@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Ping</title>
+    <meta name="description" content="Mina phones you once a day for a quick chat in Japanese." />
+    <meta name="theme-color" content="#f7f1e8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1f1a17" media="(prefers-color-scheme: dark)" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Ping" />
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <main id="screen-install" class="screen centered" hidden>
+      <div class="avatar" aria-hidden="true">ミ</div>
+      <h1>Add Ping to your Home Screen</h1>
+      <p>iPhones only allow notifications from apps on the Home Screen, and Mina's calls arrive as notifications.</p>
+      <ol class="steps">
+        <li>Tap the <strong>Share</strong> button in Safari</li>
+        <li>Choose <strong>Add to Home Screen</strong></li>
+        <li>Open Ping from your Home Screen</li>
+      </ol>
+    </main>
+
+    <main id="screen-join" class="screen centered" hidden>
+      <div class="avatar" aria-hidden="true">ミ</div>
+      <h1>Ping</h1>
+      <p>Mina phones you once a day for a quick chat in Japanese, just like a friend would.</p>
+      <form id="join-form" class="stack">
+        <label for="invite-code">Invite code</label>
+        <input id="invite-code" autocomplete="off" autocapitalize="off" spellcheck="false" required />
+        <button class="primary" type="submit">Join</button>
+        <p id="join-error" class="error" role="alert" hidden></p>
+      </form>
+      <p class="fine">Mina is an AI. During a call, your voice goes to OpenAI so she can reply. Ping doesn't record or keep your calls.</p>
+    </main>
+
+    <main id="screen-enable" class="screen centered" hidden>
+      <div class="avatar" aria-hidden="true">ミ</div>
+      <h1>So Mina can reach you</h1>
+      <p>Notifications let her call you. The microphone lets you talk back.</p>
+      <button id="enable-button" class="primary" type="button">Turn on notifications and microphone</button>
+      <p id="enable-error" class="error" role="alert" hidden></p>
+    </main>
+
+    <main id="screen-home" class="screen" hidden>
+      <header class="home-header">
+        <div class="avatar small" aria-hidden="true">ミ</div>
+        <div>
+          <h1>Mina</h1>
+          <p id="home-status" class="muted"></p>
+        </div>
+      </header>
+
+      <button id="call-button" class="primary call" type="button">Call Mina</button>
+      <p id="home-notice" class="notice" role="status" hidden></p>
+
+      <section id="messages-section" aria-labelledby="messages-title" hidden>
+        <h2 id="messages-title">Voice messages</h2>
+        <ul id="messages-list" class="messages"></ul>
+      </section>
+
+      <section aria-labelledby="settings-title">
+        <h2 id="settings-title">Settings</h2>
+        <p class="muted">On a call, you can just ask: "can you slow down?" or "give me more time to answer."</p>
+        <div class="setting">
+          <label for="speed-input">Mina's speed <output id="speed-output" for="speed-input"></output></label>
+          <input id="speed-input" type="range" min="0.6" max="1.5" step="0.05" />
+        </div>
+        <div class="setting">
+          <label for="thinking-input">Time to answer</label>
+          <select id="thinking-input">
+            <option value="short">Short</option>
+            <option value="normal">Normal</option>
+            <option value="long">Long</option>
+          </select>
+        </div>
+        <div class="setting row">
+          <label for="calls-input">Daily calls from Mina</label>
+          <input id="calls-input" type="checkbox" role="switch" />
+        </div>
+        <button id="test-ring-button" class="secondary" type="button">Ring my phone in 5 seconds</button>
+        <button id="delete-button" class="text-danger" type="button">Delete my account</button>
+      </section>
+    </main>
+
+    <main id="screen-ringing" class="screen centered phone" hidden>
+      <p class="muted">Incoming call</p>
+      <div class="avatar large ringing" aria-hidden="true">ミ</div>
+      <h1>Mina</h1>
+      <div class="call-actions">
+        <button id="decline-button" class="round decline" type="button">Decline</button>
+        <button id="answer-button" class="round answer" type="button">Answer</button>
+      </div>
+    </main>
+
+    <main id="screen-call" class="screen centered phone" hidden>
+      <p id="call-status" class="muted" role="status"></p>
+      <div id="call-avatar" class="avatar large" aria-hidden="true">ミ</div>
+      <h1>Mina</h1>
+      <p id="call-caption" class="caption" lang="ja" aria-live="polite"></p>
+      <button id="tap-to-hear" class="primary" type="button" hidden>Tap to hear Mina</button>
+      <div class="call-actions">
+        <button id="mute-button" class="round neutral" type="button" aria-pressed="false">Mute</button>
+        <button id="hangup-button" class="round decline" type="button">End</button>
+      </div>
+    </main>
+
+    <audio id="remote-audio" autoplay playsinline></audio>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "ping",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server/index.js",
+    "setup": "node scripts/setup-env.js",
+    "build:icons": "node scripts/build-icons.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
+  }
+}
