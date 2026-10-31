@@ -8,7 +8,6 @@ import { pickQuestion, questionById } from './tutor.js';
 
 export const RING_MS = 10_000;
 export const DELIVERY_GRACE_MS = 30_000; // how long a ring waits for the phone to confirm it arrived
-export const DAILY_CALL_LIMIT = 6;
 export const MAX_SESSIONS_PER_CALL = 3;
 const LATE_CALL_LIMIT_MS = 5 * 60_000; // past this a due call is rescheduled, so downtime can't ring someone at 3am
 const TEST_RING_DELAY_MS = 5_000;
@@ -20,7 +19,9 @@ export const hashToken = (token) => createHash('sha256').update(token).digest('h
 export class LimitError extends Error {}
 
 export class CallEngine {
-  constructor({ store, sendPush, now = Date.now, random = Math.random }) {
+  // No dailyCallLimit means unlimited calls, which is for prototyping only. See "Before beta launch" in the README.
+  constructor({ store, sendPush, now = Date.now, random = Math.random, dailyCallLimit = null }) {
+    this.dailyCallLimit = dailyCallLimit;
     this.store = store;
     this.sendPush = sendPush;
     this.now = now;
@@ -231,7 +232,7 @@ export class CallEngine {
   #countCall(user) {
     const day = localDay(this.now(), user.timeZone);
     if (user.usage.day !== day) user.usage = { day, calls: 0 };
-    if (user.usage.calls >= DAILY_CALL_LIMIT) throw new LimitError("That's all the calls for today. Mina will call you tomorrow!");
+    if (this.dailyCallLimit && user.usage.calls >= this.dailyCallLimit) throw new LimitError("That's all the calls for today. Mina will call you tomorrow!");
     user.usage.calls += 1;
   }
 }

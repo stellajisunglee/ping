@@ -248,7 +248,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     privateKey: VAPID_PRIVATE_KEY,
     subject: process.env.VAPID_SUBJECT ?? process.env.RENDER_EXTERNAL_URL ?? 'https://ping.example.com',
   });
-  const engine = new CallEngine({ store, sendPush });
+  const engine = new CallEngine({ store, sendPush, dailyCallLimit: Number(process.env.DAILY_CALL_LIMIT) || null });
   const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '', baseUrl: process.env.OPENAI_BASE_URL });
   const { server, ensureVoiceMessage } = createApp({
     engine,

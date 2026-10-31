@@ -3,17 +3,18 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CallEngine, DAILY_CALL_LIMIT, DELIVERY_GRACE_MS, LimitError, MAX_SESSIONS_PER_CALL, RING_MS } from '../server/calls.js';
+import { CallEngine, DELIVERY_GRACE_MS, LimitError, MAX_SESSIONS_PER_CALL, RING_MS } from '../server/calls.js';
 import { Store } from '../server/store.js';
 
 const SUBSCRIPTION = { endpoint: 'https://push.example/1', keys: { p256dh: 'a', auth: 'b' } };
 const NOON_IN_TOKYO = Date.UTC(2026, 9, 31, 3);
 
-function setup({ pushResult = { gone: false }, store = new Store() } = {}) {
+function setup({ pushResult = { gone: false }, store = new Store(), dailyCallLimit } = {}) {
   const clock = { now: NOON_IN_TOKYO };
   const pushes = [];
   const engine = new CallEngine({
     store,
+    dailyCallLimit,
     now: () => clock.now,
     random: () => 0.5,
     sendPush: async (subscription, payload, options) => {
@@ -176,15 +177,24 @@ test('the same question does not come twice in a row', async () => {
   }
 });
 
-test('calling back works immediately and is limited per day', () => {
-  const context = setup();
-  for (let index = 0; index < DAILY_CALL_LIMIT; index += 1) {
+test('with a daily limit set, calls stop at the limit and reset the next day', () => {
+  const context = setup({ dailyCallLimit: 6 });
+  for (let index = 0; index < 6; index += 1) {
     assert.equal(context.engine.callBack(context.user).state, 'answered');
   }
   assert.throws(() => context.engine.callBack(context.user), LimitError);
+  assert.throws(() => context.engine.requestTestRing(context.user), LimitError);
 
   context.clock.now += 24 * 3600_000;
   assert.equal(context.engine.callBack(context.user).state, 'answered');
+});
+
+test('with no daily limit set, calls and test rings keep working', () => {
+  const context = setup();
+  for (let index = 0; index < 50; index += 1) {
+    assert.equal(context.engine.callBack(context.user).state, 'answered');
+    context.engine.requestTestRing(context.user);
+  }
 });
 
 test('voice sessions are limited per call, and belong only to their owner', () => {

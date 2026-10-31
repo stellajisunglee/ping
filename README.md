@@ -55,18 +55,26 @@ Set these as environment variables, in `.env` locally or under the service's **E
 | `REALTIME_MODEL` | The voice model | `gpt-realtime` |
 | `REALTIME_VOICE` | Mina's voice | `marin` |
 | `MAX_CALL_SECONDS` | Where a call ends | 180 |
+| `DAILY_CALL_LIMIT` | How many calls a user can start per day, including test rings | No limit |
 
 Other rules:
 
 | Rule | Value | Where to change it |
 | --- | --- | --- |
 | Ring time | 10 seconds | `RING_MS` in `server/calls.js` |
-| Calls a user can start per day, including test rings | 6 | `DAILY_CALL_LIMIT` in `server/calls.js` |
 | Daily call hours | 10:00 to 20:00 | `WINDOW_START_HOUR`, `WINDOW_END_HOUR` in `server/schedule.js` |
 | Default speed and allowed range | 0.9, from 0.6 to 1.5 | `server/settings.js` |
 | Questions and Mina's behavior | | `server/tutor.js` |
 
 The call length limit and the hang-up run in the browser, so someone who modifies the page could stay on longer. OpenAI's own session limit is the backstop. Set a monthly budget in your OpenAI account too.
+
+## Before beta launch
+
+Ping is still a prototype, so do these before inviting testers:
+
+- Set `DAILY_CALL_LIMIT` on Render. It's off for prototyping, so any invited user can currently run up the OpenAI bill. 6 is a reasonable starting point.
+- Replace the 7-day OpenAI key with a longer-lasting one limited to the Realtime and text-to-speech APIs. Calls stop working when a key expires.
+- Set a monthly budget in your OpenAI account, and check that auto-recharge is set the way you want.
 
 ## Deploy on Render
 
