@@ -1,14 +1,14 @@
 // The Settings tab and the pages under it.
 
-import { $, api, clearWarning, el, go, onShow, setError, show, state, writeToken } from './lib.js';
+import { $, api, clearWarning, el, go, isAdmin, onShow, setError, show, state, writeToken } from './lib.js';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FREQUENCY_BUTTONS = { daily: 'Daily', 'every-other-day': 'Every other day', weekdays: 'Weekdays only', weekends: 'Weekends only', custom: 'Custom' };
-const PLAN_NAMES = { free: 'Free', plus: 'Subscriber', pro: 'Higher Tier' };
+const PLAN_NAMES = { free: 'Free', premium: 'Premium', platinum: 'Platinum' };
 const PLAN_DETAILS = {
   free: 'Ping as your contact, and your latest 25 words.',
-  plus: 'Other contacts, a lifetime word bank, removing words, example sentences, and calls that remember past conversations.',
-  pro: 'Everything in Subscriber, plus creating your own contacts.',
+  premium: 'A lifetime word bank, removing words, example sentences, and calls that remember past conversations.',
+  platinum: 'Everything in Premium, plus creating your own contacts.',
 };
 
 const hourLabel = (hour) => `${String(hour).padStart(2, '0')}:00`;
@@ -55,6 +55,7 @@ function renderManageCalls() {
     ),
   );
   $('custom-days-hint').hidden = settings.frequency !== 'custom' || settings.customDays.length > 0;
+  $('test-ring').hidden = !isAdmin();
 }
 
 function changeHours() {
@@ -73,11 +74,14 @@ function renderSettings() {
 
 function renderPlan() {
   $('plan-title').textContent = state.me.plan === 'free' ? 'Upgrade Plan' : 'Manage Plan';
+  $('plan-mode').textContent = isAdmin() ? "Test mode: real payments aren't connected, so you can switch freely and nothing is charged." : "Upgrades aren't available during the beta, so everyone is on the Free plan for now.";
+  $('plan-cancel-note').hidden = !isAdmin();
   setError('plan-clear', clearWarning());
   $('plan-choices').replaceChildren(
     ...Object.entries(PLAN_NAMES).map(([plan, name]) => {
       const button = el('button', { type: 'button', className: 'plan-choice' }, el('strong', { textContent: name }), el('span', { className: 'muted', textContent: PLAN_DETAILS[plan] }));
       button.setAttribute('aria-pressed', String(state.me.plan === plan));
+      button.disabled = !isAdmin();
       button.addEventListener('click', async () => {
         try {
           state.me = await api('/api/plan', { method: 'PUT', body: { plan } });

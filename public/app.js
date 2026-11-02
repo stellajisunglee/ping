@@ -1,5 +1,5 @@
 import { initContacts } from './contacts.js';
-import { $, api, clearWarning, el, go, initialOf, isPaid, onShow, readToken, refresh, setError, show, state, writeToken } from './lib.js';
+import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isPaid, onShow, readToken, refresh, setError, show, state, writeToken } from './lib.js';
 import { initSettings } from './settings.js';
 import { initStack } from './stack.js';
 import { startCall } from './voice.js';
@@ -375,6 +375,7 @@ function bindEvents() {
   document.addEventListener('click', (event) => {
     const link = event.target.closest('[data-go]');
     if (link) go(link.dataset.go);
+    if (event.target.closest('[data-back]')) goBack();
   });
   $('join-form').addEventListener('submit', join);
   $('enable-button').addEventListener('click', enable);
@@ -404,6 +405,7 @@ async function init() {
   initContacts({ onCall: callContact });
   initSettings();
   bindEvents();
+  enableSwipeBack();
   navigator.serviceWorker?.register('/sw.js');
   state.config = await api('/api/config').catch(() => ({}));
   state.token = readToken();

@@ -9,13 +9,13 @@ npm install
 npm run setup
 ```
 
-`npm run setup` creates a `.env` file with push keys and an invite code. Add your `OPENAI_API_KEY` to that file, then:
+`npm run setup` creates a `.env` file with push keys. Add your `OPENAI_API_KEY` to that file, then:
 
 ```bash
 npm start
 ```
 
-Open http://localhost:3000 and join with the `INVITE_CODE` from `.env`.
+Open http://localhost:3000 and join with an invite code (see "Admins and beta testers").
 
 ```bash
 npm test
@@ -43,18 +43,30 @@ On a call, the contact can explain a word in one short English sentence and save
 
 ## Plans
 
-Plans are a test switch under Settings for now, with no payment. Anyone can pick any plan.
+Plans are a test switch under Settings for now, with no payment. Only admins can use it.
 
-| | Free | Subscriber | Higher Tier |
+| | Free | Premium | Platinum |
 | --- | --- | --- | --- |
-| Contacts | Ping | Other contacts | Also create your own |
+| Contacts | Ping | Ping | Also create your own |
 | Words | Latest 25 | No limit, and can remove | Same |
 | Example sentences | No | Yes | Yes |
 | Calls remember past conversations | No | Yes | Yes |
 
 Cancelling starts a 30-day window, shown on Home, My Stack and the plan page. After it, words saved during the subscription, sentences and conversations are removed. Words saved on the free plan stay, and resubscribing in time keeps everything.
 
-Mero is listed in Contacts as coming soon and can't be called. To finish it, give it a topic and remove `comingSoon` in `server/contacts.js`.
+Mero is hidden for now. To bring it back, give it a topic and remove `hidden` in `server/contacts.js`.
+
+## Admins and beta testers
+
+The invite code someone joins with decides which version they get. It can't be changed later without deleting the account and rejoining.
+
+| | Admin | Beta tester |
+| --- | --- | --- |
+| Invite code | `ADMIN_INVITE_CODE` | `BETA_INVITE_CODE` |
+| Plan | Can switch freely | Stays on Free |
+| "Ring my phone in 5 seconds" | Yes | No |
+
+The server enforces both limits. Accounts created before there were two codes are admins.
 
 ## Limits of web push
 
@@ -70,7 +82,7 @@ Set these as environment variables, in `.env` locally or under the service's **E
 | Setting | What it does | If it's not set |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | Powers calls and the voice message | Calls and voice messages don't work. The message still shows as text |
-| `INVITE_CODE` | The code people need to join | Nobody can join, because each call costs money |
+| `ADMIN_INVITE_CODE`, `BETA_INVITE_CODE` | The codes people need to join | The defaults in `server/index.js` |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Sign the push notifications. Changing them breaks every existing subscription until the user reopens the app | The server won't start |
 | `VAPID_SUBJECT` | A `mailto:` or `https:` contact for push services | Uses the Render URL |
 | `DATA_DIR` | Where user data and the voice message are stored | `./data` |
@@ -103,7 +115,9 @@ Ping is still a prototype, so do these before inviting testers:
 - Set `DAILY_CALL_LIMIT` on Render. It's off for prototyping, so any invited user can currently run up the OpenAI bill. 6 is a reasonable starting point.
 - Replace the 7-day OpenAI key with a longer-lasting one limited to the Realtime and text-to-speech APIs. Calls stop working when a key expires.
 - Set a monthly budget in your OpenAI account, and check that auto-recharge is set the way you want.
-- Replace the plan test switch with real payments, and remove the `PUT /api/plan` route. Until then, anyone invited can turn on every paid feature for free.
+- Before sharing the beta code, finish the first three items above, because every tester's calls spend your OpenAI credits.
+- Set your own `ADMIN_INVITE_CODE` and `BETA_INVITE_CODE` on Render if this repo will ever be shared, since the defaults are in the code.
+- Replace the plan test switch with real payments, and remove the `PUT /api/plan` route.
 - Have the draft Privacy Policy and Terms of Service in `public/index.html` reviewed by a lawyer.
 - Add real accounts in onboarding. An account currently lives on one phone, so losing the app's storage loses access to it.
 
@@ -137,4 +151,4 @@ Use **New > Blueprint** and point it at this repo. `render.yaml` sets up a web s
 - `public/app.js`: signing up, Home, ringing and the call screen, with no framework or build step.
 - `public/stack.js`, `public/contacts.js`, `public/settings.js`: the other screens.
 - `public/lib.js`: what the screens share.
-- `scripts/build-icons.js`: draws the app icons into `public/icons`.
+- `scripts/build-icons.js`: draws the "ping" logo into `public/icons`.

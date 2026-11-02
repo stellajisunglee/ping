@@ -9,7 +9,7 @@ let currentWordId = null;
 function renderStack() {
   const { words, sentences, freeWordLimit } = state.me;
   $('stack-words-count').textContent = isPaid() ? `${words.length}` : `${words.length} of ${freeWordLimit}`;
-  $('stack-sentences-count').textContent = isPaid() || sentences.length ? `${sentences.length}` : 'Subscribers';
+  $('stack-sentences-count').textContent = isPaid() || sentences.length ? `${sentences.length}` : 'Premium';
   setError('stack-clear', clearWarning());
 }
 

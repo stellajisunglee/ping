@@ -26,6 +26,7 @@ const MAX_TRANSCRIPT_LINES = 80;
 const MAX_LINE_LENGTH = 500;
 const KEEP_FEEDBACK = 1000;
 const SCHEDULE_FIELDS = ['frequency', 'customDays', 'callStartHour', 'callEndHour'];
+const RENAMED_PLANS = { plus: 'premium', pro: 'platinum' };
 
 export const hashToken = (token) => createHash('sha256').update(token).digest('hex');
 
@@ -56,15 +57,23 @@ export class CallEngine {
     this.random = random;
     // Accounts saved by an older version pick up any fields they're missing.
     for (const user of Object.values(store.users)) {
-      Object.assign(user, { ...newUserFields(), ...user, settings: { ...DEFAULT_SETTINGS, ...user.settings } });
+      Object.assign(user, {
+        ...newUserFields(),
+        ...user,
+        role: user.role ?? 'admin', // accounts from before there were two invite codes
+        plan: RENAMED_PLANS[user.plan] ?? user.plan ?? 'free',
+        settings: { ...DEFAULT_SETTINGS, ...user.settings },
+      });
+      for (const contact of user.customContacts) contact.plan = 'platinum';
     }
   }
 
-  register(timeZone) {
+  register(timeZone, role = 'beta') {
     const token = randomBytes(32).toString('base64url');
     const user = {
       id: randomUUID(),
       tokenHash: hashToken(token),
+      role,
       timeZone,
       settings: { ...DEFAULT_SETTINGS },
       subscription: null,
@@ -228,7 +237,6 @@ export class CallEngine {
   callBack(user, contactId = null) {
     const contact = contactId ? findContact(user, contactId) : selectedContact(user);
     if (!contact) throw new PlanError('That contact is no longer available.');
-    if (contact.comingSoon) throw new PlanError(`${contact.name} is coming soon.`);
     if (!canCall(user, contact)) throw new PlanError(`Upgrade your plan to call ${contact.name}.`);
     this.#countCall(user);
     const question = pickQuestion(user.lastQuestionId, this.random);
@@ -303,7 +311,7 @@ export class CallEngine {
     return user ? this.#contactOf(call, user).name : PING.name;
   }
 
-  // Plans are a test switch for now. Real payments would call this after checkout.
+  // Only admins can reach this for now, through a test switch. Real payments would call it after checkout.
   setPlan(user, plan) {
     if (!PLANS.includes(plan)) return false;
     const cancelled = isPaid(user.plan) && !isPaid(plan);
@@ -318,14 +326,14 @@ export class CallEngine {
   selectContact(user, contactId) {
     const contact = findContact(user, contactId);
     if (!contact) return false;
-    if (!canCall(user, contact)) throw new PlanError(contact.comingSoon ? `${contact.name} is coming soon.` : 'Upgrade your plan to choose this contact.');
+    if (!canCall(user, contact)) throw new PlanError('Upgrade your plan to choose this contact.');
     user.contactId = contact.id;
     this.store.save();
     return true;
   }
 
   createContact(user, input) {
-    if (user.plan !== 'pro') throw new PlanError('Creating your own contact is part of the Higher Tier plan.');
+    if (user.plan !== 'platinum') throw new PlanError('Creating your own contact is part of the Platinum plan.');
     if (user.customContacts.length >= MAX_CUSTOM_CONTACTS) throw new LimitError(`You can have up to ${MAX_CUSTOM_CONTACTS} of your own contacts.`);
     const details = cleanContact(input);
     if (!details) return null;

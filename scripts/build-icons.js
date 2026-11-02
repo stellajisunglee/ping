@@ -1,4 +1,4 @@
-// Draws the app icon, the katakana ピ in white on coral, with no image tools needed.
+// Draws the app logo, the word "ping" in white on coral, with no image tools needed.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -10,19 +10,40 @@ const BACKGROUND = [200, 84, 63];
 const FOREGROUND = [255, 255, 255];
 const SUPERSAMPLE = 3;
 
-// The strokes of ピ, as lines from (x1, y1) to (x2, y2) on a 0-1 canvas, plus its small circle.
-const STROKES = [
-  [0.33, 0.47, 0.6, 0.39],
-  [0.33, 0.27, 0.33, 0.66],
-  [0.33, 0.66, 0.39, 0.73],
-  [0.39, 0.73, 0.66, 0.73],
+const STROKE_RADIUS = 0.024;
+const DOT_RADIUS = 0.03;
+const BOWL_RADIUS = 0.078;
+const TOP = 0.4;
+const MIDDLE = TOP + BOWL_RADIUS;
+const BASELINE = 0.556;
+const BOTTOM = 0.66;
+
+// Each letter's straight strokes, as lines from (x1, y1) to (x2, y2) on a 0-1 canvas.
+const LINES = [
+  [0.18, TOP, 0.18, BOTTOM], // p
+  [0.385, TOP, 0.385, BASELINE], // i
+  [0.465, TOP, 0.465, BASELINE], // n
+  [0.621, MIDDLE, 0.621, BASELINE],
+  [0.82, TOP, 0.82, 0.6], // g
 ];
-const STROKE_RADIUS = 0.033;
-const CIRCLE = { x: 0.67, y: 0.29, radius: 0.055, width: 0.02 };
+
+// Each letter's curves. `part` limits a circle to its top or bottom half.
+const CURVES = [
+  { x: 0.258, y: MIDDLE, part: 'all' }, // p
+  { x: 0.543, y: MIDDLE, part: 'top' }, // n
+  { x: 0.742, y: MIDDLE, part: 'all' }, // g
+  { x: 0.742, y: 0.6, part: 'bottom' },
+];
+const DOT = { x: 0.385, y: 0.335 }; // i
 
 function nearStroke(x, y) {
-  if (Math.abs(Math.hypot(x - CIRCLE.x, y - CIRCLE.y) - CIRCLE.radius) <= CIRCLE.width) return true;
-  return STROKES.some(([x1, y1, x2, y2]) => {
+  if (Math.hypot(x - DOT.x, y - DOT.y) <= DOT_RADIUS) return true;
+  const onCurve = CURVES.some((curve) => {
+    if ((curve.part === 'top' && y > curve.y) || (curve.part === 'bottom' && y < curve.y)) return false;
+    return Math.abs(Math.hypot(x - curve.x, y - curve.y) - BOWL_RADIUS) <= STROKE_RADIUS;
+  });
+  if (onCurve) return true;
+  return LINES.some(([x1, y1, x2, y2]) => {
     const dx = x2 - x1;
     const dy = y2 - y1;
     const along = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy)));

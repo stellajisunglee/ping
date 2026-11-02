@@ -10,6 +10,7 @@ const SCREEN_TABS = {
   word: 'home',
   sentences: 'home',
   contacts: 'contacts',
+  'contact-new': 'contacts',
   settings: 'settings',
   account: 'settings',
   'manage-calls': 'settings',
@@ -20,6 +21,11 @@ const SCREEN_TABS = {
 };
 const SCREENS = [...Object.keys(SCREEN_TABS), 'install', 'join', 'enable', 'ringing', 'call'];
 const renderers = {};
+const TAB_ROOTS = ['home', 'contacts', 'settings'];
+const BACK_SWIPE_DISTANCE = 70;
+
+let trail = [];
+let currentScreen = null;
 
 export const state = { token: null, config: {}, me: null };
 
@@ -31,7 +37,8 @@ export function el(tag, props = {}, ...children) {
   return node;
 }
 
-export const isPaid = () => state.me?.plan === 'plus' || state.me?.plan === 'pro';
+export const isPaid = () => state.me?.plan === 'premium' || state.me?.plan === 'platinum';
+export const isAdmin = () => state.me?.role === 'admin';
 
 export function readToken() {
   try {
@@ -75,6 +82,7 @@ export async function refresh() {
 }
 
 export function show(name) {
+  currentScreen = name;
   for (const screen of SCREENS) $(`screen-${screen}`).hidden = screen !== name;
   const tab = SCREEN_TABS[name];
   $('hero').hidden = !tab;
@@ -89,9 +97,42 @@ export function onShow(name, render) {
   renderers[name] = render;
 }
 
+// Remembers the way here, so going back returns to the page the user actually came from.
 export function go(name) {
+  const earlier = trail.indexOf(name);
+  if (TAB_ROOTS.includes(name)) trail = [name];
+  else if (earlier >= 0) trail = trail.slice(0, earlier + 1);
+  else trail = [...trail, name];
   renderers[name]?.();
   show(name);
+}
+
+export function goBack() {
+  if (trail.length > 1) go(trail.at(-2));
+}
+
+// Swiping left to right goes back, except during calls and sign-up.
+export function enableSwipeBack() {
+  let start = null;
+  document.addEventListener(
+    'touchstart',
+    (event) => {
+      const onSlider = event.target.closest?.('input[type="range"]');
+      start = event.touches.length === 1 && !onSlider ? { x: event.touches[0].clientX, y: event.touches[0].clientY } : null;
+    },
+    { passive: true },
+  );
+  document.addEventListener(
+    'touchend',
+    (event) => {
+      if (!start || !SCREEN_TABS[currentScreen]) return;
+      const across = event.changedTouches[0].clientX - start.x;
+      const down = Math.abs(event.changedTouches[0].clientY - start.y);
+      start = null;
+      if (across >= BACK_SWIPE_DISTANCE && across > down * 2) goBack();
+    },
+    { passive: true },
+  );
 }
 
 export function setError(id, text) {

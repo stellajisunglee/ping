@@ -17,7 +17,7 @@
   </head>
   <body>
     <main id="screen-install" class="screen centered" hidden>
-      <div class="avatar" aria-hidden="true">ピ</div>
+      <img class="logo" src="/icons/icon-192.png" alt="ping" />
       <h1>Add Ping to your Home Screen</h1>
       <p>iPhones only allow notifications from apps on the Home Screen, and Ping's calls arrive as notifications.</p>
       <ol class="steps">
@@ -28,8 +28,7 @@
     </main>
 
     <main id="screen-join" class="screen centered" hidden>
-      <div class="avatar" aria-hidden="true">ピ</div>
-      <h1>Ping</h1>
+      <h1><img class="logo" src="/icons/icon-192.png" alt="ping" /></h1>
       <p>An app that calls you once a day to practice speaking Japanese, just like a friend would.</p>
       <form id="join-form" class="stack">
         <label for="invite-code">Invite code</label>
@@ -41,7 +40,7 @@
     </main>
 
     <main id="screen-enable" class="screen centered" hidden>
-      <div class="avatar" aria-hidden="true">ピ</div>
+      <img class="logo" src="/icons/icon-192.png" alt="ping" />
       <h1>So Ping can reach you</h1>
       <p>Notifications let Ping call you. The microphone lets you talk back.</p>
       <button id="enable-button" class="primary" type="button">Turn on notifications and microphone</button>
@@ -71,7 +70,7 @@
     </main>
 
     <main id="screen-stack" class="screen tabbed" hidden>
-      <button class="back" type="button" data-go="home">‹ Home</button>
+      <button class="back" type="button" data-back>‹ Home</button>
       <h1>My Stack</h1>
       <p id="stack-clear" class="notice warning" hidden></p>
       <div class="tile-row">
@@ -81,14 +80,14 @@
     </main>
 
     <main id="screen-words" class="screen tabbed" hidden>
-      <button class="back" type="button" data-go="stack">‹ My Stack</button>
+      <button class="back" type="button" data-back>‹ My Stack</button>
       <h1>Words</h1>
       <p id="words-empty" class="muted">Words you don't understand on a call will show up here. Just ask what a word means.</p>
       <ul id="words-list" class="plain-list"></ul>
     </main>
 
     <main id="screen-word" class="screen tabbed" hidden>
-      <button class="back" type="button" data-go="words">‹ Words</button>
+      <button class="back" type="button" data-back>‹ Words</button>
       <div class="word-card">
         <p id="word-kanji" class="word-kanji" lang="ja"></p>
         <p id="word-kana" class="word-kana" lang="ja"></p>
@@ -100,45 +99,49 @@
       <ul id="word-examples" class="plain-list examples"></ul>
       <button id="word-remove-button" class="text-danger wide" type="button">Remove from stack</button>
       <div id="word-upgrade" class="notice upgrade">
-        <p>Subscribers can see example sentences and remove words.</p>
+        <p>Premium and Platinum members can see example sentences and remove words.</p>
         <button class="secondary" type="button" data-go="plan">Upgrade Plan</button>
       </div>
     </main>
 
     <main id="screen-sentences" class="screen tabbed" hidden>
-      <button class="back" type="button" data-go="stack">‹ My Stack</button>
+      <button class="back" type="button" data-back>‹ My Stack</button>
       <h1>Sentences</h1>
       <p id="sentences-hint" class="muted">Swipe left to remove a sentence.</p>
       <p id="sentences-empty" class="muted">Open a word, show its example sentences, and save the ones you like.</p>
       <p id="sentences-error" class="error" role="alert" hidden></p>
       <ul id="sentences-list" class="plain-list"></ul>
       <div id="sentences-upgrade" class="notice upgrade">
-        <p>Saving example sentences is part of a subscription.</p>
+        <p>Saving example sentences is part of Premium and Platinum.</p>
         <button class="secondary" type="button" data-go="plan">Upgrade Plan</button>
       </div>
     </main>
 
     <main id="screen-contacts" class="screen tabbed" hidden>
-      <h1>Contacts</h1>
-      <p id="contacts-error" class="error" role="alert" hidden></p>
-      <ul id="contacts-list" class="plain-list contacts"></ul>
+      <header class="page-header">
+        <h1>Contacts</h1>
+        <button id="contact-new-button" class="primary small" type="button" data-go="contact-new">Create New Contact</button>
+      </header>
       <div id="contacts-upgrade" class="notice upgrade">
-        <p>Subscribers can choose other friends to call them.</p>
+        <p>Upgrade your plan to create a new contact.</p>
         <button class="secondary" type="button" data-go="plan">Upgrade Plan</button>
       </div>
-      <div id="contact-create-upgrade" class="notice upgrade" hidden>
-        <p>The Higher Tier plan lets you create your own contact.</p>
-        <button class="secondary" type="button" data-go="plan">Manage Plan</button>
-      </div>
-      <form id="contact-create" class="stack full" hidden>
-        <h2>Create your own contact</h2>
+      <p id="contacts-error" class="error" role="alert" hidden></p>
+      <ul id="contacts-list" class="plain-list contacts"></ul>
+    </main>
+
+    <main id="screen-contact-new" class="screen tabbed" hidden>
+      <button class="back" type="button" data-back>‹ Contacts</button>
+      <h1>Create New Contact</h1>
+      <form id="contact-new-form" class="stack full">
         <label for="contact-name">Name</label>
         <input id="contact-name" maxlength="30" required />
-        <label for="contact-topic">What do they talk about?</label>
+        <label for="contact-topic">Conversation topic</label>
         <input id="contact-topic" maxlength="200" placeholder="Cooking, travel, work..." required />
         <label for="contact-voice">Voice</label>
         <select id="contact-voice"></select>
         <button class="primary" type="submit">Create contact</button>
+        <p id="contact-new-error" class="error" role="alert" hidden></p>
       </form>
     </main>
 
@@ -155,7 +158,7 @@
     </main>
 
     <main id="screen-account" class="screen tabbed" hidden>
-      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <button class="back" type="button" data-back>‹ Settings</button>
       <h1>Manage Account</h1>
       <p class="muted">Your account lives on this phone, with no email or password yet. Deleting it removes your streak, stack, contacts and saved conversations.</p>
       <p id="account-error" class="error" role="alert" hidden></p>
@@ -163,7 +166,7 @@
     </main>
 
     <main id="screen-manage-calls" class="screen tabbed" hidden>
-      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <button class="back" type="button" data-back>‹ Settings</button>
       <h1>Manage Calls</h1>
       <p class="muted">On a call, you can also just ask: "can you slow down?" or "give me more time to answer."</p>
       <p id="calls-error" class="error" role="alert" hidden></p>
@@ -219,21 +222,23 @@
         <label for="calls-input">Calls on</label>
         <input id="calls-input" type="checkbox" role="switch" />
       </div>
-      <button id="test-ring-button" class="secondary wide" type="button">Ring my phone in 5 seconds</button>
-      <p id="test-ring-status" class="muted" role="status"></p>
+      <div id="test-ring" class="stack full" hidden>
+        <button id="test-ring-button" class="secondary wide" type="button">Ring my phone in 5 seconds</button>
+        <p id="test-ring-status" class="muted" role="status"></p>
+      </div>
     </main>
 
     <main id="screen-plan" class="screen tabbed" hidden>
-      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <button class="back" type="button" data-back>‹ Back</button>
       <h1 id="plan-title">Upgrade Plan</h1>
-      <p class="notice">Test mode: real payments aren't connected, so you can switch freely and nothing is charged.</p>
+      <p id="plan-mode" class="notice"></p>
       <p id="plan-clear" class="notice warning" hidden></p>
       <div id="plan-choices" class="plan-choices"></div>
-      <p class="muted">If you cancel, words, sentences and conversations saved during your subscription clear after 30 days.</p>
+      <p id="plan-cancel-note" class="muted">If you cancel, words, sentences and conversations saved during your subscription clear after 30 days.</p>
     </main>
 
     <main id="screen-privacy" class="screen tabbed prose" hidden>
-      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <button class="back" type="button" data-back>‹ Settings</button>
       <h1>Privacy Policy</h1>
       <p class="notice warning">Draft for testing. It needs a legal review before launch.</p>
       <h2>Your voice</h2>
@@ -249,7 +254,7 @@
     </main>
 
     <main id="screen-terms" class="screen tabbed prose" hidden>
-      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <button class="back" type="button" data-back>‹ Settings</button>
       <h1>Terms of Service</h1>
       <p class="notice warning">Draft for testing. It needs a legal review before launch.</p>
       <h2>Prototype</h2>
@@ -263,7 +268,7 @@
     </main>
 
     <main id="screen-feedback" class="screen tabbed" hidden>
-      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <button class="back" type="button" data-back>‹ Settings</button>
       <h1>Feedback</h1>
       <form id="feedback-form" class="stack full">
         <label for="feedback-input">What's working, and what isn't?</label>

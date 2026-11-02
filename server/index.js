@@ -21,6 +21,8 @@ const MAX_FEEDBACK_LENGTH = 2_000;
 const MAX_WRONG_CODES_PER_MINUTE = 10;
 const MAX_TRACKED_IPS = 10_000;
 const MAX_CALL_SECONDS = Number(process.env.MAX_CALL_SECONDS ?? 180);
+const DEFAULT_ADMIN_CODE = 'minabystella_admin_only';
+const DEFAULT_BETA_CODE = 'beta-01';
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -59,7 +61,7 @@ const isSubscription = (value) =>
   typeof value?.endpoint === 'string' && value.endpoint.startsWith('https://') && typeof value.keys?.p256dh === 'string' && typeof value.keys?.auth === 'string';
 
 export function createApp({ engine, openai, config }) {
-  const { inviteCode, vapidPublicKey, model, voice, dataDir } = config;
+  const { inviteCodes, vapidPublicKey, model, voice, dataDir } = config;
   const registerAttempts = new Map();
   const voiceMessageJobs = new Map();
   const voiceMessageFile = (contactId) => join(dataDir ?? ROOT, 'voice-messages', `${contactId}.mp3`);
@@ -109,6 +111,8 @@ export function createApp({ engine, openai, config }) {
     }
   }
 
+  const roleForCode = (given) => Object.entries(inviteCodes).find(([, code]) => code && codesMatch(given, code))?.[0] ?? null;
+
   const recentWrongCodes = (ip) => (registerAttempts.get(ip) ?? []).filter((at) => Date.now() - at < 60_000);
 
   // Only wrong codes count, so a group joining from the same Wi-Fi isn't locked out.
@@ -119,6 +123,7 @@ export function createApp({ engine, openai, config }) {
 
   function publicUser(user) {
     return {
+      role: user.role,
       plan: user.plan,
       clearAt: user.clearAt,
       settings: user.settings,
@@ -144,14 +149,15 @@ export function createApp({ engine, openai, config }) {
     if (method === 'POST' && pathname === '/api/register') {
       const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ?? req.socket.remoteAddress;
       if (recentWrongCodes(ip).length >= MAX_WRONG_CODES_PER_MINUTE) return json(res, 429, { error: 'Too many tries. Wait a minute and try again.' });
-      if (!inviteCode) return json(res, 503, { error: 'Sign-ups are closed.' });
+      if (!Object.values(inviteCodes).some(Boolean)) return json(res, 503, { error: 'Sign-ups are closed.' });
       const body = await readJson(req);
-      if (!codesMatch(body.inviteCode ?? '', inviteCode)) {
+      const role = roleForCode(body.inviteCode ?? '');
+      if (!role) {
         recordWrongCode(ip);
         return json(res, 403, { error: "That invite code isn't right." });
       }
       if (!isValidTimeZone(body.timeZone)) return json(res, 400, { error: 'Your time zone was not recognized.' });
-      const { user, token } = engine.register(body.timeZone);
+      const { user, token } = engine.register(body.timeZone, role);
       return json(res, 201, { token, ...publicUser(user) });
     }
 
@@ -190,6 +196,7 @@ export function createApp({ engine, openai, config }) {
     }
 
     if (method === 'POST' && pathname === '/api/test-ring') {
+      if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
       engine.requestTestRing(user);
       return json(res, 202, {});
     }
@@ -201,6 +208,7 @@ export function createApp({ engine, openai, config }) {
     }
 
     if (method === 'PUT' && pathname === '/api/plan') {
+      if (user.role !== 'admin') return json(res, 403, { error: "Plans can't be changed during the beta." });
       const body = await readJson(req);
       if (!engine.setPlan(user, body.plan)) return json(res, 400, { error: 'That plan was not recognized.' });
       return json(res, 200, publicUser(user));
@@ -378,7 +386,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     engine,
     openai,
     config: {
-      inviteCode: process.env.INVITE_CODE ?? '',
+      inviteCodes: { admin: process.env.ADMIN_INVITE_CODE ?? DEFAULT_ADMIN_CODE, beta: process.env.BETA_INVITE_CODE ?? DEFAULT_BETA_CODE },
       vapidPublicKey: VAPID_PUBLIC_KEY,
       model: process.env.REALTIME_MODEL ?? 'gpt-realtime',
       voice,
@@ -391,6 +399,5 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(port, () => {
     console.log(`Ping running on http://localhost:${port}`);
     if (!process.env.OPENAI_API_KEY) console.warn('OPENAI_API_KEY is not set: calls and voice messages will not work.');
-    if (!process.env.INVITE_CODE) console.warn('INVITE_CODE is not set: nobody can sign up.');
   });
 }

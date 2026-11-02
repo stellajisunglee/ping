@@ -7,6 +7,7 @@ import { Store } from '../server/store.js';
 
 const SUBSCRIPTION = { endpoint: 'https://push.example/1', keys: { p256dh: 'a', auth: 'b' } };
 const INVITE_CODE = 'test-invite';
+const BETA_CODE = 'test-beta';
 
 let baseUrl;
 let server;
@@ -36,7 +37,7 @@ const join = async () => (await request('/api/register', { method: 'POST', body:
 
 before(async () => {
   engine = new CallEngine({ store: new Store(), sendPush: async () => ({ gone: false }) });
-  ({ server } = createApp({ engine, openai, config: { inviteCode: INVITE_CODE, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null } }));
+  ({ server } = createApp({ engine, openai, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null } }));
   await new Promise((resolve) => server.listen(0, resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
@@ -50,7 +51,7 @@ test('joining needs the right invite code and a real time zone', async () => {
 });
 
 test('repeated wrong invite codes are blocked, without counting good ones', async () => {
-  const { server: limited } = createApp({ engine, openai, config: { inviteCode: INVITE_CODE, vapidPublicKey: 'public', model: 'm', voice: 'v', dataDir: null } });
+  const { server: limited } = createApp({ engine, openai, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE }, vapidPublicKey: 'public', model: 'm', voice: 'v', dataDir: null } });
   await new Promise((resolve) => limited.listen(0, resolve));
   const attempt = async (inviteCode) => {
     const response = await fetch(`http://127.0.0.1:${limited.address().port}/api/register`, {
@@ -67,7 +68,7 @@ test('repeated wrong invite codes are blocked, without counting good ones', asyn
 });
 
 test('sign-ups are closed when no invite code is configured', async () => {
-  const { server: closed } = createApp({ engine, openai, config: { inviteCode: '', vapidPublicKey: 'public', model: 'm', voice: 'v', dataDir: null } });
+  const { server: closed } = createApp({ engine, openai, config: { inviteCodes: { admin: '', beta: '' }, vapidPublicKey: 'public', model: 'm', voice: 'v', dataDir: null } });
   await new Promise((resolve) => closed.listen(0, resolve));
   const response = await fetch(`http://127.0.0.1:${closed.address().port}/api/register`, {
     method: 'POST',
@@ -90,6 +91,15 @@ test('the OpenAI key route never returns the server key, only a short-lived one'
   assert.equal(data.clientSecret, 'ek_test');
   assert.equal(data.sdpUrl, openai.sdpUrl);
   assert.equal(minted.at(-1).session.audio.output.speed, 0.9);
+});
+
+test('the invite codes never reach the browser', async () => {
+  const { data: config } = await request('/api/config');
+  assert.ok(!JSON.stringify(config).includes(INVITE_CODE));
+  for (const file of ['/', '/app.js', '/lib.js', '/settings.js', '/contacts.js']) {
+    const text = await (await fetch(baseUrl + file)).text();
+    assert.ok(!text.includes('minabystella_admin_only') && !text.includes('beta-01'), file);
+  }
 });
 
 test('someone else cannot start a voice session on your call', async () => {
@@ -152,7 +162,7 @@ test('a word can be added on any plan, but only subscribers can remove it', asyn
   assert.equal((await request('/api/stack/words', { method: 'POST', token, body: { kana: 'hello', romaji: 'x', english: 'y' } })).status, 400);
   assert.equal((await request(`/api/stack/words/${data.word.id}`, { method: 'DELETE', token })).status, 403);
 
-  await request('/api/plan', { method: 'PUT', token, body: { plan: 'plus' } });
+  await request('/api/plan', { method: 'PUT', token, body: { plan: 'premium' } });
   const removed = await request(`/api/stack/words/${data.word.id}`, { method: 'DELETE', token });
   assert.equal(removed.status, 200);
   assert.deepEqual(removed.data.words, []);
@@ -164,7 +174,7 @@ test('example sentences need a subscription, and are only saved on request', asy
   const path = `/api/stack/words/${data.word.id}/examples`;
   assert.equal((await request(path, { method: 'POST', token })).status, 403);
 
-  await request('/api/plan', { method: 'PUT', token, body: { plan: 'plus' } });
+  await request('/api/plan', { method: 'PUT', token, body: { plan: 'premium' } });
   const { data: examples } = await request(path, { method: 'POST', token });
   assert.equal(examples.sentences.length, 1);
   assert.deepEqual((await request('/api/me', { token })).data.sentences, []);
@@ -175,18 +185,22 @@ test('example sentences need a subscription, and are only saved on request', asy
   assert.equal(removed.status, 200);
 });
 
-test('contacts follow the plan: free has Ping, Mero is coming soon, Higher Tier can create', async () => {
+test('Ping is the only built-in contact while Mero is hidden, and only Platinum can create more', async () => {
   const token = await join();
   const { data: free } = await request('/api/me', { token });
-  assert.deepEqual(free.contacts.map(({ id, available }) => [id, available]), [['ping', true], ['mero', false]]);
+  assert.deepEqual(free.contacts.map(({ id, available }) => [id, available]), [['ping', true]]);
   assert.equal((await request('/api/calls', { method: 'POST', token, body: { contactId: 'mero' } })).status, 403);
-  assert.equal((await request('/api/contacts', { method: 'POST', token, body: { name: 'Yuki', topic: 'cooking', voice: 'cedar' } })).status, 403);
+  assert.equal((await request('/api/contact', { method: 'PUT', token, body: { contactId: 'mero' } })).status, 404);
+  const yukiDetails = { name: 'Yuki', topic: 'cooking', voice: 'cedar' };
+  assert.equal((await request('/api/contacts', { method: 'POST', token, body: yukiDetails })).status, 403);
 
-  await request('/api/plan', { method: 'PUT', token, body: { plan: 'pro' } });
-  assert.equal((await request('/api/contact', { method: 'PUT', token, body: { contactId: 'mero' } })).status, 403);
+  await request('/api/plan', { method: 'PUT', token, body: { plan: 'premium' } });
+  assert.equal((await request('/api/contacts', { method: 'POST', token, body: yukiDetails })).status, 403);
+
+  await request('/api/plan', { method: 'PUT', token, body: { plan: 'platinum' } });
   assert.equal((await request('/api/contacts', { method: 'POST', token, body: { name: '', topic: 'x', voice: 'cedar' } })).status, 400);
-  const { data: pro } = await request('/api/contacts', { method: 'POST', token, body: { name: 'Yuki', topic: 'cooking', voice: 'cedar' } });
-  const yuki = pro.contacts.find((contact) => contact.name === 'Yuki');
+  const { data: platinum } = await request('/api/contacts', { method: 'POST', token, body: yukiDetails });
+  const yuki = platinum.contacts.find((contact) => contact.name === 'Yuki');
   assert.equal((await request('/api/contact', { method: 'PUT', token, body: { contactId: yuki.id } })).data.contacts.find((contact) => contact.selected).id, yuki.id);
 
   const { data: call } = await request('/api/calls', { method: 'POST', token, body: { contactId: yuki.id } });
@@ -198,6 +212,23 @@ test('contacts follow the plan: free has Ping, Mero is coming soon, Higher Tier 
   assert.equal(downgraded.contacts.find((contact) => contact.selected).id, 'ping');
   assert.ok(downgraded.clearAt);
   assert.equal((await request('/api/calls', { method: 'POST', token, body: { contactId: yuki.id } })).status, 403);
+});
+
+test('the invite code decides the role, and beta testers cannot switch plans or test-ring', async () => {
+  const signUp = (inviteCode) => request('/api/register', { method: 'POST', body: { inviteCode, timeZone: 'Asia/Tokyo' } });
+  const { data: admin } = await signUp(INVITE_CODE);
+  const { data: beta } = await signUp(BETA_CODE);
+  assert.equal(admin.role, 'admin');
+  assert.equal(beta.role, 'beta');
+  assert.equal(beta.plan, 'free');
+
+  assert.equal((await request('/api/plan', { method: 'PUT', token: beta.token, body: { plan: 'platinum' } })).status, 403);
+  assert.equal((await request('/api/me', { token: beta.token })).data.plan, 'free');
+  assert.equal((await request('/api/test-ring', { method: 'POST', token: beta.token })).status, 403);
+
+  assert.equal((await request('/api/plan', { method: 'PUT', token: admin.token, body: { plan: 'platinum' } })).status, 200);
+  await request('/api/push', { method: 'PUT', token: admin.token, body: { subscription: SUBSCRIPTION, timeZone: 'Asia/Tokyo' } });
+  assert.equal((await request('/api/test-ring', { method: 'POST', token: admin.token })).status, 202);
 });
 
 test('a connected call counts toward the streak', async () => {
@@ -214,7 +245,7 @@ test('conversations are only kept on a paid plan, and shape later calls', async 
   const first = (await request('/api/calls', { method: 'POST', token })).data;
   assert.equal((await request(`/api/calls/${first.id}/transcript`, { method: 'POST', token, body: { lines } })).data.saved, false);
 
-  await request('/api/plan', { method: 'PUT', token, body: { plan: 'plus' } });
+  await request('/api/plan', { method: 'PUT', token, body: { plan: 'premium' } });
   const second = (await request('/api/calls', { method: 'POST', token })).data;
   assert.equal((await request(`/api/calls/${second.id}/transcript`, { method: 'POST', token, body: { lines } })).data.saved, true);
   const third = (await request('/api/calls', { method: 'POST', token })).data;

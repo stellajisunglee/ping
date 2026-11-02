@@ -262,7 +262,7 @@ function connectToday(context) {
 
 test('the ring and missed call name the selected contact', async () => {
   const context = setup();
-  context.engine.setPlan(context.user, 'pro');
+  context.engine.setPlan(context.user, 'platinum');
   const contact = context.engine.createContact(context.user, { name: 'Yuki', topic: 'cooking', voice: 'cedar' });
   context.engine.selectContact(context.user, contact.id);
   await ringNow(context);
@@ -370,7 +370,7 @@ test('free users cannot remove words, and subscribers have no limit', () => {
   const context = setup();
   const { word: saved } = context.engine.addWord(context.user, word(0));
   assert.throws(() => context.engine.removeWord(context.user, saved.id), PlanError);
-  context.engine.setPlan(context.user, 'plus');
+  context.engine.setPlan(context.user, 'premium');
   for (let index = 1; index < FREE_WORD_LIMIT + 10; index += 1) context.engine.addWord(context.user, word(index));
   assert.equal(context.user.words.length, FREE_WORD_LIMIT + 10);
   assert.equal(context.engine.removeWord(context.user, saved.id), true);
@@ -379,7 +379,7 @@ test('free users cannot remove words, and subscribers have no limit', () => {
 test('cancelling clears subscription words 30 days later, and keeps earlier ones', async () => {
   const context = setup();
   context.engine.addWord(context.user, word(0));
-  context.engine.setPlan(context.user, 'plus');
+  context.engine.setPlan(context.user, 'premium');
   context.engine.addWord(context.user, word(1));
   context.engine.saveSentence(context.user, { japanese: '元気です。', english: "I'm well." });
   const call = context.engine.callBack(context.user);
@@ -401,10 +401,10 @@ test('cancelling clears subscription words 30 days later, and keeps earlier ones
 
 test('resubscribing within the 30 days keeps everything', async () => {
   const context = setup();
-  context.engine.setPlan(context.user, 'plus');
+  context.engine.setPlan(context.user, 'premium');
   context.engine.addWord(context.user, word(1));
   context.engine.setPlan(context.user, 'free');
-  context.engine.setPlan(context.user, 'pro');
+  context.engine.setPlan(context.user, 'platinum');
   assert.equal(context.user.clearAt, null);
   context.clock.now += CANCEL_WINDOW_MS + 1;
   await context.engine.tick();
@@ -413,7 +413,7 @@ test('resubscribing within the 30 days keeps everything', async () => {
 
 test('example lookups are limited per day', () => {
   const context = setup();
-  context.engine.setPlan(context.user, 'plus');
+  context.engine.setPlan(context.user, 'premium');
   const { word: saved } = context.engine.addWord(context.user, word(0));
   for (let index = 0; index < 50; index += 1) assert.equal(context.engine.startLookup(context.user, saved.id).id, saved.id);
   assert.throws(() => context.engine.startLookup(context.user, saved.id), LimitError);
@@ -440,7 +440,30 @@ test('an account from before these features still works', () => {
   assert.equal(user.settings.speed, 1.1);
   assert.equal(user.settings.formality, 'formal');
   assert.equal(user.plan, 'free');
+  assert.equal(user.role, 'admin');
   assert.deepEqual(user.words, []);
   assert.equal(engine.streak(user).current, 0);
   assert.equal(engine.callBack(user).contactId, 'ping');
+});
+
+test('saved accounts on the old plan names move to the new ones and keep their contacts', () => {
+  const store = new Store();
+  const base = { timeZone: 'Asia/Tokyo', settings: {}, messages: [], usage: { day: null, calls: 0 } };
+  store.users.plus = { ...base, id: 'plus', plan: 'plus' };
+  store.users.pro = { ...base, id: 'pro', plan: 'pro', contactId: 'c1', customContacts: [{ id: 'c1', name: 'Yuki', spokenName: 'Yuki', topic: 'cooking', voice: 'cedar', plan: 'pro' }] };
+  const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO });
+  assert.equal(store.users.plus.plan, 'premium');
+  assert.equal(store.users.pro.plan, 'platinum');
+  const yuki = engine.contacts(store.users.pro).find((contact) => contact.name === 'Yuki');
+  assert.deepEqual([yuki.available, yuki.selected, yuki.custom], [true, true, true]);
+});
+
+test('a new account keeps the role it signed up with, and an old one stays as it was', () => {
+  const store = new Store();
+  const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }) });
+  const { user: admin } = engine.register('Asia/Tokyo', 'admin');
+  const { user: beta } = engine.register('Asia/Tokyo', 'beta');
+  new CallEngine({ store, sendPush: async () => ({ gone: false }) });
+  assert.equal(admin.role, 'admin');
+  assert.equal(beta.role, 'beta');
 });
