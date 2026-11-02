@@ -8,12 +8,14 @@ export class Store {
     this.file = file;
     this.users = {};
     this.calls = {};
+    this.feedback = [];
     if (!file) return;
     mkdirSync(dirname(file), { recursive: true });
     try {
       const saved = JSON.parse(readFileSync(file, 'utf8'));
       this.users = saved.users ?? {};
       this.calls = saved.calls ?? {};
+      this.feedback = saved.feedback ?? [];
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
@@ -23,7 +25,7 @@ export class Store {
   save() {
     if (!this.file) return;
     const temp = `${this.file}.tmp`;
-    writeFileSync(temp, JSON.stringify({ users: this.users, calls: this.calls }));
+    writeFileSync(temp, JSON.stringify({ users: this.users, calls: this.calls, feedback: this.feedback }));
     renameSync(temp, this.file);
   }
 }

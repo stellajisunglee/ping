@@ -1,7 +1,7 @@
 {
   "name": "Ping",
   "short_name": "Ping",
-  "description": "Mina phones you once a day for a quick chat in Japanese.",
+  "description": "An app that calls you to practice speaking Japanese.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

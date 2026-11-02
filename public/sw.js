@@ -1,8 +1,10 @@
 // Makes the phone "ring" while the app is closed, and keeps the app shell available offline.
 
-const CACHE = 'ping-v1';
-const SHELL = ['/', '/index.html', '/app.js', '/voice.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
-const NOTIFICATION_TAG = 'mina-call';
+const CACHE = 'ping-v2';
+const SHELL = ['/', '/index.html', '/app.js', '/lib.js', '/stack.js', '/contacts.js', '/settings.js', '/voice.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
+const NOTIFICATION_TAG = 'ping-call';
+const RING_AGAIN_EVERY_MS = 2_500;
+const RING_AGAIN_TIMES = 3; // keeps it inside the 10 seconds, after which the server sends the missed call
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -34,8 +36,8 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-function showRing(callId) {
-  return self.registration.showNotification('Mina is calling', {
+function showRing(callId, contactName) {
+  return self.registration.showNotification(`${contactName} is calling`, {
     body: 'Tap to answer',
     tag: NOTIFICATION_TAG,
     renotify: true,
@@ -43,7 +45,7 @@ function showRing(callId) {
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
     vibrate: [400, 200, 400, 200, 400, 200, 400],
-    data: { type: 'ring', callId },
+    data: { type: 'ring', callId, contactName },
     actions: [
       { action: 'answer', title: 'Answer' },
       { action: 'decline', title: 'Decline' },
@@ -51,9 +53,9 @@ function showRing(callId) {
   });
 }
 
-function showMissed(callId) {
-  return self.registration.showNotification('Missed call from Mina', {
-    body: 'She left you a voice message. Tap to listen and call back.',
+function showMissed(callId, contactName) {
+  return self.registration.showNotification(`Missed call from ${contactName}`, {
+    body: 'You have a voice message. Tap to listen and call back.',
     tag: NOTIFICATION_TAG,
     renotify: true,
     icon: '/icons/icon-192.png',
@@ -67,24 +69,36 @@ async function tellOpenApps(message) {
   for (const client of windows) client.postMessage(message);
 }
 
-async function handleRing(callId) {
-  await showRing(callId);
-  await tellOpenApps({ type: 'ring', callId });
+// Rings the phone again until the call is answered, declined or missed, so one buzz isn't easy to miss.
+async function keepRinging(callId, contactName) {
+  for (let count = 0; count < RING_AGAIN_TIMES; count += 1) {
+    await new Promise((resolve) => setTimeout(resolve, RING_AGAIN_EVERY_MS));
+    const open = await self.registration.getNotifications({ tag: NOTIFICATION_TAG });
+    if (!open.some(({ data }) => data?.type === 'ring' && data.callId === callId)) return;
+    await showRing(callId, contactName);
+  }
+}
+
+async function handleRing(callId, contactName) {
+  await showRing(callId, contactName);
+  await tellOpenApps({ type: 'ring', callId, contactName });
   // A push that sat undelivered can arrive after the call was already missed.
   const response = await fetch(`/api/calls/${callId}/delivered`, { method: 'POST' });
   const { state } = await response.json();
-  if (state === 'missed') await handleMissed(callId);
+  if (state === 'missed') await handleMissed(callId, contactName);
+  else if (state === 'ringing') await keepRinging(callId, contactName);
 }
 
-async function handleMissed(callId) {
-  await showMissed(callId);
+async function handleMissed(callId, contactName) {
+  await showMissed(callId, contactName);
   await tellOpenApps({ type: 'missed', callId });
 }
 
 self.addEventListener('push', (event) => {
   const data = event.data?.json() ?? {};
-  if (data.type === 'ring') event.waitUntil(handleRing(data.callId).catch(() => {}));
-  else if (data.type === 'missed') event.waitUntil(handleMissed(data.callId));
+  const contactName = data.contactName ?? 'Ping';
+  if (data.type === 'ring') event.waitUntil(handleRing(data.callId, contactName).catch(() => {}));
+  else if (data.type === 'missed') event.waitUntil(handleMissed(data.callId, contactName));
 });
 
 async function openApp(path, message) {

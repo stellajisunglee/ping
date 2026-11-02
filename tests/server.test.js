@@ -2,6 +2,7 @@ import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../server/index.js';
 import { CallEngine } from '../server/calls.js';
+import { silenceMs } from '../server/settings.js';
 import { Store } from '../server/store.js';
 
 const SUBSCRIPTION = { endpoint: 'https://push.example/1', keys: { p256dh: 'a', auth: 'b' } };
@@ -19,6 +20,7 @@ const openai = {
     return 'ek_test';
   },
   speak: async () => Buffer.from('audio'),
+  exampleSentences: async () => [{ japanese: '元気です。', english: "I'm well." }],
 };
 
 async function request(path, { method = 'GET', token, body } = {}) {
@@ -100,7 +102,7 @@ test('settings changes return what the live call needs', async () => {
   const token = await join();
   const { data } = await request('/api/settings', { method: 'PATCH', token, body: { speedChange: 'slower', thinkingTime: 'long' } });
   assert.equal(data.settings.speed, 0.75);
-  assert.equal(data.turnDetection.silence_duration_ms, 2500);
+  assert.equal(data.turnDetection.silence_duration_ms, silenceMs('long', 0.75));
 });
 
 test('push subscriptions are validated', async () => {
@@ -138,4 +140,127 @@ test('static files are served with a strict content policy, and nothing outside 
   assert.equal((await fetch(`${baseUrl}/manifest.webmanifest`)).status, 200);
   assert.equal((await fetch(`${baseUrl}/..%2fpackage.json`)).status, 404);
   assert.equal((await fetch(`${baseUrl}/%2e%2e/server/index.js`)).status, 404);
+});
+
+const WORD = { kanji: '元気', kana: 'げんき', romaji: 'genki', english: 'healthy, well' };
+
+test('a word can be added on any plan, but only subscribers can remove it', async () => {
+  const token = await join();
+  const { data } = await request('/api/stack/words', { method: 'POST', token, body: WORD });
+  assert.equal(data.added, true);
+  assert.equal((await request('/api/stack/words', { method: 'POST', token, body: WORD })).data.added, false);
+  assert.equal((await request('/api/stack/words', { method: 'POST', token, body: { kana: 'hello', romaji: 'x', english: 'y' } })).status, 400);
+  assert.equal((await request(`/api/stack/words/${data.word.id}`, { method: 'DELETE', token })).status, 403);
+
+  await request('/api/plan', { method: 'PUT', token, body: { plan: 'plus' } });
+  const removed = await request(`/api/stack/words/${data.word.id}`, { method: 'DELETE', token });
+  assert.equal(removed.status, 200);
+  assert.deepEqual(removed.data.words, []);
+});
+
+test('example sentences need a subscription, and are only saved on request', async () => {
+  const token = await join();
+  const { data } = await request('/api/stack/words', { method: 'POST', token, body: WORD });
+  const path = `/api/stack/words/${data.word.id}/examples`;
+  assert.equal((await request(path, { method: 'POST', token })).status, 403);
+
+  await request('/api/plan', { method: 'PUT', token, body: { plan: 'plus' } });
+  const { data: examples } = await request(path, { method: 'POST', token });
+  assert.equal(examples.sentences.length, 1);
+  assert.deepEqual((await request('/api/me', { token })).data.sentences, []);
+
+  const saved = await request('/api/stack/sentences', { method: 'POST', token, body: { ...examples.sentences[0], word: '元気' } });
+  assert.equal(saved.data.sentences.length, 1);
+  const removed = await request(`/api/stack/sentences/${saved.data.sentences[0].id}`, { method: 'DELETE', token });
+  assert.equal(removed.status, 200);
+});
+
+test('contacts follow the plan: free has Ping, Mero is coming soon, Higher Tier can create', async () => {
+  const token = await join();
+  const { data: free } = await request('/api/me', { token });
+  assert.deepEqual(free.contacts.map(({ id, available }) => [id, available]), [['ping', true], ['mero', false]]);
+  assert.equal((await request('/api/calls', { method: 'POST', token, body: { contactId: 'mero' } })).status, 403);
+  assert.equal((await request('/api/contacts', { method: 'POST', token, body: { name: 'Yuki', topic: 'cooking', voice: 'cedar' } })).status, 403);
+
+  await request('/api/plan', { method: 'PUT', token, body: { plan: 'pro' } });
+  assert.equal((await request('/api/contact', { method: 'PUT', token, body: { contactId: 'mero' } })).status, 403);
+  assert.equal((await request('/api/contacts', { method: 'POST', token, body: { name: '', topic: 'x', voice: 'cedar' } })).status, 400);
+  const { data: pro } = await request('/api/contacts', { method: 'POST', token, body: { name: 'Yuki', topic: 'cooking', voice: 'cedar' } });
+  const yuki = pro.contacts.find((contact) => contact.name === 'Yuki');
+  assert.equal((await request('/api/contact', { method: 'PUT', token, body: { contactId: yuki.id } })).data.contacts.find((contact) => contact.selected).id, yuki.id);
+
+  const { data: call } = await request('/api/calls', { method: 'POST', token, body: { contactId: yuki.id } });
+  assert.equal(call.contactName, 'Yuki');
+  await request(`/api/calls/${call.id}/session`, { method: 'POST', token });
+  assert.equal(minted.at(-1).session.audio.output.voice, 'cedar');
+
+  const { data: downgraded } = await request('/api/plan', { method: 'PUT', token, body: { plan: 'free' } });
+  assert.equal(downgraded.contacts.find((contact) => contact.selected).id, 'ping');
+  assert.ok(downgraded.clearAt);
+  assert.equal((await request('/api/calls', { method: 'POST', token, body: { contactId: yuki.id } })).status, 403);
+});
+
+test('a connected call counts toward the streak', async () => {
+  const token = await join();
+  const { data: call } = await request('/api/calls', { method: 'POST', token });
+  const { data } = await request(`/api/calls/${call.id}/connected`, { method: 'POST', token });
+  assert.equal(data.streak.current, 1);
+  assert.equal(data.streak.best, 1);
+});
+
+test('conversations are only kept on a paid plan, and shape later calls', async () => {
+  const token = await join();
+  const lines = [{ from: 'contact', text: '今日は何をしましたか？' }, { from: 'you', text: 'ラーメンを食べました' }];
+  const first = (await request('/api/calls', { method: 'POST', token })).data;
+  assert.equal((await request(`/api/calls/${first.id}/transcript`, { method: 'POST', token, body: { lines } })).data.saved, false);
+
+  await request('/api/plan', { method: 'PUT', token, body: { plan: 'plus' } });
+  const second = (await request('/api/calls', { method: 'POST', token })).data;
+  assert.equal((await request(`/api/calls/${second.id}/transcript`, { method: 'POST', token, body: { lines } })).data.saved, true);
+  const third = (await request('/api/calls', { method: 'POST', token })).data;
+  await request(`/api/calls/${third.id}/session`, { method: 'POST', token });
+  assert.match(minted.at(-1).session.instructions, /ラーメンを食べました/);
+});
+
+test('a transcript problem does not stop the call', async () => {
+  const realMint = openai.mintClientSecret;
+  const warn = console.warn;
+  console.warn = () => {};
+  const sessions = [];
+  openai.mintClientSecret = async (session) => {
+    sessions.push(session);
+    if (session.audio.input.transcription) throw new Error('bad transcription model');
+    return 'ek_retry';
+  };
+  try {
+    const token = await join();
+    const { data: call } = await request('/api/calls', { method: 'POST', token });
+    const { status, data } = await request(`/api/calls/${call.id}/session`, { method: 'POST', token });
+    assert.equal(status, 200);
+    assert.equal(data.clientSecret, 'ek_retry');
+    assert.equal(sessions.length, 2);
+    assert.ok(sessions[1].audio.input.turn_detection);
+  } finally {
+    openai.mintClientSecret = realMint;
+    console.warn = warn;
+  }
+});
+
+test('feedback is kept without saying who sent it', async () => {
+  const token = await join();
+  const log = console.log;
+  console.log = () => {};
+  try {
+    assert.equal((await request('/api/feedback', { method: 'POST', token, body: { text: '  ' } })).status, 400);
+    assert.equal((await request('/api/feedback', { method: 'POST', token, body: { text: 'Love it' } })).status, 201);
+  } finally {
+    console.log = log;
+  }
+  assert.deepEqual(Object.keys(engine.store.feedback[0]).sort(), ['at', 'text']);
+  assert.equal(engine.store.feedback[0].text, 'Love it');
+});
+
+test('plans are checked', async () => {
+  const token = await join();
+  assert.equal((await request('/api/plan', { method: 'PUT', token, body: { plan: 'free-forever' } })).status, 400);
 });

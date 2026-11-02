@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CallEngine, DELIVERY_GRACE_MS, LimitError, MAX_SESSIONS_PER_CALL, RING_MS } from '../server/calls.js';
+import { CallEngine, CANCEL_WINDOW_MS, DELIVERY_GRACE_MS, LimitError, MAX_SESSIONS_PER_CALL, PlanError, RING_MS } from '../server/calls.js';
+import { FREE_WORD_LIMIT } from '../server/stack.js';
+import { localDay, localParts } from '../server/schedule.js';
 import { Store } from '../server/store.js';
 
 const SUBSCRIPTION = { endpoint: 'https://push.example/1', keys: { p256dh: 'a', auth: 'b' } };
@@ -248,4 +250,197 @@ test('a ringing call survives a restart and is still missed on time', async () =
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+const DAY_MS = 86_400_000;
+const word = (index) => ({ kanji: '', kana: `あ${index}`, romaji: `a${index}`, english: `word ${index}` });
+
+function connectToday(context) {
+  const call = context.engine.callBack(context.user);
+  assert.equal(context.engine.markConnected(context.user, call.id), true);
+}
+
+test('the ring and missed call name the selected contact', async () => {
+  const context = setup();
+  context.engine.setPlan(context.user, 'pro');
+  const contact = context.engine.createContact(context.user, { name: 'Yuki', topic: 'cooking', voice: 'cedar' });
+  context.engine.selectContact(context.user, contact.id);
+  await ringNow(context);
+  assert.equal(context.pushes[0].payload.contactName, 'Yuki');
+  const call = callOf(context.store);
+  assert.equal(call.contactId, contact.id);
+  context.engine.markDelivered(call.id);
+  context.clock.now += RING_MS;
+  await context.engine.tick();
+  assert.equal(context.pushes.at(-1).payload.contactName, 'Yuki');
+  assert.equal(context.engine.voicemail(context.user).contact.name, 'Yuki');
+});
+
+test('the voicemail shows only while the last call is one that was missed', async () => {
+  const context = setup();
+  assert.equal(context.engine.voicemail(context.user), null);
+  await ringNow(context);
+  const missed = callOf(context.store);
+  context.engine.markDelivered(missed.id);
+  context.clock.now += RING_MS;
+  await context.engine.tick();
+  assert.ok(context.engine.voicemail(context.user));
+
+  context.engine.callBack(context.user);
+  assert.equal(context.engine.voicemail(context.user), null);
+});
+
+test('declining the next call clears the voicemail', async () => {
+  const context = setup();
+  await ringNow(context);
+  const first = callOf(context.store);
+  context.engine.markDelivered(first.id);
+  context.clock.now += RING_MS;
+  await context.engine.tick();
+  await ringNow(context);
+  context.engine.decline(callOf(context.store).id);
+  assert.equal(context.engine.voicemail(context.user), null);
+});
+
+test('the streak grows once per day and survives only unbroken days', () => {
+  const context = setup();
+  connectToday(context);
+  connectToday(context);
+  assert.deepEqual(context.engine.streak(context.user), { current: 1, best: 1 });
+
+  context.clock.now += DAY_MS;
+  connectToday(context);
+  context.clock.now += DAY_MS;
+  connectToday(context);
+  assert.deepEqual(context.engine.streak(context.user), { current: 3, best: 3 });
+
+  context.clock.now += 2 * DAY_MS;
+  assert.deepEqual(context.engine.streak(context.user), { current: 0, best: 3 });
+  connectToday(context);
+  assert.deepEqual(context.engine.streak(context.user), { current: 1, best: 3 });
+});
+
+test('days off in the schedule do not break a streak', () => {
+  const context = setup();
+  context.engine.updateSettings(context.user, { frequency: 'weekdays' });
+  context.clock.now = Date.UTC(2026, 9, 30, 3); // a Friday
+  connectToday(context);
+  context.clock.now += 2 * DAY_MS; // Sunday, with no call on Saturday
+  assert.equal(context.engine.streak(context.user).current, 1);
+  context.clock.now += DAY_MS; // Monday
+  connectToday(context);
+  assert.equal(context.engine.streak(context.user).current, 2);
+});
+
+test('a call that never connected does not count', () => {
+  const context = setup();
+  const { user: stranger } = context.engine.register('Asia/Tokyo');
+  const call = context.engine.callBack(context.user);
+  assert.equal(context.engine.markConnected(stranger, call.id), false);
+  assert.equal(context.engine.streak(context.user).current, 0);
+});
+
+test('changing the schedule moves the next call, without a second call today', async () => {
+  const context = setup();
+  context.engine.updateSettings(context.user, { callStartHour: 18, callEndHour: 19 });
+  assert.equal(localParts(context.user.nextCallAt, 'Asia/Tokyo').hour, 18);
+
+  await ringNow(context);
+  const firstRingDay = localDay(context.clock.now, 'Asia/Tokyo');
+  context.engine.updateSettings(context.user, { callStartHour: 19, callEndHour: 21 });
+  assert.notEqual(localDay(context.user.nextCallAt, 'Asia/Tokyo'), firstRingDay);
+});
+
+test('a speed change leaves the next call alone', () => {
+  const context = setup();
+  const before = context.user.nextCallAt;
+  context.engine.updateSettings(context.user, { speed: 1.2 });
+  assert.equal(context.user.nextCallAt, before);
+});
+
+test('a free stack keeps the latest 25 words', () => {
+  const context = setup();
+  for (let index = 0; index < FREE_WORD_LIMIT + 3; index += 1) assert.equal(context.engine.addWord(context.user, word(index)).added, true);
+  assert.equal(context.user.words.length, FREE_WORD_LIMIT);
+  assert.equal(context.user.words[0].kana, `あ${FREE_WORD_LIMIT + 2}`);
+  assert.ok(!context.user.words.some((saved) => saved.kana === 'あ0'));
+});
+
+test('free users cannot remove words, and subscribers have no limit', () => {
+  const context = setup();
+  const { word: saved } = context.engine.addWord(context.user, word(0));
+  assert.throws(() => context.engine.removeWord(context.user, saved.id), PlanError);
+  context.engine.setPlan(context.user, 'plus');
+  for (let index = 1; index < FREE_WORD_LIMIT + 10; index += 1) context.engine.addWord(context.user, word(index));
+  assert.equal(context.user.words.length, FREE_WORD_LIMIT + 10);
+  assert.equal(context.engine.removeWord(context.user, saved.id), true);
+});
+
+test('cancelling clears subscription words 30 days later, and keeps earlier ones', async () => {
+  const context = setup();
+  context.engine.addWord(context.user, word(0));
+  context.engine.setPlan(context.user, 'plus');
+  context.engine.addWord(context.user, word(1));
+  context.engine.saveSentence(context.user, { japanese: '元気です。', english: "I'm well." });
+  const call = context.engine.callBack(context.user);
+  context.engine.saveConversation(context.user, call.id, [{ from: 'you', text: 'はい' }]);
+
+  context.engine.setPlan(context.user, 'free');
+  assert.equal(context.user.clearAt, context.clock.now + CANCEL_WINDOW_MS);
+  context.clock.now += CANCEL_WINDOW_MS - 1;
+  await context.engine.tick();
+  assert.equal(context.user.words.length, 2);
+
+  context.clock.now += 1;
+  await context.engine.tick();
+  assert.deepEqual(context.user.words.map((saved) => saved.kana), ['あ0']);
+  assert.deepEqual(context.user.sentences, []);
+  assert.deepEqual(context.user.conversations, []);
+  assert.equal(context.user.clearAt, null);
+});
+
+test('resubscribing within the 30 days keeps everything', async () => {
+  const context = setup();
+  context.engine.setPlan(context.user, 'plus');
+  context.engine.addWord(context.user, word(1));
+  context.engine.setPlan(context.user, 'free');
+  context.engine.setPlan(context.user, 'pro');
+  assert.equal(context.user.clearAt, null);
+  context.clock.now += CANCEL_WINDOW_MS + 1;
+  await context.engine.tick();
+  assert.equal(context.user.words.length, 1);
+});
+
+test('example lookups are limited per day', () => {
+  const context = setup();
+  context.engine.setPlan(context.user, 'plus');
+  const { word: saved } = context.engine.addWord(context.user, word(0));
+  for (let index = 0; index < 50; index += 1) assert.equal(context.engine.startLookup(context.user, saved.id).id, saved.id);
+  assert.throws(() => context.engine.startLookup(context.user, saved.id), LimitError);
+  context.clock.now += DAY_MS;
+  assert.ok(context.engine.startLookup(context.user, saved.id));
+});
+
+test('an account from before these features still works', () => {
+  const store = new Store();
+  store.users.old = {
+    id: 'old',
+    tokenHash: 'x',
+    timeZone: 'Asia/Tokyo',
+    settings: { speed: 1.1, thinkingTime: 'long', callsEnabled: true },
+    subscription: null,
+    nextCallAt: null,
+    testRingAt: null,
+    lastQuestionId: 'genki',
+    messages: [{ id: 'm1', callId: 'c1', at: 1, heard: false }],
+    usage: { day: null, calls: 0 },
+  };
+  const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO });
+  const [user] = Object.values(store.users);
+  assert.equal(user.settings.speed, 1.1);
+  assert.equal(user.settings.formality, 'formal');
+  assert.equal(user.plan, 'free');
+  assert.deepEqual(user.words, []);
+  assert.equal(engine.streak(user).current, 0);
+  assert.equal(engine.callBack(user).contactId, 'ping');
 });

@@ -1,11 +1,11 @@
-// One phone call with Mina: a WebRTC connection straight from this browser to the voice model.
+// One phone call with a contact: a WebRTC connection straight from this browser to the voice model.
 
 const DATA_CHANNEL = 'oai-events';
 const WRAP_UP_BEFORE_END_SECONDS = 20;
 const HANG_UP_AFTER_GOODBYE_MS = 600;
 const GOODBYE_TIMEOUT_MS = 10_000;
 
-export function startCall({ callId, api, audio, onStatus, onCaption, onSpeaking, onSettings, onEnded, onNeedsTap }) {
+export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, onSpeaking, onSettings, onEnded, onNeedsTap }) {
   let pc = null;
   let channel = null;
   let microphone = null;
@@ -16,6 +16,9 @@ export function startCall({ callId, api, audio, onStatus, onCaption, onSpeaking,
   let hangingUp = false;
   let speaking = false;
   let audioFinished = false;
+  let responding = false;
+  let pendingVoiceUpdate = null;
+  let maxCallSeconds = 0;
   const timers = [];
 
   const send = (event) => {
@@ -33,11 +36,11 @@ export function startCall({ callId, api, audio, onStatus, onCaption, onSpeaking,
     onEnded(reason);
   }
 
-  // Mina speaks first, but only once the user can actually hear her.
+  // The contact speaks first, but only once the user can actually hear them.
   function greetWhenReady() {
     if (greeted || !channelOpen || !audioPlaying) return;
     greeted = true;
-    onStatus('connected');
+    onStatus('connected', maxCallSeconds);
     send({ type: 'response.create' });
   }
 
@@ -51,6 +54,39 @@ export function startCall({ callId, api, audio, onStatus, onCaption, onSpeaking,
     );
   }
 
+  // The speed can only change between turns, so a change made mid-sentence waits for the turn to end.
+  function updateVoice({ settings, turnDetection }) {
+    const update = {
+      type: 'session.update',
+      session: { type: 'realtime', audio: { input: { turn_detection: turnDetection }, output: { speed: settings.speed } } },
+    };
+    if (responding) pendingVoiceUpdate = update;
+    else send(update);
+  }
+
+  const TOOLS = {
+    async update_settings(change) {
+      const { settings, turnDetection } = await api('/api/settings', { method: 'PATCH', body: change });
+      updateVoice({ settings, turnDetection });
+      onSettings(settings);
+      return { ok: true, settings };
+    },
+    async add_to_stack(word) {
+      const { added, word: saved } = await api('/api/stack/words', { method: 'POST', body: word });
+      if (added) onWordAdded(saved);
+      return { ok: true, added };
+    },
+  };
+
+  async function runTool(call) {
+    try {
+      return await TOOLS[call.name](JSON.parse(call.arguments || '{}'));
+    } catch (error) {
+      console.warn(`${call.name} failed`, error);
+      return { ok: false };
+    }
+  }
+
   async function handleToolCalls(items) {
     const calls = items.filter((item) => item.type === 'function_call');
     if (!calls.length) return;
@@ -62,32 +98,29 @@ export function startCall({ callId, api, audio, onStatus, onCaption, onSpeaking,
       return;
     }
     for (const call of calls) {
-      let output = { ok: false };
-      try {
-        const { settings, turnDetection } = await api('/api/settings', { method: 'PATCH', body: JSON.parse(call.arguments || '{}') });
-        // The speed can only change between turns, which is where a finished response leaves us.
-        send({
-          type: 'session.update',
-          session: { type: 'realtime', audio: { input: { turn_detection: turnDetection }, output: { speed: settings.speed } } },
-        });
-        onSettings(settings);
-        output = { ok: true, settings };
-      } catch (error) {
-        console.warn('Settings change failed', error);
-      }
+      const output = await runTool(call);
       send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(output) } });
     }
-    send({ type: 'response.create' });
+    // If the word was saved while the contact was already explaining it, they've said what they needed to.
+    const alreadyAnswered = items.some((item) => item.type === 'message') && calls.every((call) => call.name === 'add_to_stack');
+    if (!alreadyAnswered) send({ type: 'response.create' });
   }
 
   function handleEvent(event) {
     switch (event.type) {
       case 'response.created':
+        responding = true;
         audioFinished = false;
-        onCaption('');
         break;
       case 'response.output_audio_transcript.delta':
-        onCaption(event.delta, true);
+        onLine({ id: event.item_id, from: 'contact', delta: event.delta });
+        break;
+      // This holds the user's place in the transcript, because their words arrive after the reply has started.
+      case 'input_audio_buffer.committed':
+        onLine({ id: event.item_id, from: 'you', text: '' });
+        break;
+      case 'conversation.item.input_audio_transcription.completed':
+        onLine({ id: event.item_id, from: 'you', text: event.transcript });
         break;
       case 'output_audio_buffer.started':
         speaking = true;
@@ -101,6 +134,11 @@ export function startCall({ callId, api, audio, onStatus, onCaption, onSpeaking,
         if (hangingUp) timers.push(setTimeout(() => end('finished'), HANG_UP_AFTER_GOODBYE_MS));
         break;
       case 'response.done':
+        responding = false;
+        if (pendingVoiceUpdate) {
+          send(pendingVoiceUpdate);
+          pendingVoiceUpdate = null;
+        }
         handleToolCalls(event.response?.output ?? []);
         break;
       case 'error':
@@ -113,6 +151,7 @@ export function startCall({ callId, api, audio, onStatus, onCaption, onSpeaking,
   async function connect() {
     onStatus('connecting');
     const { clientSecret, sdpUrl, maxSeconds } = await api(`/api/calls/${callId}/session`, { method: 'POST' });
+    maxCallSeconds = maxSeconds;
     if (ended) return;
     microphone = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     if (ended) {
@@ -164,5 +203,16 @@ export function startCall({ callId, api, audio, onStatus, onCaption, onSpeaking,
     hangUp: () => end('hung-up'),
     setMuted: (muted) => microphone?.getAudioTracks().forEach((track) => (track.enabled = !muted)),
     resumeAudio: playAudio,
+    updateVoice,
+    // Browsers only sometimes let a page pick the speaker, so this reports whether it worked.
+    async setSpeaker(on) {
+      if (!audio.setSinkId) return false;
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices.filter((device) => device.kind === 'audiooutput');
+      const target = on ? outputs.find((device) => /speaker/i.test(device.label)) : outputs.find((device) => device.deviceId === 'default');
+      if (!target) return false;
+      await audio.setSinkId(target.deviceId);
+      return true;
+    },
   };
 }

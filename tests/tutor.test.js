@@ -1,18 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applySettings, DEFAULT_SETTINGS, MAX_SPEED, MIN_SPEED, SILENCE_MS } from '../server/settings.js';
-import { buildInstructions, buildSession, pickQuestion, QUESTIONS, turnDetection } from '../server/tutor.js';
+import { applySettings, DEFAULT_SETTINGS, MAX_SPEED, MIN_SPEED, SILENCE_MS, silenceMs } from '../server/settings.js';
+import { buildInstructions, buildSession, pickQuestion, QUESTIONS, turnDetection, voiceMessageFor } from '../server/tutor.js';
 
-test('the four requested questions are all in the bank', () => {
-  const japanese = QUESTIONS.map((question) => question.japanese);
-  for (const question of ['今日は元気ですか？', '何してますか？', '今日は何を食べますか？', '週末に何をしますか？']) {
-    assert.ok(japanese.includes(question), question);
+test('every question is open-ended, with a polite and a casual version', () => {
+  for (const question of QUESTIONS) {
+    assert.match(question.japanese, /何|どんな|どう/, question.id);
+    assert.match(question.japanese, /(です|ます|ました)か？$/, question.id);
+    assert.ok(question.casual && !/(です|ます|ました)/.test(question.casual), question.id);
   }
 });
 
 test('pickQuestion avoids the last question', () => {
   for (const value of [0, 0.3, 0.6, 0.99]) {
-    assert.notEqual(pickQuestion('genki', () => value).id, 'genki');
+    assert.notEqual(pickQuestion('day', () => value).id, 'day');
   }
 });
 
@@ -31,6 +32,47 @@ test('the instructions ask this call\'s question and cover each behavior', () =>
   assert.match(instructions, /update_settings/);
   assert.match(instructions, /end_call/);
   assert.match(instructions, /Try saying that in Japanese/);
+  assert.match(instructions, /add_to_stack/);
+});
+
+test('Ping is formal by default, says it\'s not sure when off topic, and sticks to two languages', () => {
+  const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12 });
+  assert.match(instructions, /You are Ping/);
+  assert.match(instructions, /ピンです/);
+  assert.match(instructions, /です\/ます/);
+  assert.match(instructions, /ちょっとわかりません/);
+  assert.match(instructions, /Only ever speak Japanese or English/);
+  assert.ok(!/Mina|ミナ/.test(instructions));
+});
+
+test('the level and politeness settings change how the contact talks', () => {
+  const settings = { ...DEFAULT_SETTINGS, formality: 'casual', proficiency: 'advanced' };
+  const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12, settings });
+  assert.match(instructions, /The user is advanced/);
+  assert.match(instructions, /casual speech/);
+  assert.match(instructions, /ピンだよ/);
+  assert.ok(instructions.includes(QUESTIONS[0].casual));
+});
+
+test('a custom contact uses its own name, topic and voice', () => {
+  const contact = { id: 'c1', name: 'Yuki', spokenName: 'Yuki', topic: 'cooking', voice: 'cedar', plan: 'pro' };
+  const session = buildSession({ model: 'm', voice: 'marin', question: QUESTIONS[0], settings: DEFAULT_SETTINGS, localHour: 12, contact });
+  assert.equal(session.audio.output.voice, 'cedar');
+  assert.match(session.instructions, /You are Yuki/);
+  assert.match(session.instructions, /about cooking/);
+  assert.ok(!session.instructions.includes(QUESTIONS[0].japanese));
+});
+
+test('past conversations reach the instructions only when given', () => {
+  const remembered = buildInstructions({ question: QUESTIONS[0], localHour: 12, memories: ['ラーメンが好きです'] });
+  assert.match(remembered, /WHAT YOU REMEMBER/);
+  assert.match(remembered, /ラーメンが好きです/);
+  assert.ok(!/WHAT YOU REMEMBER/.test(buildInstructions({ question: QUESTIONS[0], localHour: 12 })));
+});
+
+test('voicemail uses the contact name in both languages', () => {
+  assert.match(voiceMessageFor().japanese, /ピン/);
+  assert.match(voiceMessageFor().english, /Ping/);
 });
 
 test('the session carries the user speed and thinking time', () => {
@@ -38,14 +80,15 @@ test('the session carries the user speed and thinking time', () => {
     model: 'gpt-realtime',
     voice: 'marin',
     question: QUESTIONS[0],
-    settings: { speed: 0.75, thinkingTime: 'long', callsEnabled: true },
+    settings: { ...DEFAULT_SETTINGS, speed: 0.75, thinkingTime: 'long' },
     localHour: 12,
   });
   assert.equal(session.type, 'realtime');
   assert.equal(session.audio.output.speed, 0.75);
   assert.equal(session.audio.output.voice, 'marin');
-  assert.equal(session.audio.input.turn_detection.silence_duration_ms, SILENCE_MS.long);
-  assert.deepEqual(session.tools.map((tool) => tool.name), ['update_settings', 'end_call']);
+  assert.equal(session.audio.input.turn_detection.silence_duration_ms, silenceMs('long', 0.75));
+  assert.deepEqual(session.audio.input.transcription.languages, ['ja', 'en']);
+  assert.deepEqual(session.tools.map((tool) => tool.name), ['add_to_stack', 'update_settings', 'end_call']);
 });
 
 test('speed steps stay inside the allowed range', () => {
@@ -61,4 +104,25 @@ test('unknown settings changes are ignored', () => {
   assert.deepEqual(applySettings(DEFAULT_SETTINGS, { speedChange: 'warp', thinkingTime: 'forever', callsEnabled: 'no', admin: true }), DEFAULT_SETTINGS);
   assert.equal(applySettings(DEFAULT_SETTINGS, { callsEnabled: false }).callsEnabled, false);
   assert.equal(turnDetection('nonsense').silence_duration_ms, SILENCE_MS.normal);
+});
+
+test('slower speeds are more patient with gaps in speech', () => {
+  assert.equal(silenceMs('normal', 1), SILENCE_MS.normal);
+  assert.equal(silenceMs('normal', 1.5), SILENCE_MS.normal);
+  assert.ok(silenceMs('normal', 0.75) > silenceMs('normal', 0.9));
+  assert.ok(silenceMs('normal', 0.6) > silenceMs('normal', 0.75));
+  assert.equal(turnDetection('long', 0.6).silence_duration_ms, 4000);
+});
+
+test('schedule and call settings are checked', () => {
+  const changed = applySettings(DEFAULT_SETTINGS, { frequency: 'weekends', proficiency: 'advanced', formality: 'casual', callStartHour: 8, callEndHour: 12, customDays: [6, 0, 9, 6, 'x'] });
+  assert.equal(changed.frequency, 'weekends');
+  assert.equal(changed.proficiency, 'advanced');
+  assert.equal(changed.formality, 'casual');
+  assert.deepEqual([changed.callStartHour, changed.callEndHour], [8, 12]);
+  assert.deepEqual(changed.customDays, [0, 6]);
+
+  const rejected = applySettings(DEFAULT_SETTINGS, { frequency: 'hourly', language: 'fr', callStartHour: 15, callEndHour: 9 });
+  assert.deepEqual(rejected, DEFAULT_SETTINGS);
+  assert.equal(applySettings(DEFAULT_SETTINGS, { callEndHour: 99 }).callEndHour, DEFAULT_SETTINGS.callEndHour);
 });

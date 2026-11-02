@@ -5,7 +5,8 @@ import vm from 'node:vm';
 
 const source = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
 
-function loadWorker({ deliveredState = 'ringing', windows = [] } = {}) {
+function loadWorker({ deliveredState = 'ringing', windows = [], ringClosedAfter = null } = {}) {
+  const state = { ringClosedAfter };
   const listeners = {};
   const shown = [];
   const fetched = [];
@@ -19,6 +20,7 @@ function loadWorker({ deliveredState = 'ringing', windows = [] } = {}) {
       showNotification: async (title, options) => {
         shown.push({ title, ...options });
       },
+      getNotifications: async () => (state.ringClosedAfter !== null && shown.length >= state.ringClosedAfter ? [] : shown.slice(-1)),
     },
     clients: {
       matchAll: async () => windows,
@@ -31,7 +33,7 @@ function loadWorker({ deliveredState = 'ringing', windows = [] } = {}) {
     fetched.push({ path, method: options?.method });
     return { json: async () => ({ state: deliveredState }) };
   };
-  vm.runInNewContext(source, { self, fetch: fetchStub, URL, caches: {}, Promise, console });
+  vm.runInNewContext(source, { self, fetch: fetchStub, URL, caches: {}, Promise, console, setTimeout: (run) => run() });
 
   async function fire(type, event) {
     const pending = [];
@@ -48,15 +50,15 @@ function loadWorker({ deliveredState = 'ringing', windows = [] } = {}) {
 
 test('a ring shows the notification and confirms delivery', async () => {
   const worker = loadWorker();
-  await worker.push({ type: 'ring', callId: 'c1' });
-  assert.equal(worker.shown[0].title, 'Mina is calling');
+  await worker.push({ type: 'ring', callId: 'c1', contactName: 'Ping' });
+  assert.equal(worker.shown[0].title, 'Ping is calling');
   assert.deepEqual(worker.fetched, [{ path: '/api/calls/c1/delivered', method: 'POST' }]);
 });
 
 test('a ring that arrives after the call was missed becomes a missed call', async () => {
   const worker = loadWorker({ deliveredState: 'missed' });
-  await worker.push({ type: 'ring', callId: 'c1' });
-  assert.equal(worker.shown.at(-1).title, 'Missed call from Mina');
+  await worker.push({ type: 'ring', callId: 'c1', contactName: 'Yuki' });
+  assert.equal(worker.shown.at(-1).title, 'Missed call from Yuki');
   assert.equal(worker.shown.at(-1).tag, worker.shown[0].tag);
 });
 
@@ -64,8 +66,21 @@ test('a missed call replaces the ring notification', async () => {
   const worker = loadWorker();
   await worker.push({ type: 'ring', callId: 'c1' });
   await worker.push({ type: 'missed', callId: 'c1' });
-  assert.equal(worker.shown[1].tag, worker.shown[0].tag);
-  assert.equal(worker.shown[1].data.type, 'missed');
+  assert.equal(worker.shown.at(-1).tag, worker.shown[0].tag);
+  assert.equal(worker.shown.at(-1).data.type, 'missed');
+});
+
+test('the phone keeps ringing during the 10 seconds', async () => {
+  const worker = loadWorker();
+  await worker.push({ type: 'ring', callId: 'c1', contactName: 'Ping' });
+  assert.equal(worker.shown.length, 4);
+  assert.ok(worker.shown.every((ring) => ring.renotify && ring.data.type === 'ring'));
+});
+
+test('ringing stops once the call is answered or declined', async () => {
+  const worker = loadWorker({ ringClosedAfter: 2 });
+  await worker.push({ type: 'ring', callId: 'c1', contactName: 'Ping' });
+  assert.equal(worker.shown.length, 2);
 });
 
 test('tapping a ring answers and opens the call', async () => {

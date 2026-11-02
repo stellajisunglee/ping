@@ -1,4 +1,4 @@
-// Draws the app icon, the katakana ミ in white on coral, with no image tools needed.
+// Draws the app icon, the katakana ピ in white on coral, with no image tools needed.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -10,15 +10,18 @@ const BACKGROUND = [200, 84, 63];
 const FOREGROUND = [255, 255, 255];
 const SUPERSAMPLE = 3;
 
-// Each stroke of ミ, as a line from (x1, y1) to (x2, y2) on a 0-1 canvas.
+// The strokes of ピ, as lines from (x1, y1) to (x2, y2) on a 0-1 canvas, plus its small circle.
 const STROKES = [
-  [0.36, 0.28, 0.62, 0.36],
-  [0.4, 0.46, 0.62, 0.53],
-  [0.33, 0.63, 0.66, 0.74],
+  [0.33, 0.47, 0.6, 0.39],
+  [0.33, 0.27, 0.33, 0.66],
+  [0.33, 0.66, 0.39, 0.73],
+  [0.39, 0.73, 0.66, 0.73],
 ];
 const STROKE_RADIUS = 0.033;
+const CIRCLE = { x: 0.67, y: 0.29, radius: 0.055, width: 0.02 };
 
 function nearStroke(x, y) {
+  if (Math.abs(Math.hypot(x - CIRCLE.x, y - CIRCLE.y) - CIRCLE.radius) <= CIRCLE.width) return true;
   return STROKES.some(([x1, y1, x2, y2]) => {
     const dx = x2 - x1;
     const dy = y2 - y1;

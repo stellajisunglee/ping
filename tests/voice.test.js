@@ -1,0 +1,157 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { startCall } from '../public/voice.js';
+
+// A stand-in for the browser's WebRTC, so the call's event handling runs without a real connection.
+function setupCall({ apiResponses = {} } = {}) {
+  const sent = [];
+  const channel = {
+    readyState: 'open',
+    send: (event) => sent.push(JSON.parse(event)),
+    close() {},
+  };
+  globalThis.RTCPeerConnection = class {
+    addTrack() {}
+    createDataChannel() {
+      return channel;
+    }
+    async createOffer() {
+      return { sdp: 'offer' };
+    }
+    async setLocalDescription() {}
+    async setRemoteDescription() {}
+    close() {}
+  };
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      mediaDevices: {
+        getUserMedia: async () => ({ getAudioTracks: () => [{}], getTracks: () => [] }),
+        enumerateDevices: async () => [{ kind: 'audiooutput', label: 'Speakerphone', deviceId: 'loud' }, { kind: 'audiooutput', label: 'Default', deviceId: 'default' }],
+      },
+    },
+  });
+  globalThis.fetch = async () => ({ ok: true, text: async () => 'answer' });
+
+  const events = { lines: [], words: [], ended: [], settings: [], apiCalls: [] };
+  const audio = { play: async () => {}, srcObject: null };
+  const call = startCall({
+    callId: 'c1',
+    audio,
+    api: async (path, options) => {
+      events.apiCalls.push({ path, options });
+      if (path.endsWith('/session')) return { clientSecret: 'ek', sdpUrl: 'https://voice.test', maxSeconds: 180 };
+      return apiResponses[path];
+    },
+    onStatus: () => {},
+    onLine: (line) => events.lines.push(line),
+    onWordAdded: (word) => events.words.push(word),
+    onSpeaking: () => {},
+    onSettings: (settings) => events.settings.push(settings),
+    onEnded: (reason) => events.ended.push(reason),
+    onNeedsTap: () => {},
+  });
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  const fire = async (event) => {
+    channel.onmessage({ data: JSON.stringify(event) });
+    await settle();
+  };
+  return { call, sent, events, fire, settle, channel, audio };
+}
+
+async function connected(options) {
+  const context = setupCall(options);
+  await context.settle();
+  await context.settle();
+  return context;
+}
+
+const finishCall = (context) => context.call.hangUp();
+
+test('the transcript keeps the user line in order, even though it arrives late', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'you1' });
+  await context.fire({ type: 'response.output_audio_transcript.delta', item_id: 'ai1', delta: 'そう' });
+  await context.fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'you1', transcript: '元気です' });
+  assert.deepEqual(context.events.lines, [
+    { id: 'you1', from: 'you', text: '' },
+    { id: 'ai1', from: 'contact', delta: 'そう' },
+    { id: 'you1', from: 'you', text: '元気です' },
+  ]);
+});
+
+const toolDone = (name, args, extra = []) => ({
+  type: 'response.done',
+  response: { output: [...extra, { type: 'function_call', name, call_id: 'tool1', arguments: JSON.stringify(args) }] },
+});
+
+test('a word the user asked about is saved and announced, then the contact answers', async (t) => {
+  const saved = { id: 'w1', kana: 'げんき' };
+  const context = await connected({ apiResponses: { '/api/stack/words': { added: true, word: saved } } });
+  t.after(() => finishCall(context));
+  await context.fire(toolDone('add_to_stack', { kana: 'げんき', romaji: 'genki', english: 'well', kanji: '元気' }));
+  assert.deepEqual(context.events.words, [saved]);
+  const types = context.sent.map((event) => event.type);
+  assert.deepEqual(types.slice(-2), ['conversation.item.create', 'response.create']);
+  assert.deepEqual(JSON.parse(context.sent.at(-2).item.output), { ok: true, added: true });
+});
+
+test('a duplicate word is not announced', async (t) => {
+  const context = await connected({ apiResponses: { '/api/stack/words': { added: false, word: null } } });
+  t.after(() => finishCall(context));
+  await context.fire(toolDone('add_to_stack', { kana: 'げんき' }));
+  assert.deepEqual(context.events.words, []);
+});
+
+test('a word saved while already speaking does not make the contact speak twice', async (t) => {
+  const context = await connected({ apiResponses: { '/api/stack/words': { added: true, word: { id: 'w1' } } } });
+  t.after(() => finishCall(context));
+  const before = context.sent.filter((event) => event.type === 'response.create').length;
+  await context.fire(toolDone('add_to_stack', { kana: 'げんき' }, [{ type: 'message' }]));
+  assert.equal(context.sent.filter((event) => event.type === 'response.create').length, before);
+});
+
+test('a speed change mid-sentence waits for the turn to end', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  const update = { settings: { speed: 0.7 }, turnDetection: { silence_duration_ms: 2000 } };
+
+  await context.fire({ type: 'response.created' });
+  context.call.updateVoice(update);
+  assert.ok(!context.sent.some((event) => event.type === 'session.update'));
+
+  await context.fire({ type: 'response.done', response: { output: [] } });
+  const sentUpdate = context.sent.find((event) => event.type === 'session.update');
+  assert.equal(sentUpdate.session.audio.output.speed, 0.7);
+  assert.equal(sentUpdate.session.audio.input.turn_detection.silence_duration_ms, 2000);
+
+  context.sent.length = 0;
+  context.call.updateVoice(update);
+  assert.equal(context.sent[0].type, 'session.update');
+});
+
+test('a tool that fails tells the model, and the call carries on', async (t) => {
+  const warn = console.warn;
+  console.warn = () => {};
+  const context = await connected();
+  t.after(() => {
+    console.warn = warn;
+    finishCall(context);
+  });
+  await context.fire(toolDone('update_settings', { speedChange: 'slower' }));
+  assert.deepEqual(JSON.parse(context.sent.at(-2).item.output), { ok: false });
+  assert.deepEqual(context.events.ended, []);
+});
+
+test('the speaker switch reports when the phone does not allow it', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  assert.equal(await context.call.setSpeaker(true), false);
+
+  const sinks = [];
+  context.audio.setSinkId = async (id) => sinks.push(id);
+  assert.equal(await context.call.setSpeaker(true), true);
+  assert.equal(await context.call.setSpeaker(false), true);
+  assert.deepEqual(sinks, ['loud', 'default']);
+});

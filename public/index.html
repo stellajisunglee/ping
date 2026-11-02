@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Ping</title>
-    <meta name="description" content="Mina phones you once a day for a quick chat in Japanese." />
+    <meta name="description" content="An app that calls you to practice speaking Japanese." />
     <meta name="theme-color" content="#f7f1e8" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#1f1a17" media="(prefers-color-scheme: dark)" />
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -17,9 +17,9 @@
   </head>
   <body>
     <main id="screen-install" class="screen centered" hidden>
-      <div class="avatar" aria-hidden="true">ミ</div>
+      <div class="avatar" aria-hidden="true">ピ</div>
       <h1>Add Ping to your Home Screen</h1>
-      <p>iPhones only allow notifications from apps on the Home Screen, and Mina's calls arrive as notifications.</p>
+      <p>iPhones only allow notifications from apps on the Home Screen, and Ping's calls arrive as notifications.</p>
       <ol class="steps">
         <li>Tap the <strong>Share</strong> button in Safari</li>
         <li>Choose <strong>Add to Home Screen</strong></li>
@@ -28,88 +28,321 @@
     </main>
 
     <main id="screen-join" class="screen centered" hidden>
-      <div class="avatar" aria-hidden="true">ミ</div>
+      <div class="avatar" aria-hidden="true">ピ</div>
       <h1>Ping</h1>
-      <p>Mina phones you once a day for a quick chat in Japanese, just like a friend would.</p>
+      <p>An app that calls you once a day to practice speaking Japanese, just like a friend would.</p>
       <form id="join-form" class="stack">
         <label for="invite-code">Invite code</label>
         <input id="invite-code" autocomplete="off" autocapitalize="off" spellcheck="false" required />
         <button class="primary" type="submit">Join</button>
         <p id="join-error" class="error" role="alert" hidden></p>
       </form>
-      <p class="fine">Mina is an AI. During a call, your voice goes to OpenAI so she can reply. Ping doesn't record or keep your calls.</p>
+      <p class="fine">Ping is an AI. During a call, your voice goes to OpenAI so Ping can reply. Calls aren't recorded.</p>
     </main>
 
     <main id="screen-enable" class="screen centered" hidden>
-      <div class="avatar" aria-hidden="true">ミ</div>
-      <h1>So Mina can reach you</h1>
-      <p>Notifications let her call you. The microphone lets you talk back.</p>
+      <div class="avatar" aria-hidden="true">ピ</div>
+      <h1>So Ping can reach you</h1>
+      <p>Notifications let Ping call you. The microphone lets you talk back.</p>
       <button id="enable-button" class="primary" type="button">Turn on notifications and microphone</button>
       <p id="enable-error" class="error" role="alert" hidden></p>
     </main>
 
-    <main id="screen-home" class="screen" hidden>
-      <header class="home-header">
-        <div class="avatar small" aria-hidden="true">ミ</div>
-        <div>
-          <h1>Mina</h1>
-          <p id="home-status" class="muted"></p>
-        </div>
-      </header>
-
-      <button id="call-button" class="primary call" type="button">Call Mina</button>
+    <main id="screen-home" class="screen tabbed" hidden>
+      <h1>Home</h1>
+      <p id="home-status" class="muted"></p>
       <p id="home-notice" class="notice" role="status" hidden></p>
-
-      <section id="messages-section" aria-labelledby="messages-title" hidden>
-        <h2 id="messages-title">Voice messages</h2>
-        <ul id="messages-list" class="messages"></ul>
+      <div class="stats">
+        <div class="stat">
+          <strong id="streak-current" class="stat-value">0</strong>
+          <span class="muted">Streak</span>
+        </div>
+        <div class="stat">
+          <strong id="streak-best" class="stat-value">0</strong>
+          <span class="muted">All-time streak</span>
+        </div>
+      </div>
+      <p id="home-clear" class="notice warning" hidden></p>
+      <section id="voicemail-section" aria-labelledby="voicemail-title" hidden>
+        <h2 id="voicemail-title">Voicemail</h2>
+        <div id="voicemail"></div>
       </section>
+      <button class="secondary wide" type="button" data-go="stack">My Stack</button>
+    </main>
 
-      <section aria-labelledby="settings-title">
-        <h2 id="settings-title">Settings</h2>
-        <p class="muted">On a call, you can just ask: "can you slow down?" or "give me more time to answer."</p>
-        <div class="setting">
-          <label for="speed-input">Mina's speed <output id="speed-output" for="speed-input"></output></label>
-          <input id="speed-input" type="range" min="0.6" max="1.5" step="0.05" />
+    <main id="screen-stack" class="screen tabbed" hidden>
+      <button class="back" type="button" data-go="home">‹ Home</button>
+      <h1>My Stack</h1>
+      <p id="stack-clear" class="notice warning" hidden></p>
+      <div class="tile-row">
+        <button class="tile" type="button" data-go="words"><strong>Words</strong><span id="stack-words-count" class="muted"></span></button>
+        <button class="tile" type="button" data-go="sentences"><strong>Sentences</strong><span id="stack-sentences-count" class="muted"></span></button>
+      </div>
+    </main>
+
+    <main id="screen-words" class="screen tabbed" hidden>
+      <button class="back" type="button" data-go="stack">‹ My Stack</button>
+      <h1>Words</h1>
+      <p id="words-empty" class="muted">Words you don't understand on a call will show up here. Just ask what a word means.</p>
+      <ul id="words-list" class="plain-list"></ul>
+    </main>
+
+    <main id="screen-word" class="screen tabbed" hidden>
+      <button class="back" type="button" data-go="words">‹ Words</button>
+      <div class="word-card">
+        <p id="word-kanji" class="word-kanji" lang="ja"></p>
+        <p id="word-kana" class="word-kana" lang="ja"></p>
+        <p id="word-romaji" class="muted"></p>
+        <p id="word-english" class="word-english"></p>
+      </div>
+      <p id="word-error" class="error" role="alert" hidden></p>
+      <button id="word-examples-button" class="secondary wide" type="button">Show example sentences</button>
+      <ul id="word-examples" class="plain-list examples"></ul>
+      <button id="word-remove-button" class="text-danger wide" type="button">Remove from stack</button>
+      <div id="word-upgrade" class="notice upgrade">
+        <p>Subscribers can see example sentences and remove words.</p>
+        <button class="secondary" type="button" data-go="plan">Upgrade Plan</button>
+      </div>
+    </main>
+
+    <main id="screen-sentences" class="screen tabbed" hidden>
+      <button class="back" type="button" data-go="stack">‹ My Stack</button>
+      <h1>Sentences</h1>
+      <p id="sentences-hint" class="muted">Swipe left to remove a sentence.</p>
+      <p id="sentences-empty" class="muted">Open a word, show its example sentences, and save the ones you like.</p>
+      <p id="sentences-error" class="error" role="alert" hidden></p>
+      <ul id="sentences-list" class="plain-list"></ul>
+      <div id="sentences-upgrade" class="notice upgrade">
+        <p>Saving example sentences is part of a subscription.</p>
+        <button class="secondary" type="button" data-go="plan">Upgrade Plan</button>
+      </div>
+    </main>
+
+    <main id="screen-contacts" class="screen tabbed" hidden>
+      <h1>Contacts</h1>
+      <p id="contacts-error" class="error" role="alert" hidden></p>
+      <ul id="contacts-list" class="plain-list contacts"></ul>
+      <div id="contacts-upgrade" class="notice upgrade">
+        <p>Subscribers can choose other friends to call them.</p>
+        <button class="secondary" type="button" data-go="plan">Upgrade Plan</button>
+      </div>
+      <div id="contact-create-upgrade" class="notice upgrade" hidden>
+        <p>The Higher Tier plan lets you create your own contact.</p>
+        <button class="secondary" type="button" data-go="plan">Manage Plan</button>
+      </div>
+      <form id="contact-create" class="stack full" hidden>
+        <h2>Create your own contact</h2>
+        <label for="contact-name">Name</label>
+        <input id="contact-name" maxlength="30" required />
+        <label for="contact-topic">What do they talk about?</label>
+        <input id="contact-topic" maxlength="200" placeholder="Cooking, travel, work..." required />
+        <label for="contact-voice">Voice</label>
+        <select id="contact-voice"></select>
+        <button class="primary" type="submit">Create contact</button>
+      </form>
+    </main>
+
+    <main id="screen-settings" class="screen tabbed" hidden>
+      <h1>Settings</h1>
+      <div class="menu">
+        <button class="row-button" type="button" data-go="account">Manage Account</button>
+        <button class="row-button" type="button" data-go="manage-calls">Manage Calls</button>
+        <button id="plan-button" class="row-button" type="button">Upgrade Plan</button>
+        <button class="row-button" type="button" data-go="privacy">Privacy Policy</button>
+        <button class="row-button" type="button" data-go="terms">Terms of Service</button>
+        <button class="row-button" type="button" data-go="feedback">Feedback</button>
+      </div>
+    </main>
+
+    <main id="screen-account" class="screen tabbed" hidden>
+      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <h1>Manage Account</h1>
+      <p class="muted">Your account lives on this phone, with no email or password yet. Deleting it removes your streak, stack, contacts and saved conversations.</p>
+      <p id="account-error" class="error" role="alert" hidden></p>
+      <button id="delete-button" class="text-danger wide" type="button">Delete my account</button>
+    </main>
+
+    <main id="screen-manage-calls" class="screen tabbed" hidden>
+      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <h1>Manage Calls</h1>
+      <p class="muted">On a call, you can also just ask: "can you slow down?" or "give me more time to answer."</p>
+      <p id="calls-error" class="error" role="alert" hidden></p>
+      <div class="setting">
+        <label for="language-input">Target language</label>
+        <select id="language-input"><option value="ja">Japanese</option></select>
+      </div>
+      <div class="setting">
+        <label for="speed-input">Voice speed <output id="speed-output" for="speed-input"></output></label>
+        <input id="speed-input" type="range" min="0.6" max="1.5" step="0.05" />
+        <p class="muted">Slower speeds also give you longer pauses before your turn ends.</p>
+      </div>
+      <div class="setting">
+        <span class="label">Call frequency</span>
+        <div id="frequency-choices" class="choices"></div>
+        <div id="custom-days" class="choices days" hidden></div>
+        <p id="custom-days-hint" class="muted" hidden>Pick at least one day, or you won't get calls.</p>
+      </div>
+      <div class="setting">
+        <span class="label">Call hours</span>
+        <div class="hours">
+          <label for="start-hour-input" class="visually-hidden">From</label>
+          <select id="start-hour-input"></select>
+          <span class="muted">to</span>
+          <label for="end-hour-input" class="visually-hidden">To</label>
+          <select id="end-hour-input"></select>
         </div>
-        <div class="setting">
-          <label for="thinking-input">Time to answer</label>
-          <select id="thinking-input">
-            <option value="short">Short</option>
-            <option value="normal">Normal</option>
-            <option value="long">Long</option>
-          </select>
-        </div>
-        <div class="setting row">
-          <label for="calls-input">Daily calls from Mina</label>
-          <input id="calls-input" type="checkbox" role="switch" />
-        </div>
-        <button id="test-ring-button" class="secondary" type="button">Ring my phone in 5 seconds</button>
-        <button id="delete-button" class="text-danger" type="button">Delete my account</button>
-      </section>
+      </div>
+      <div class="setting">
+        <label for="proficiency-input">Japanese level</label>
+        <select id="proficiency-input">
+          <option value="beginner">Beginner</option>
+          <option value="intermediate">Intermediate</option>
+          <option value="advanced">Advanced</option>
+        </select>
+      </div>
+      <div class="setting">
+        <label for="formality-input">Speech style</label>
+        <select id="formality-input">
+          <option value="formal">Formal</option>
+          <option value="casual">Casual</option>
+        </select>
+      </div>
+      <div class="setting">
+        <label for="thinking-input">Time to answer</label>
+        <select id="thinking-input">
+          <option value="short">Short</option>
+          <option value="normal">Normal</option>
+          <option value="long">Long</option>
+        </select>
+      </div>
+      <div class="setting row">
+        <label for="calls-input">Calls on</label>
+        <input id="calls-input" type="checkbox" role="switch" />
+      </div>
+      <button id="test-ring-button" class="secondary wide" type="button">Ring my phone in 5 seconds</button>
+      <p id="test-ring-status" class="muted" role="status"></p>
+    </main>
+
+    <main id="screen-plan" class="screen tabbed" hidden>
+      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <h1 id="plan-title">Upgrade Plan</h1>
+      <p class="notice">Test mode: real payments aren't connected, so you can switch freely and nothing is charged.</p>
+      <p id="plan-clear" class="notice warning" hidden></p>
+      <div id="plan-choices" class="plan-choices"></div>
+      <p class="muted">If you cancel, words, sentences and conversations saved during your subscription clear after 30 days.</p>
+    </main>
+
+    <main id="screen-privacy" class="screen tabbed prose" hidden>
+      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <h1>Privacy Policy</h1>
+      <p class="notice warning">Draft for testing. It needs a legal review before launch.</p>
+      <h2>Your voice</h2>
+      <p>During a call, your voice goes directly from your phone to OpenAI so the AI can reply. Ping doesn't record audio.</p>
+      <h2>What Ping stores</h2>
+      <p>Your time zone, settings, plan, streak, notification details, voicemails, recent call times, your word and sentence stacks, and your contacts.</p>
+      <h2>Conversations</h2>
+      <p>On a paid plan, the text of your recent calls is stored to personalize future calls. On the free plan, conversation text isn't stored.</p>
+      <h2>Cancelling and deleting</h2>
+      <p>If you cancel, words, sentences and conversations saved during your subscription clear after 30 days. Deleting your account in Manage Account removes your account data right away.</p>
+      <h2>Feedback</h2>
+      <p>Anything you send through Feedback is stored without your account attached.</p>
+    </main>
+
+    <main id="screen-terms" class="screen tabbed prose" hidden>
+      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <h1>Terms of Service</h1>
+      <p class="notice warning">Draft for testing. It needs a legal review before launch.</p>
+      <h2>Prototype</h2>
+      <p>Ping is an early prototype offered by invitation. It may change, stop working, or lose data.</p>
+      <h2>AI conversations</h2>
+      <p>Everyone you talk to on Ping is an AI. It can make mistakes, including about Japanese, so don't rely on it for anything important.</p>
+      <h2>Using Ping</h2>
+      <p>Please don't misuse the service or try to get around its limits.</p>
+      <h2>Plans</h2>
+      <p>Paid plans are in test mode, and nothing is charged.</p>
+    </main>
+
+    <main id="screen-feedback" class="screen tabbed" hidden>
+      <button class="back" type="button" data-go="settings">‹ Settings</button>
+      <h1>Feedback</h1>
+      <form id="feedback-form" class="stack full">
+        <label for="feedback-input">What's working, and what isn't?</label>
+        <textarea id="feedback-input" rows="6" maxlength="2000" required></textarea>
+        <button class="primary" type="submit">Send</button>
+        <p id="feedback-error" class="error" role="alert" hidden></p>
+        <p id="feedback-sent" role="status" hidden>Thanks, that's been sent.</p>
+      </form>
     </main>
 
     <main id="screen-ringing" class="screen centered phone" hidden>
       <p class="muted">Incoming call</p>
-      <div class="avatar large ringing" aria-hidden="true">ミ</div>
-      <h1>Mina</h1>
+      <div id="ringing-avatar" class="avatar large ringing" aria-hidden="true">ピ</div>
+      <h1 id="ringing-name">Ping</h1>
       <div class="call-actions">
         <button id="decline-button" class="round decline" type="button">Decline</button>
         <button id="answer-button" class="round answer" type="button">Answer</button>
       </div>
     </main>
 
-    <main id="screen-call" class="screen centered phone" hidden>
-      <p id="call-status" class="muted" role="status"></p>
-      <div id="call-avatar" class="avatar large" aria-hidden="true">ミ</div>
-      <h1>Mina</h1>
-      <p id="call-caption" class="caption" lang="ja" aria-live="polite"></p>
-      <button id="tap-to-hear" class="primary" type="button" hidden>Tap to hear Mina</button>
-      <div class="call-actions">
-        <button id="mute-button" class="round neutral" type="button" aria-pressed="false">Mute</button>
-        <button id="hangup-button" class="round decline" type="button">End</button>
+    <main id="screen-call" class="screen phone call-screen" hidden>
+      <header class="call-header">
+        <div id="call-avatar" class="avatar small" aria-hidden="true">ピ</div>
+        <div>
+          <h1 id="call-name">Ping</h1>
+          <p id="call-status" class="muted" role="status"></p>
+        </div>
+      </header>
+      <div id="call-transcript" class="transcript" aria-live="polite"></div>
+      <button id="tap-to-hear" class="primary" type="button" hidden>Tap to hear Ping</button>
+      <p id="call-hint" class="call-hint" role="status" hidden></p>
+      <div id="call-speed-popup" class="speed-popup" hidden>
+        <label for="call-speed-input">Speaking speed <output id="call-speed-output" for="call-speed-input"></output></label>
+        <input id="call-speed-input" type="range" min="0.6" max="1.5" step="0.05" />
+        <p>Slower speeds wait longer through your pauses.</p>
+        <button id="call-speed-close" class="secondary" type="button">Done</button>
+      </div>
+      <div class="call-controls">
+        <div class="control">
+          <button id="speaker-button" class="circle" type="button" aria-pressed="false" aria-labelledby="speaker-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Z" /><path class="stroke" d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11" /></svg>
+          </button>
+          <span id="speaker-label">Speaker</span>
+        </div>
+        <div class="control">
+          <button id="mute-button" class="circle" type="button" aria-pressed="false" aria-labelledby="mute-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path class="stroke" d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></svg>
+          </button>
+          <span id="mute-label">Mute</span>
+        </div>
+        <div class="control">
+          <button id="speed-button" class="circle" type="button" aria-pressed="false" aria-labelledby="speed-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path class="stroke" d="M4.5 17a9 9 0 1 1 15 0M12 14l4-5" /><circle cx="12" cy="14" r="1.6" /></svg>
+          </button>
+          <span id="speed-label">Speed</span>
+        </div>
+        <div class="control">
+          <button id="hangup-button" class="circle decline" type="button" aria-labelledby="hangup-label">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 14.5c5-4.6 13-4.6 18 0l-2.2 3-3.8-1.6v-2.6a10 10 0 0 0-6 0v2.6l-3.8 1.6-2.2-3Z" /></svg>
+          </button>
+          <span id="hangup-label">End call</span>
+        </div>
       </div>
     </main>
+
+    <nav id="hero" class="hero" aria-label="Main" hidden>
+      <button type="button" data-go="home">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path class="stroke" d="M4 11l8-7 8 7v9h-5v-6H9v6H4v-9Z" /></svg>
+        Home
+      </button>
+      <button type="button" data-go="contacts">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle class="stroke" cx="12" cy="8" r="4" /><path class="stroke" d="M4 21c1-5 4-7 8-7s7 2 8 7" /></svg>
+        Contacts
+      </button>
+      <button type="button" data-go="settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path class="stroke" d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle class="stroke" cx="16" cy="7" r="2" /><circle class="stroke" cx="8" cy="17" r="2" /></svg>
+        Settings
+      </button>
+    </nav>
 
     <audio id="remote-audio" autoplay playsinline></audio>
   </body>

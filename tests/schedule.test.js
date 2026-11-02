@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isValidTimeZone, localDay, localParts, nextCallTime } from '../server/schedule.js';
+import { isCallDay, isValidTimeZone, localDay, localDayNumber, localParts, nextCallTime } from '../server/schedule.js';
 
 const hourIn = (ms, timeZone) => localParts(ms, timeZone).hour;
 
@@ -53,4 +53,46 @@ test('bad time zones are rejected', () => {
   assert.equal(isValidTimeZone('Not/AZone'), false);
   assert.equal(isValidTimeZone(''), false);
   assert.equal(isValidTimeZone(42), false);
+});
+
+const NOON_SATURDAY_IN_TOKYO = Date.UTC(2026, 9, 31, 3);
+const weekdayIn = (ms, timeZone) => (localDayNumber(ms, timeZone) + 4) % 7;
+
+test('calls stay inside the hours the user set', () => {
+  const settings = { callStartHour: 7, callEndHour: 9 };
+  for (const value of [0, 0.5, 0.999]) {
+    const hour = hourIn(nextCallTime({ now: NOON_SATURDAY_IN_TOKYO, timeZone: 'Asia/Tokyo', random: () => value, settings }), 'Asia/Tokyo');
+    assert.ok(hour >= 7 && hour < 9, `got ${hour}`);
+  }
+});
+
+test('hours can run to midnight', () => {
+  const at = nextCallTime({ now: NOON_SATURDAY_IN_TOKYO, timeZone: 'Asia/Tokyo', random: () => 0.999, settings: { callStartHour: 22, callEndHour: 24 } });
+  assert.equal(hourIn(at, 'Asia/Tokyo'), 23);
+  assert.equal(localDay(at, 'Asia/Tokyo'), '2026-10-31');
+});
+
+test('weekdays only skips the weekend', () => {
+  const at = nextCallTime({ now: NOON_SATURDAY_IN_TOKYO, timeZone: 'Asia/Tokyo', random: () => 0.5, settings: { frequency: 'weekdays' } });
+  assert.equal(localDay(at, 'Asia/Tokyo'), '2026-11-02');
+});
+
+test('weekends only skips to Saturday', () => {
+  const at = nextCallTime({ now: NOON_SATURDAY_IN_TOKYO, timeZone: 'Asia/Tokyo', skipToday: true, random: () => 0.5, settings: { frequency: 'weekends' } });
+  assert.equal(localDay(at, 'Asia/Tokyo'), '2026-11-01');
+  const afterSunday = nextCallTime({ now: at, timeZone: 'Asia/Tokyo', skipToday: true, random: () => 0.5, settings: { frequency: 'weekends' } });
+  assert.equal(localDay(afterSunday, 'Asia/Tokyo'), '2026-11-07');
+});
+
+test('custom days are followed, and no days means no call', () => {
+  const at = nextCallTime({ now: NOON_SATURDAY_IN_TOKYO, timeZone: 'Asia/Tokyo', skipToday: true, random: () => 0.5, settings: { frequency: 'custom', customDays: [3] } });
+  assert.equal(weekdayIn(at, 'Asia/Tokyo'), 3);
+  assert.equal(nextCallTime({ now: NOON_SATURDAY_IN_TOKYO, timeZone: 'Asia/Tokyo', settings: { frequency: 'custom', customDays: [] } }), null);
+});
+
+test('every other day alternates, across a month end', () => {
+  const start = localDayNumber(NOON_SATURDAY_IN_TOKYO, 'Asia/Tokyo');
+  const settings = { frequency: 'every-other-day' };
+  assert.notEqual(isCallDay(start, settings), isCallDay(start + 1, settings));
+  assert.equal(isCallDay(start, settings), isCallDay(start + 2, settings));
 });
