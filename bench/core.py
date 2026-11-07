@@ -26,7 +26,9 @@ LABELS = {"t": "thinking", "d": "done"}
 
 MIN_PAUSE_S = 0.3  # shorter gaps are just the spaces between words
 FRAME_S = 0.02
-SILENCE_BELOW_SPEECH_DB = 30  # a frame this much quieter than the clip's loud speech counts as silence
+# A frame counts as silence below this point between the clip's background noise (0) and its speech (1).
+# Relative to each clip, so quiet recordings and noisy rooms work the same way.
+SILENCE_SHARE = 1 / 3
 # Silence added after every clip, longer than any detector's own timeout, so a final pause can always be caught.
 END_PAD_S = 9.0
 # An end-of-turn event can arrive just after the user starts talking again. It still cuts them off.
@@ -49,8 +51,8 @@ def find_pauses(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> list[tuple
         return []
     rms = np.sqrt(np.mean(audio[: frames * frame].reshape(frames, frame) ** 2, axis=1))
     loudness = 20 * np.log10(rms + 1e-10)
-    speech_level = np.percentile(loudness, 95)
-    silent = loudness < speech_level - SILENCE_BELOW_SPEECH_DB
+    noise_level, speech_level = np.percentile(loudness, [10, 95])
+    silent = loudness < noise_level + SILENCE_SHARE * (speech_level - noise_level)
 
     pauses = []
     heard_speech = False
@@ -71,6 +73,12 @@ def find_pauses(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> list[tuple
         for start, end in pauses
         if (end - start) * FRAME_S >= MIN_PAUSE_S
     ]
+
+
+def in_turns(groups: list[list]) -> list:
+    """The first item of every group, then the second of every group, and so on."""
+    longest = max((len(group) for group in groups), default=0)
+    return [group[index] for index in range(longest) for group in groups if index < len(group)]
 
 
 def is_final(pause: Pause, clip_seconds: float) -> bool:

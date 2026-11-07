@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from core import END_PAD_S, SAMPLE_RATE, Pause, append_label, drop_labels, find_pauses, flux_decisions, next_free_clip_number, read_labels, release_within, silence_decisions, summarize
+from core import END_PAD_S, SAMPLE_RATE, Pause, append_label, drop_labels, find_pauses, flux_decisions, in_turns, next_free_clip_number, read_labels, release_within, silence_decisions, summarize
 
 
 def tone(seconds: float) -> np.ndarray:
@@ -33,6 +33,14 @@ class FindPauses(unittest.TestCase):
         noise = np.random.default_rng(0).normal(0, 0.001, int(0.8 * SAMPLE_RATE)).astype(np.float32)
         audio = np.concatenate([tone(1.0), noise, tone(1.0)])
         self.assertEqual(len(find_pauses(audio)), 1)
+
+    def test_a_quiet_recording_still_has_its_pauses_found(self):
+        # Like real clips: speech around -38 dB, a room around -65 dB, only about 27 dB apart.
+        rng = np.random.default_rng(1)
+        room = lambda seconds: rng.normal(0, 0.0006, int(seconds * SAMPLE_RATE)).astype(np.float32)
+        speech = lambda seconds: tone(seconds) * 0.04 + room(seconds)
+        audio = np.concatenate([room(0.5), speech(1.5), room(0.7), speech(1.5), room(0.5), speech(1.0), room(1.0)])
+        self.assertEqual(len(find_pauses(audio)), 3)
 
     def test_silent_clip_has_no_pauses(self):
         self.assertEqual(find_pauses(quiet(2.0)), [])
@@ -101,6 +109,12 @@ class ClipFiles(unittest.TestCase):
             self.assertEqual(drop_labels("clip_001.wav", path), 2)
             self.assertEqual([pause.clip for pause in read_labels(path)], ["clip_002.wav"])
             self.assertEqual(drop_labels("clip_009.wav", path), 0)
+
+
+class LabelingOrder(unittest.TestCase):
+    def test_pauses_come_from_each_clip_in_turn(self):
+        self.assertEqual(in_turns([["a1", "a2", "a3"], ["b1"], [], ["c1", "c2"]]), ["a1", "b1", "c1", "a2", "c2", "a3"])
+        self.assertEqual(in_turns([]), [])
 
 
 class ReleasingTheMicrophone(unittest.TestCase):
