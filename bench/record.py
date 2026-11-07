@@ -4,6 +4,9 @@ Press Enter to start a clip and Enter again to stop. Type q and Enter to finish.
 
 from __future__ import annotations
 
+import os
+import sys
+
 import numpy as np
 import sounddevice
 import soundfile
@@ -21,7 +24,11 @@ def record_clip(path) -> tuple[float, bool]:
     chunks = []
     stream = sounddevice.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", callback=lambda data, *_: chunks.append(data.copy()))
     stream.start()
-    input("  Recording. Answer, then stay quiet for a second, then press Enter to stop.")
+    try:
+        input("  Recording. Answer, then stay quiet for a second, then press Enter to stop.")
+    except KeyboardInterrupt:
+        release_within(lambda: stop_stream(stream))
+        raise
     # Save before letting go of the microphone, so a stuck microphone can't lose the recording.
     captured = list(chunks)
     audio = np.concatenate(captured)[:, 0] if captured else np.zeros(0, dtype=np.float32)
@@ -39,11 +46,18 @@ def main() -> None:
         print(f"  Saved {path.name} ({seconds:.1f} s)")
         if not released:
             print("  The microphone didn't let go, which can happen with a Bluetooth headset. Your clip is saved.")
-            print("  Quit with Ctrl+C and run record.py again to carry on, ideally with the Mac's own microphone.")
+            print("  Run record.py again to carry on, ideally with the Mac's own microphone.")
             break
         if dropped := drop_labels(path.name):
             print(f"  Removed {dropped} old labels for {path.name}, since it's a new recording. Label it again with label.py.")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (KeyboardInterrupt, EOFError):
+        print("\nStopped. A clip still being recorded wasn't saved.")
+    # The audio library's own shutdown can hang on a Mac, which is what stopped Ctrl+C from working.
+    # Every finished clip is already saved, so leave without it.
+    sys.stdout.flush()
+    os._exit(0)
