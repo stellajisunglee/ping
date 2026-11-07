@@ -157,14 +157,23 @@ const TOOLS = [
   },
 ];
 
-export const turnDetection = (thinkingTime, speed) => ({
-  type: 'server_vad',
-  silence_duration_ms: silenceMs(thinkingTime, speed),
-  create_response: true,
-  interrupt_response: true,
-});
+// How Ping decides the user has finished their turn: after enough silence, or when OpenAI
+// judges from the words said so far that they're done.
+export const TURN_MODES = ['silence', 'semantic'];
 
-export function buildSession({ model, voice, question, settings, localHour, calledBack, contact = PING, memories = [] }) {
+// Semantic mode has no silence length to tune, only how eager the model is to reply.
+// Learners pause to find words, so even "short" stops at medium, and "normal" and "long"
+// both get low, the most patient level, which waits up to 8 seconds.
+const SEMANTIC_EAGERNESS = { short: 'medium', normal: 'low', long: 'low' };
+
+export function turnDetection({ thinkingTime, speed, turnMode = 'silence' }) {
+  if (turnMode === 'semantic') {
+    return { type: 'semantic_vad', eagerness: SEMANTIC_EAGERNESS[thinkingTime] ?? 'low', create_response: true, interrupt_response: true };
+  }
+  return { type: 'server_vad', silence_duration_ms: silenceMs(thinkingTime, speed), create_response: true, interrupt_response: true };
+}
+
+export function buildSession({ model, voice, question, settings, localHour, calledBack, contact = PING, memories = [], turnMode = 'silence' }) {
   return {
     type: 'realtime',
     model,
@@ -174,7 +183,7 @@ export function buildSession({ model, voice, question, settings, localHour, call
     audio: {
       input: {
         transcription: { model: TRANSCRIPTION_MODEL, languages: ['ja', 'en'] },
-        turn_detection: turnDetection(settings.thinkingTime, settings.speed),
+        turn_detection: turnDetection({ thinkingTime: settings.thinkingTime, speed: settings.speed, turnMode }),
       },
       output: { voice: contact.voice ?? voice, speed: settings.speed },
     },

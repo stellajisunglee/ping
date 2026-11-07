@@ -338,3 +338,34 @@ test('turn metrics must be the known numbers, for the user\'s own call', async (
   assert.equal((await request('/api/calls/not-a-call/metrics', { method: 'POST', token: owner, body: METRICS })).status, 404);
   assert.equal((await request(path, { method: 'POST', body: METRICS })).status, 401);
 });
+
+test('only admins can change the turn mode, and it reaches the call, mid-call changes and metrics', async () => {
+  const signUp = async (inviteCode) => (await request('/api/register', { method: 'POST', body: { inviteCode, timeZone: 'Asia/Tokyo' } })).data;
+  const beta = await signUp(BETA_CODE);
+  assert.equal(beta.turnMode, 'silence');
+  assert.equal((await request('/api/turn-mode', { method: 'PUT', token: beta.token, body: { turnMode: 'semantic' } })).status, 403);
+  assert.equal((await request('/api/me', { token: beta.token })).data.turnMode, 'silence');
+
+  const { token } = await signUp(INVITE_CODE);
+  assert.equal((await request('/api/turn-mode', { method: 'PUT', token, body: { turnMode: 'psychic' } })).status, 400);
+  const { status, data } = await request('/api/turn-mode', { method: 'PUT', token, body: { turnMode: 'semantic' } });
+  assert.equal(status, 200);
+  assert.equal(data.turnMode, 'semantic');
+
+  const { data: call } = await request('/api/calls', { method: 'POST', token });
+  await request(`/api/calls/${call.id}/session`, { method: 'POST', token });
+  assert.deepEqual(minted.at(-1).session.audio.input.turn_detection, { type: 'semantic_vad', eagerness: 'low', create_response: true, interrupt_response: true });
+
+  const { data: changed } = await request('/api/settings', { method: 'PATCH', token, body: { thinkingTime: 'short' } });
+  assert.equal(changed.turnDetection.type, 'semantic_vad');
+  assert.equal(changed.turnDetection.eagerness, 'medium');
+
+  const log = console.log;
+  console.log = () => {};
+  try {
+    await request(`/api/calls/${call.id}/metrics`, { method: 'POST', token, body: METRICS });
+  } finally {
+    console.log = log;
+  }
+  assert.equal(engine.store.calls[call.id].turnMetrics.turnMode, 'semantic');
+});

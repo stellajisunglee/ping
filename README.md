@@ -65,6 +65,7 @@ The invite code someone joins with decides which version they get. It can't be c
 | Invite code | `ADMIN_INVITE_CODE` | `BETA_INVITE_CODE` |
 | Plan | Can switch freely | Stays on Free |
 | "Ring my phone in 5 seconds" | Yes | No |
+| Turn detection | Can switch between silence and semantic, on the plan page | Silence, the default |
 
 The server enforces both limits. Accounts created before there were two codes are admins.
 
@@ -102,6 +103,9 @@ Other rules:
 | Cancellation window | 30 days | `CANCEL_WINDOW_MS` in `server/calls.js` |
 | Example lookups per user per day | 50 | `MAX_LOOKUPS_PER_DAY` in `server/calls.js` |
 | Extra pause time at slow speeds | | `SLOW_SPEED_PATIENCE` in `server/settings.js` |
+| `turnMode`: how Ping decides the user has finished talking | `silence` (OpenAI's `server_vad`) for everyone. Admins can switch their own to `semantic` (`semantic_vad`) | `TURN_MODES` and `SEMANTIC_EAGERNESS` in `server/tutor.js` |
+
+In semantic mode, "Time to answer" sets how eager OpenAI is to reply instead of a silence length. `normal` and `long` currently behave the same there, because `low` is the lowest eagerness level.
 | Default speed and allowed range | 0.9, from 0.6 to 1.5 | `server/settings.js` |
 | Questions and how contacts behave | | `server/tutor.js` |
 | Contacts and voices | | `server/contacts.js` |

@@ -126,6 +126,7 @@ export function createApp({ engine, openai, config }) {
     return {
       role: user.role,
       plan: user.plan,
+      turnMode: user.turnMode,
       clearAt: user.clearAt,
       settings: user.settings,
       hasSubscription: Boolean(user.subscription),
@@ -193,7 +194,7 @@ export function createApp({ engine, openai, config }) {
     if (method === 'PATCH' && pathname === '/api/settings') {
       const body = await readJson(req);
       const settings = engine.updateSettings(user, body);
-      return json(res, 200, { settings, turnDetection: turnDetection(settings.thinkingTime, settings.speed) });
+      return json(res, 200, { settings, turnDetection: turnDetection({ thinkingTime: settings.thinkingTime, speed: settings.speed, turnMode: user.turnMode }) });
     }
 
     if (method === 'POST' && pathname === '/api/test-ring') {
@@ -212,6 +213,13 @@ export function createApp({ engine, openai, config }) {
       if (user.role !== 'admin') return json(res, 403, { error: "Plans can't be changed during the beta." });
       const body = await readJson(req);
       if (!engine.setPlan(user, body.plan)) return json(res, 400, { error: 'That plan was not recognized.' });
+      return json(res, 200, publicUser(user));
+    }
+
+    if (method === 'PUT' && pathname === '/api/turn-mode') {
+      if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
+      const body = await readJson(req);
+      if (!engine.setTurnMode(user, body.turnMode)) return json(res, 400, { error: 'That turn mode was not recognized.' });
       return json(res, 200, publicUser(user));
     }
 

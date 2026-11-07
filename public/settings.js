@@ -5,6 +5,7 @@ import { $, api, clearWarning, el, go, isAdmin, onShow, setError, show, state, w
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FREQUENCY_BUTTONS = { daily: 'Daily', 'every-other-day': 'Every other day', weekdays: 'Weekdays only', weekends: 'Weekends only', custom: 'Custom' };
 const PLAN_NAMES = { free: 'Free', premium: 'Premium', platinum: 'Platinum' };
+const TURN_MODE_NAMES = { silence: 'Silence', semantic: 'Semantic' };
 const PLAN_DETAILS = {
   free: 'Ping as your contact, and your latest 25 words.',
   premium: 'A lifetime word bank, removing words, example sentences, and calls that remember past conversations.',
@@ -92,6 +93,25 @@ function renderPlan() {
       });
       return button;
     }),
+  );
+  renderTurnMode();
+}
+
+// Admins only: which turn detector their own calls use, to compare the two.
+function renderTurnMode() {
+  $('turn-mode-section').hidden = !isAdmin();
+  if (!isAdmin()) return;
+  $('turn-mode-choices').replaceChildren(
+    ...Object.entries(TURN_MODE_NAMES).map(([turnMode, name]) =>
+      choiceButton(name, state.me.turnMode === turnMode, async () => {
+        try {
+          state.me = await api('/api/turn-mode', { method: 'PUT', body: { turnMode } });
+          renderTurnMode();
+        } catch (error) {
+          setError('plan-clear', error.message);
+        }
+      }),
+    ),
   );
 }
 

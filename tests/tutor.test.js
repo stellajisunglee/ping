@@ -103,7 +103,7 @@ test('speed steps stay inside the allowed range', () => {
 test('unknown settings changes are ignored', () => {
   assert.deepEqual(applySettings(DEFAULT_SETTINGS, { speedChange: 'warp', thinkingTime: 'forever', callsEnabled: 'no', admin: true }), DEFAULT_SETTINGS);
   assert.equal(applySettings(DEFAULT_SETTINGS, { callsEnabled: false }).callsEnabled, false);
-  assert.equal(turnDetection('nonsense').silence_duration_ms, SILENCE_MS.normal);
+  assert.equal(turnDetection({ thinkingTime: 'nonsense' }).silence_duration_ms, SILENCE_MS.normal);
 });
 
 test('slower speeds are more patient with gaps in speech', () => {
@@ -111,7 +111,7 @@ test('slower speeds are more patient with gaps in speech', () => {
   assert.equal(silenceMs('normal', 1.5), SILENCE_MS.normal);
   assert.ok(silenceMs('normal', 0.75) > silenceMs('normal', 0.9));
   assert.ok(silenceMs('normal', 0.6) > silenceMs('normal', 0.75));
-  assert.equal(turnDetection('long', 0.6).silence_duration_ms, 4000);
+  assert.equal(turnDetection({ thinkingTime: 'long', speed: 0.6 }).silence_duration_ms, 4000);
 });
 
 test('schedule and call settings are checked', () => {
@@ -125,4 +125,31 @@ test('schedule and call settings are checked', () => {
   const rejected = applySettings(DEFAULT_SETTINGS, { frequency: 'hourly', language: 'fr', callStartHour: 15, callEndHour: 9 });
   assert.deepEqual(rejected, DEFAULT_SETTINGS);
   assert.equal(applySettings(DEFAULT_SETTINGS, { callEndHour: 99 }).callEndHour, DEFAULT_SETTINGS.callEndHour);
+});
+
+test('silence mode waits a set silence for every thinking time, as before', () => {
+  for (const thinkingTime of ['short', 'normal', 'long']) {
+    assert.deepEqual(turnDetection({ thinkingTime, speed: 0.9, turnMode: 'silence' }), {
+      type: 'server_vad',
+      silence_duration_ms: silenceMs(thinkingTime, 0.9),
+      create_response: true,
+      interrupt_response: true,
+    });
+  }
+  assert.deepEqual(turnDetection({ thinkingTime: 'normal', speed: 0.9 }), turnDetection({ thinkingTime: 'normal', speed: 0.9, turnMode: 'silence' }));
+});
+
+test('semantic mode is patient: short is medium, normal and long are low', () => {
+  const eagerness = (thinkingTime) => turnDetection({ thinkingTime, speed: 0.9, turnMode: 'semantic' });
+  assert.deepEqual(eagerness('short'), { type: 'semantic_vad', eagerness: 'medium', create_response: true, interrupt_response: true });
+  assert.equal(eagerness('normal').eagerness, 'low');
+  assert.equal(eagerness('long').eagerness, 'low');
+  assert.equal(eagerness('nonsense').eagerness, 'low');
+  assert.equal(eagerness('normal').silence_duration_ms, undefined);
+});
+
+test('the session uses the turn mode it is given', () => {
+  const build = (turnMode) => buildSession({ model: 'm', voice: 'marin', question: QUESTIONS[0], settings: DEFAULT_SETTINGS, localHour: 12, turnMode });
+  assert.equal(build('semantic').audio.input.turn_detection.type, 'semantic_vad');
+  assert.equal(build(undefined).audio.input.turn_detection.type, 'server_vad');
 });

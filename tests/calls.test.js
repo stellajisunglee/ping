@@ -441,6 +441,7 @@ test('an account from before these features still works', () => {
   assert.equal(user.settings.formality, 'formal');
   assert.equal(user.plan, 'free');
   assert.equal(user.role, 'admin');
+  assert.equal(user.turnMode, 'silence');
   assert.deepEqual(user.words, []);
   assert.equal(engine.streak(user).current, 0);
   assert.equal(engine.callBack(user).contactId, 'ping');

@@ -8,7 +8,7 @@ import { recordCallDay, streakToShow } from './progress.js';
 import { localDay, localDayNumber, localParts, nextCallTime } from './schedule.js';
 import { applySettings, DEFAULT_SETTINGS } from './settings.js';
 import { addSentence, addWord, cleanSentence, cleanWord, clearSubscriptionData } from './stack.js';
-import { pickQuestion, questionById } from './tutor.js';
+import { pickQuestion, questionById, TURN_MODES } from './tutor.js';
 
 export const RING_MS = 10_000;
 export const DELIVERY_GRACE_MS = 30_000; // how long a ring waits for the phone to confirm it arrived
@@ -27,7 +27,6 @@ const MAX_LINE_LENGTH = 500;
 const KEEP_FEEDBACK = 1000;
 const SCHEDULE_FIELDS = ['frequency', 'customDays', 'callStartHour', 'callEndHour'];
 const RENAMED_PLANS = { plus: 'premium', pro: 'platinum' };
-const TURN_MODE = 'silence'; // Ping only detects the end of a turn from silence so far
 
 export const hashToken = (token) => createHash('sha256').update(token).digest('hex');
 
@@ -46,6 +45,7 @@ const newUserFields = () => ({
   lastCallOutcome: null,
   lastRingDay: null,
   lookups: { day: null, count: 0 },
+  turnMode: 'silence', // only an admin can change it, to compare turn detectors
 });
 
 export class CallEngine {
@@ -267,6 +267,7 @@ export class CallEngine {
     if (!call || call.userId !== user.id || call.state !== 'answered') return null;
     if (call.sessions >= MAX_SESSIONS_PER_CALL) throw new LimitError('This call has ended. Please call back.');
     call.sessions += 1;
+    call.turnMode = user.turnMode; // kept with the call, so its metrics report the mode it really used
     this.store.save();
     const contact = this.#contactOf(call, user);
     return {
@@ -276,7 +277,15 @@ export class CallEngine {
       calledBack: call.direction === 'outgoing',
       contact,
       memories: this.#memories(user, contact),
+      turnMode: user.turnMode,
     };
+  }
+
+  setTurnMode(user, turnMode) {
+    if (!TURN_MODES.includes(turnMode)) return false;
+    user.turnMode = turnMode;
+    this.store.save();
+    return true;
   }
 
   // The call connected, so today counts toward the streak.
@@ -293,7 +302,7 @@ export class CallEngine {
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id) return null;
     const { thinkingTime, speed, proficiency } = user.settings;
-    call.turnMetrics = { callId, ...metrics, turnMode: TURN_MODE, thinkingTime, speed, proficiency };
+    call.turnMetrics = { callId, ...metrics, turnMode: call.turnMode ?? user.turnMode, thinkingTime, speed, proficiency };
     this.store.save();
     return call.turnMetrics;
   }
