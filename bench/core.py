@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import re
 import statistics
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -89,6 +90,15 @@ def next_free_clip_number(names: list[str]) -> int:
     while number in used:
         number += 1
     return number
+
+
+def release_within(stop, seconds: float = 2.0) -> bool:
+    """Runs `stop` in the background and waits at most `seconds` for it. Returns whether it finished.
+    Releasing a microphone can hang on a Mac, especially with a Bluetooth headset, so nothing may wait on it forever."""
+    worker = threading.Thread(target=stop, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    return not worker.is_alive()
 
 
 def read_labels(path: Path = LABELS_CSV) -> list[Pause]:

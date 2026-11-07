@@ -2,12 +2,13 @@
     python -m unittest discover bench"""
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
 import numpy as np
 
-from core import END_PAD_S, SAMPLE_RATE, Pause, append_label, drop_labels, find_pauses, flux_decisions, next_free_clip_number, read_labels, silence_decisions, summarize
+from core import END_PAD_S, SAMPLE_RATE, Pause, append_label, drop_labels, find_pauses, flux_decisions, next_free_clip_number, read_labels, release_within, silence_decisions, summarize
 
 
 def tone(seconds: float) -> np.ndarray:
@@ -100,6 +101,18 @@ class ClipFiles(unittest.TestCase):
             self.assertEqual(drop_labels("clip_001.wav", path), 2)
             self.assertEqual([pause.clip for pause in read_labels(path)], ["clip_002.wav"])
             self.assertEqual(drop_labels("clip_009.wav", path), 0)
+
+
+class ReleasingTheMicrophone(unittest.TestCase):
+    def test_a_quick_release_reports_success(self):
+        released = []
+        self.assertTrue(release_within(lambda: released.append(True)))
+        self.assertEqual(released, [True])
+
+    def test_a_stuck_release_gives_up_instead_of_hanging(self):
+        stuck = threading.Event()
+        self.assertFalse(release_within(stuck.wait, seconds=0.1))
+        stuck.set()
 
 
 if __name__ == "__main__":
