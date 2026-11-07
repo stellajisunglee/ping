@@ -211,18 +211,92 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
 
 **Done when:** `python bench/run.py` produces the table from my labeled clips, and the Deepgram cost shown in my console is under $5.
 
+**What the benchmark found** (140 labeled pauses: 100 thinking, 40 done, 17 of the done ones at the end of an answer)
+
+| Detector | Cut-offs | Typical wait after a real end |
+| --- | --- | --- |
+| Silence 1.3 s (Ping today) | 33% | 1.3 s |
+| Smart Turn v3.2 | 11% | 0.23 s |
+| Smart Turn with a 2.5 s silence backup | 14% | 0.23 s, never over 2.5 s |
+| Flux, patient setting | 17% | 1.06 s |
+
+- Smart Turn missed 4 of the 17 end-of-answer pauses, so it needs a silence backup.
+- Flux didn't beat Smart Turn, so Deepgram isn't needed.
+- Smart Turn should run in the browser, not on the server. Ping's audio goes from the phone straight to OpenAI and never touches the server. Running it on the server would add a network hop, server cost, and voice passing through the server.
+- Session 5 was added for Smart Turn. Adaptive patience moved to Session 6, so it's built once, for the detector Ping will actually use.
+
 ---
 
-## Session 5: Adaptive patience within a call
+## Session 5: Smart Turn in the browser
 
-**Why:** sessions 1 to 4 compare fixed settings. This one lets Ping react during the call: when it cuts the learner off, it waits longer for the rest of that call. It's a simple feedback rule built on the Session 1 measurement, and it only comes after the comparison so the earlier numbers stay clean. It applies to whichever detector the earlier sessions point to.
+**Why:** the benchmark says Smart Turn with a silence backup cuts learners off less than half as often as Ping's current 1.3-second rule, and replies about four times sooner. It's free and runs on the phone, so the audio never leaves the device. Two things are still unknown:
+- How fast it runs in a phone browser.
+- Whether it still works on the cleaned-up audio a call uses (echo cancellation, noise suppression, volume leveling). The benchmark used raw laptop recordings.
+
+**Step 5a: spike first, no commits**
+
+1. Ask me before adding anything new. The candidates:
+   - `onnxruntime-web`, the library that runs the models
+   - The Smart Turn v3.2 CPU model
+   - Silero VAD, the small voice detector that tells Smart Turn when to look
+
+   For each one, give me its size and license. Serve them from `public/` rather than a CDN, to keep the no-build-step setup.
+2. Build a throwaway test page that runs Silero and Smart Turn on the live mic, using the same audio settings a call uses. Show each verdict on screen as I talk, plus:
+   - How long the models took to download and load
+   - Smart Turn's time per decision (median and slowest)
+   - Silero's time per audio frame
+3. Smart Turn takes Whisper-style log-mel features, not raw audio. Write that conversion in plain JavaScript. Check it against the Python feature extractor's output from `bench/`, using a small saved fixture.
+4. Check the current OpenAI docs on how Ping tells OpenAI the turn is over. The preferred design keeps `server_vad` at a long silence (the backup) for barge-ins and long pauses. Find out whether the app can end the turn early (for example with `input_audio_buffer.commit` over WebRTC) while `server_vad` is on. If it can't, explain what turning OpenAI's detection off would mean for the Session 3 barge-in and aizuchi handling.
+5. I test on my phone and on a laptop, with AirPods and on speaker. Report the numbers, and whether Ping's own voice ever triggers it.
+
+**Go/no-go:** go ahead if Smart Turn's slowest decision on my phone is under about 300 ms, and its verdicts match my sense of when I'm done. Otherwise stop, and we decide from the numbers.
+
+**Step 5b: build (after I say go on the spike)**
+
+1. Add a third turn mode, `smartTurn`, to the admin switch from Session 2, so the three modes can be compared on the Session 1 numbers.
+2. In `smartTurn` mode:
+   - OpenAI keeps `server_vad` with a long silence, about 2.5 s, as the backup. This is subject to what 5a found.
+   - When the user goes quiet, the browser runs Smart Turn. If the model says done, Ping ends the turn right away and replies through the existing `requestReply` path, so the Session 3 aizuchi rules still apply.
+3. Keep the browser logic in its own file (for example `public/smart-turn.js`). Split it into pure functions that can be tested without a model or mic:
+   - The log-mel features
+   - The pause-and-decide logic
+   - The fallback rule
+4. Fallback: if the models fail to load, or a decision takes too long, that call quietly falls back to silence mode. A slow phone can never make Ping worse than today.
+5. The service worker saves the model files in advance, so only the first call ever downloads them.
+6. Add numbers to the Session 1 summary and the server's list of allowed fields:
+   - `smartTurnEnds`: turns Smart Turn ended
+   - `backupEnds`: turns the silence backup ended
+   - `smartTurnMedianMs` and `smartTurnP90Ms`: decision times
+   - `modelLoadMs`
+   - `smartTurnFallback`: 0 or 1
+
+   Numbers only, as always. Compare modes on `replyGap` and `suspectedCutoffs`.
+7. Tests:
+   - The features match the Python fixture within a small tolerance.
+   - The decision logic is right for done, not done, and a slow model.
+   - The fallback works.
+   - The new metric fields pass `cleanMetrics`.
+   - Route tests still show only admins can pick the mode.
+8. README:
+   - Add `smartTurn` to the admin table.
+   - Explain the behavior under "How a call works".
+   - Under privacy, say that Smart Turn runs on the phone and the audio stays there.
+
+**Done when:** on my phone in `smartTurn` mode, most turns end within about half a second of my finishing, `suspectedCutoffs` is no worse than silence mode over several calls, and the metrics show `smartTurnEnds` well above `backupEnds`.
+
+---
+
+## Session 6: Adaptive patience within a call
+
+**Why:** sessions 1 to 5 compare fixed settings. This one lets Ping react during the call: when it cuts the learner off, it waits longer for the rest of that call. It's a simple feedback rule built on the Session 1 measurement, and it only comes after the comparison so the earlier numbers stay clean. It applies to whichever detector the earlier sessions point to. After the benchmark, that's expected to be `smartTurn`.
 
 **What to build**
 
 1. In `voice.js`, when a suspected cut-off happens (the user starts speaking within `SUSPECTED_CUTOFF_WINDOW_MS` of Ping's audio starting, and Session 3 didn't classify it as aizuchi), raise Ping's patience one step for the rest of the call:
    - **Silence mode:** multiply the silence length by `PATIENCE_STEP`, capped at `MAX_SILENCE_MS`.
    - **Semantic mode:** move eagerness down one level, for example `medium` to `low`. `low` is the floor, so a user already at `low` stays there.
-   - Send the change with `session.update`, through the same path as `updateVoice`, so it waits for Ping's turn to end. Check in the current docs that `turn_detection` can change mid-session, and don't guess.
+   - **Smart Turn mode:** raise the probability Smart Turn needs to call a turn done by `SMART_TURN_STEP`, for example 0.5 to 0.6, capped at `MAX_SMART_TURN_THRESHOLD`. Also lengthen the silence backup the same way silence mode does. The threshold lives in the browser, so it needs no `session.update`. The backup does.
+   - Send any OpenAI change with `session.update`, through the same path as `updateVoice`, so it waits for Ping's turn to end. Check in the current docs that `turn_detection` can change mid-session, and don't guess.
 
 2. Only ever step up, never back down, during a call, and stop after `MAX_PATIENCE_STEPS`. Put all three values in named constants, each with a one-line comment explaining why.
 
@@ -234,7 +308,7 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
 
 6. Tests:
    - Pull the decision into a pure function: given the current turn detection and the steps taken so far, it returns the next turn detection, or nothing at the cap.
-   - Test both modes, the cap and the semantic floor.
+   - Test all three modes, the caps and the semantic floor.
    - Route tests show a non-admin can't change `adaptivePatience`.
 
 7. README: explain the behavior in two or three sentences under "How a call works", and add `adaptivePatience` to the admin table.
@@ -245,14 +319,11 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
 
 ---
 
-## After all five sessions
+## After all six sessions
 
 - Merge `turn-taking-v2` only after I've used it on my own calls for a few days.
-- Use the Session 1 numbers and the benchmark to decide between three options:
-  - Keep OpenAI semantic mode
-  - Move to Pipecat with Smart Turn
-  - Try Deepgram Flux in the live app
-- Use the Session 5 numbers to decide whether adaptive patience stays on, and whether it should carry across calls.
+- Use the Session 1 numbers from real calls to pick the default turn mode: silence, semantic or `smartTurn`. The benchmark points to `smartTurn`. Deepgram Flux was ruled out by the benchmark.
+- Use the Session 6 numbers to decide whether adaptive patience stays on, and whether it should carry across calls.
 
 ## Known issues to fix later
 

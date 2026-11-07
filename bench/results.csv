@@ -1,0 +1,7 @@
+detector,setting,thinking_pauses,done_pauses,cutoff_rate,catch_rate,median_catch_ms
+silence,0.8s,100,40,0.61,0.925,800
+silence,1.3s,100,40,0.33,0.725,1300
+silence,2.5s,100,40,0.04,0.475,2500
+smart_turn,v3.2,100,40,0.11,0.775,230
+flux,default,100,40,0.37,0.875,594
+flux,patient,100,40,0.17,0.725,1058
