@@ -1,6 +1,6 @@
 // One phone call with a contact: a WebRTC connection straight from this browser to the voice model.
 
-import { classifyTurn, RESUME_NOTE } from './aizuchi.js';
+import { classifyTurn, resumeNote } from './aizuchi.js';
 import { summarizeTurns, TIMED_EVENTS } from './turn-metrics.js';
 
 const DATA_CHANNEL = 'oai-events';
@@ -30,6 +30,8 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
   let waitingTurn = null; // a turn that talked over the contact, waiting for its words
   const talkedOver = new Set(); // turns that started while the contact was speaking
   const transcripts = new Map(); // the user's words for each turn, as they arrive
+  const plannedReplies = new Map(); // the contact's full text for each reply, even the parts never spoken
+  let cutReply = ''; // the full text of the reply the user last cut off
   const turnLog = []; // when each turn-taking event arrived, for the call's timing summary
   const timers = [];
 
@@ -102,9 +104,11 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
     }
     talkedOver.delete(itemId);
     transcripts.delete(itemId);
+    const planned = cutReply;
+    cutReply = '';
     if (decision === 'resume') {
       turnLog.push({ type: 'aizuchi', at: performance.now() });
-      requestReply(RESUME_NOTE);
+      requestReply(resumeNote(planned));
     } else {
       requestReply();
     }
@@ -175,7 +179,12 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
         audioFinished = false;
         break;
       case 'response.output_audio_transcript.delta':
+        plannedReplies.set(event.item_id, (plannedReplies.get(event.item_id) ?? '') + event.delta);
         onLine({ id: event.item_id, from: 'contact', delta: event.delta });
+        break;
+      // OpenAI trimmed this reply to what the user heard, so keep the full version in case they only said うん.
+      case 'conversation.item.truncated':
+        cutReply = plannedReplies.get(event.item_id) ?? '';
         break;
       case 'input_audio_buffer.speech_started':
         if (speaking) talkedOver.add(event.item_id);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyTurn, isAizuchi } from '../public/aizuchi.js';
+import { classifyTurn, isAizuchi, resumeNote } from '../public/aizuchi.js';
 
 test('short listening sounds count as aizuchi, however they are written', () => {
   for (const text of ['うん。', 'うん', 'はい', 'ウン', 'うんうん', 'はいはい', 'そうなの。', 'そうなんだ！', 'なるほど…', 'へー', 'Yeah.', 'mhm', 'uh huh', ' はい、 ']) {
@@ -24,4 +24,14 @@ test('a turn that talked over the contact waits for its words, then resumes only
   assert.equal(classifyTurn({ talkedOverContact: true, transcript: 'うん。' }), 'resume');
   assert.equal(classifyTurn({ talkedOverContact: true, transcript: 'いや、それは早すぎ。' }), 'reply');
   assert.equal(classifyTurn({ talkedOverContact: true, transcript: '' }), 'reply');
+});
+
+test('the carry-on note includes the planned reply when there is one', () => {
+  assert.match(resumeNote(), /Carry on from the exact point/);
+  assert.doesNotMatch(resumeNote(), /had planned/);
+  assert.doesNotMatch(resumeNote('   '), /had planned/);
+  const note = resumeNote('お寿司、いいですね！どんなネタが一番好きですか？');
+  assert.match(note, /「お寿司、いいですね！どんなネタが一番好きですか？」/);
+  assert.match(note, /Say the part they didn't hear/);
+  assert.ok(resumeNote('あ'.repeat(1000)).length < 1000);
 });

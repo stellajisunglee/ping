@@ -271,3 +271,15 @@ test('a turn that ends while a reply is still being written waits for it to fini
   await context.fire({ type: 'response.done', response: { output: [] } });
   assert.equal(replies(context).length, before + 1);
 });
+
+test('after aizuchi, the note gives back the reply OpenAI cut short', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  await context.fire({ type: 'response.output_audio_transcript.delta', item_id: 'a1', delta: 'お寿司、いいですね！' });
+  await context.fire({ type: 'response.output_audio_transcript.delta', item_id: 'a1', delta: 'どんなネタが好きですか？' });
+  await talkOverPing(context, 'u1');
+  await context.fire({ type: 'conversation.item.truncated', item_id: 'a1', content_index: 0, audio_end_ms: 900 });
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  await context.fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'はい' });
+  assert.match(systemNotes(context).at(-1).item.content[0].text, /「お寿司、いいですね！どんなネタが好きですか？」/);
+});
