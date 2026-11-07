@@ -66,7 +66,7 @@ It finds every pause over 300 ms on its own, so there's nothing to mark by hand.
 - `d` if you were done
 - `r` to replay, `s` to skip, `q` to quit
 
-Labels go to `labels.csv` as you go, so you can stop and come back later. Pauses come from each clip in turn, so wherever you stop, your labels cover every question and take. 18 clips usually have far more than 60 pauses. Aim for at least 60, roughly two thirds of them `t`, and label more if you have time.
+Labels go to `labels.csv` as you go, so you can stop and come back later. Each clip's final pause comes first, since those are nearly all the `d` pauses. Middle pauses then come from each clip in turn, so wherever you stop, your labels cover every question and take. 18 clips usually have far more than 60 pauses. Aim for at least 60, roughly two thirds of them `t`, and label more if you have time.
 
 Skip (`s`) anything that isn't a real pause, like a dip in the middle of a word.
 

@@ -2,8 +2,8 @@
 were still thinking (t) or done (d). Each answer is saved to labels.csv straight away, so you can stop
 and pick up later. Pauses already labeled are skipped.
 
-Pauses come one clip at a time in turn (the first pause of every clip, then the second, and so on),
-so wherever you stop, the labels are spread across every question and take."""
+Each clip's final pause comes first, since those are nearly all the "done" pauses. The rest come
+one clip at a time in turn, so wherever you stop, the labels are spread across every question and take."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import sys
 
 import sounddevice
 
-from core import AUDIO_DIR, LABELS, SAMPLE_RATE, Pause, append_label, find_pauses, in_turns, read_clip, read_labels
+from core import AUDIO_DIR, LABELS, SAMPLE_RATE, Pause, append_label, find_pauses, labeling_order, read_clip, read_labels
 
 CONTEXT_BEFORE_S = 3.0  # enough of the sentence to remember what you were saying
 CONTEXT_AFTER_S = 1.5  # enough to hear whether you carried on
@@ -35,7 +35,7 @@ def main() -> None:
 
     audio = {path.name: read_clip(path) for path in clips}
     pauses_by_clip = [[(name, start_s, end_s) for start_s, end_s in find_pauses(clip) if (name, start_s) not in done_keys] for name, clip in audio.items()]
-    to_label = in_turns(pauses_by_clip)
+    to_label = labeling_order(pauses_by_clip, lambda pause: pause[2] >= len(audio[pause[0]]) / SAMPLE_RATE - 0.02)
     print(f"{len(to_label)} pauses left to label.")
 
     for name, start_s, end_s in to_label:

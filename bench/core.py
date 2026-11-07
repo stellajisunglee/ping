@@ -114,6 +114,14 @@ def in_turns(groups: list[list]) -> list:
     return [group[index] for index in range(longest) for group in groups if index < len(group)]
 
 
+def labeling_order(pauses_by_clip: list[list], is_final) -> list:
+    """Every clip's final pause first, since those are nearly all the scarcer "done" pauses,
+    then the rest one clip at a time, so stopping early still covers every question and take."""
+    finals = [pause for group in pauses_by_clip for pause in group if is_final(pause)]
+    middles = [[pause for pause in group if not is_final(pause)] for group in pauses_by_clip]
+    return finals + in_turns(middles)
+
+
 def is_final(pause: Pause, clip_seconds: float) -> bool:
     return pause.end_s >= clip_seconds - FRAME_S
 

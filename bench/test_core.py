@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from core import END_PAD_S, SAMPLE_RATE, Pause, append_label, drop_labels, find_pauses, flux_decisions, in_turns, next_free_clip_number, read_labels, release_within, silence_decisions, summarize
+from core import END_PAD_S, SAMPLE_RATE, Pause, append_label, drop_labels, find_pauses, flux_decisions, in_turns, labeling_order, next_free_clip_number, read_labels, release_within, silence_decisions, summarize
 
 
 def tone(seconds: float) -> np.ndarray:
@@ -141,6 +141,11 @@ class LabelingOrder(unittest.TestCase):
     def test_pauses_come_from_each_clip_in_turn(self):
         self.assertEqual(in_turns([["a1", "a2", "a3"], ["b1"], [], ["c1", "c2"]]), ["a1", "b1", "c1", "a2", "c2", "a3"])
         self.assertEqual(in_turns([]), [])
+
+    def test_final_pauses_come_first_then_the_rest_in_turn(self):
+        clips = [["a1", "a2", "a-end"], ["b1", "b-end"], ["c1", "c2"]]
+        order = labeling_order(clips, lambda pause: pause.endswith("end"))
+        self.assertEqual(order, ["a-end", "b-end", "a1", "b1", "c1", "a2", "c2"])
 
 
 class ReleasingTheMicrophone(unittest.TestCase):
