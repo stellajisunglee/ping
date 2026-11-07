@@ -35,6 +35,8 @@ Tapping after the 10 seconds opens the voicemail, with the call-back button.
 
 On a call, the contact can explain a word in one short English sentence and save it to the user's stack, nudge them back to Japanese, say 「ちょっとわかりません」 if they steer off topic, and change settings when asked in plain English. The screen shows a live transcript with `*added to stack*` for each new word, and buttons for speaker, mute, speed and end call.
 
+OpenAI stops the contact's audio as soon as the user makes a sound, and the app, not OpenAI, decides when the contact replies. If the user talked over the contact with only aizuchi, like うん or はい, the app waits for the transcript (usually under half a second), then has the contact carry on from where it was cut off instead of answering. Anything else, or a transcript that doesn't arrive within 1.5 seconds, gets a normal reply.
+
 ## Progress and My Stack
 
 - **Streak:** days in a row with a connected call, answered or called back. Days off in the user's schedule don't break it. Home also shows the all-time best.
@@ -153,6 +155,7 @@ Use **New > Blueprint** and point it at this repo. `render.yaml` sets up a web s
 - `server/store.js`: saves state to one JSON file.
 - `public/sw.js`: shows the ring and missed call notifications, and handles tapping them.
 - `public/voice.js`: the WebRTC call, including running the voice model's tools.
+- `public/aizuchi.js`: decides whether talking over the contact was only aizuchi, so the contact carries on instead of answering.
 - `public/turn-metrics.js`: turns a call's turn-taking event times into numbers, such as reply latency, suspected cut-offs and barge-ins. The server uses it to check what the phone sends, and logs one `turn-metrics` line per call.
 - `public/app.js`: signing up, Home, ringing and the call screen, with no framework or build step.
 - `public/stack.js`, `public/contacts.js`, `public/settings.js`: the other screens.

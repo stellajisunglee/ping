@@ -41,7 +41,8 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
   let userTurns = 0;
   let agentTurns = 0;
   let suspectedCutoffs = 0;
-  let bargeIns = 0;
+  let talkOvers = 0; // times the contact's audio was cut because the user spoke
+  let ignoredAizuchi = 0;
   let userStoppedAt = null; // when the user's turn ended, until Ping's reply starts
   let agentStartedAt = null;
   let agentPlaying = false;
@@ -81,8 +82,12 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
         break;
       // OpenAI clears Ping's audio when the user talks over it, so only count a clear that followed their speech.
       case 'output_audio_buffer.cleared':
-        if (agentPlaying && userSpokeOver) bargeIns += 1;
+        if (agentPlaying && userSpokeOver) talkOvers += 1;
         agentPlaying = false;
+        break;
+      // Logged by the app when talking over Ping turned out to be aizuchi and Ping carried on.
+      case 'aizuchi':
+        ignoredAizuchi += 1;
         break;
       default:
     }
@@ -94,8 +99,8 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
     replyLatencyP90Ms: percentile(sorted, 0.9),
     replyLatencyCount: sorted.length,
     suspectedCutoffs,
-    bargeIns,
-    ignoredAizuchi: 0,
+    bargeIns: Math.max(0, talkOvers - ignoredAizuchi), // real interruptions only
+    ignoredAizuchi,
     userTurns,
     agentTurns,
     callSeconds: connectedAt === null ? 0 : Math.max(0, Math.round((endedAt - connectedAt) / 1000)),

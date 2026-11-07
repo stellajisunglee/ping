@@ -136,29 +136,28 @@ Find out what OpenAI does when:
 
 Does it queue a new reply to the うん? Does it error because a response is already active? Log what happens on two test calls and report back before building. The design below depends on the answer.
 
-**Step 3b: build**
+**What the spike found** (two rounds, both turn modes)
 
-1. Set `interrupt_response: false` in both turn modes, so `voice.js` decides when to interrupt.
+- Over WebRTC, OpenAI clears Ping's unplayed audio (`output_audio_buffer.cleared`, then `conversation.item.truncated`) the moment it detects speech, whatever `create_response` and `interrupt_response` are set to. No setting lets Ping talk through an うん, so the original design (`interrupt_response: false` plus a 500 ms window in `voice.js`) can't work.
+- With `interrupt_response: false`, a reply that's cut while still being generated keeps generating, and its later audio plays anyway. Ping skips words. So `interrupt_response` stays `true`.
+- After an うん, Ping usually restarted the sentence it was cut off in, because it can see its reply was trimmed to what was heard.
+- In semantic mode, the event timestamps include OpenAI's own waiting, so a 「うん。」 measured about 1.2 seconds. Speech length from events can't spot aizuchi. The transcript can, and it arrives about 0.3 to 0.5 seconds after the turn ends.
 
-2. In `voice.js`, when `speech_started` arrives while Ping's audio is playing, start a timer of `AIZUCHI_WINDOW_MS = 500`.
-   - If `speech_stopped` arrives before the timer fires, it was aizuchi. Clear the timer, increase `ignoredAizuchi`, and let Ping keep talking.
-   - If the timer fires, it's a real interruption. Send `response.cancel` and `output_audio_buffer.clear` (verify both are valid client events for WebRTC sessions), then increase `bargeIns`.
+**Step 3b: build (revised after the spike)**
 
-3. Depending on the spike:
-   - **If OpenAI queues a reply to the うん:** set `create_response: false`. Create replies from `voice.js` on `input_audio_buffer.committed` instead.
-     - Skip the reply when the user's speech was shorter than about 600 ms and overlapped Ping's audio. Use speech duration from the event timestamps, not the transcript, so there's no extra delay waiting for transcription.
-     - Keep the existing `response.create` calls in `handleToolCalls` working.
-   - **If it doesn't:** keep `create_response: true`.
+The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping."
 
-4. Put `AIZUCHI_WINDOW_MS` and the 600 ms rule in named constants, each with a one-line comment explaining why.
+1. Set `create_response: false` and keep `interrupt_response: true` in both turn modes. OpenAI still stops Ping when the user speaks, and the app asks for every reply.
+2. In `voice.js`, when a turn ends (`input_audio_buffer.committed`):
+   - If it didn't start while Ping was speaking, reply straight away.
+   - If it did, wait for its transcript, up to `TRANSCRIPT_WAIT_MS`. If the words are only aizuchi, add a one-off system message telling Ping to carry on from where it was cut off without restarting, then reply, and count it as `ignoredAizuchi`. Otherwise reply normally. A failed or missing transcript gets a normal reply.
+   - A turn that ends while a reply is still being written waits for that reply to finish.
+3. Put the aizuchi word list and the decision in a pure module (`public/aizuchi.js`). The decision returns "reply", "wait" or "resume".
+4. `bargeIns` now counts only talk-overs that weren't aizuchi.
+5. Tests for the word list, every decision, and each reply path in `voice.js`.
+6. README: describe the behavior under "How a call works".
 
-5. Tests:
-   - Pull the interruption decision into a pure function: given event timings, it returns "ignore" or "interrupt".
-   - Test it at 300 ms, 499 ms, 501 ms and 2000 ms.
-
-6. README: describe the new interruption behavior in two or three sentences under "How a call works".
-
-**Done when:** on a test call, I say うん during Ping's reply and Ping keeps talking. When I talk over Ping properly, it stops within about half a second. The metrics show both.
+**Done when:** on a test call, I say うん during Ping's reply and Ping picks up where it left off within about a second, without restarting or answering the うん. When I talk over Ping properly, it stops and answers me. The metrics show `ignoredAizuchi` and `bargeIns` separately.
 
 ---
 
@@ -252,3 +251,7 @@ Does it queue a new reply to the うん? Does it error because a response is alr
   - Move to Pipecat with Smart Turn
   - Try Deepgram Flux in the live app
 - Use the Session 5 numbers to decide whether adaptive patience stays on, and whether it should carry across calls.
+
+## Known issues to fix later
+
+- **The call transcript shows words Ping never said.** OpenAI writes a reply in about a second but takes several seconds to speak it, so the full reply appears on screen right away. When the user interrupts, OpenAI cuts the audio and trims its own copy of the reply (`conversation.item.truncated`), but the screen keeps the whole text. Fix: on `conversation.item.truncated`, cut or grey out the unheard part of that line. Found in the Session 3a spike.

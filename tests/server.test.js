@@ -354,7 +354,7 @@ test('only admins can change the turn mode, and it reaches the call, mid-call ch
 
   const { data: call } = await request('/api/calls', { method: 'POST', token });
   await request(`/api/calls/${call.id}/session`, { method: 'POST', token });
-  assert.deepEqual(minted.at(-1).session.audio.input.turn_detection, { type: 'semantic_vad', eagerness: 'low', create_response: true, interrupt_response: true });
+  assert.deepEqual(minted.at(-1).session.audio.input.turn_detection, { type: 'semantic_vad', eagerness: 'low', create_response: false, interrupt_response: true });
 
   const { data: changed } = await request('/api/settings', { method: 'PATCH', token, body: { thinkingTime: 'short' } });
   assert.equal(changed.turnDetection.type, 'semantic_vad');

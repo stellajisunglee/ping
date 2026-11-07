@@ -166,11 +166,13 @@ export const TURN_MODES = ['silence', 'semantic'];
 // both get low, the most patient level, which waits up to 8 seconds.
 const SEMANTIC_EAGERNESS = { short: 'medium', normal: 'low', long: 'low' };
 
+// OpenAI stops the contact when the user speaks (interrupt_response), but doesn't reply on its own
+// (create_response). The app asks for each reply, so it can let the contact carry on after aizuchi.
+const REPLY_CONTROL = { create_response: false, interrupt_response: true };
+
 export function turnDetection({ thinkingTime, speed, turnMode = 'silence' }) {
-  if (turnMode === 'semantic') {
-    return { type: 'semantic_vad', eagerness: SEMANTIC_EAGERNESS[thinkingTime] ?? 'low', create_response: true, interrupt_response: true };
-  }
-  return { type: 'server_vad', silence_duration_ms: silenceMs(thinkingTime, speed), create_response: true, interrupt_response: true };
+  if (turnMode === 'semantic') return { type: 'semantic_vad', eagerness: SEMANTIC_EAGERNESS[thinkingTime] ?? 'low', ...REPLY_CONTROL };
+  return { type: 'server_vad', silence_duration_ms: silenceMs(thinkingTime, speed), ...REPLY_CONTROL };
 }
 
 export function buildSession({ model, voice, question, settings, localHour, calledBack, contact = PING, memories = [], turnMode = 'silence' }) {

@@ -103,3 +103,14 @@ test('metrics are only accepted as the known fields, all whole numbers', () => {
     assert.equal(cleanMetrics(bad), null, JSON.stringify(bad));
   }
 });
+
+test('talking over Ping with aizuchi counts as ignored aizuchi, not a barge-in', () => {
+  const summary = summarize(
+    timeline(
+      ['agentStarted', 0], ['speechStarted', 3000], ['agentCleared', 3000], ['aizuchi', 3800],
+      ['agentStarted', 4200], ['speechStarted', 7000], ['agentCleared', 7000],
+    ),
+  );
+  assert.equal(summary.ignoredAizuchi, 1);
+  assert.equal(summary.bargeIns, 1);
+});

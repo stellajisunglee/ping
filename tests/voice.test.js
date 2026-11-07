@@ -185,3 +185,89 @@ test('a failure sending the numbers never stops the call from ending', async () 
     console.warn = warn;
   }
 });
+
+const replies = (context) => context.sent.filter((event) => event.type === 'response.create');
+const systemNotes = (context) => context.sent.filter((event) => event.type === 'conversation.item.create' && event.item.role === 'system');
+
+// Ping is speaking, then the user talks over it, and OpenAI cuts the audio, as it does over WebRTC.
+async function talkOverPing(context, itemId) {
+  await context.fire({ type: 'output_audio_buffer.started', response_id: 'r1' });
+  await context.fire({ type: 'input_audio_buffer.speech_started', item_id: itemId });
+  await context.fire({ type: 'output_audio_buffer.cleared', response_id: 'r1' });
+}
+
+test('a normal turn gets a reply as soon as it ends', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  const before = replies(context).length;
+  await context.fire({ type: 'input_audio_buffer.speech_started', item_id: 'u1' });
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  assert.equal(replies(context).length, before + 1);
+  assert.deepEqual(systemNotes(context), []);
+});
+
+test('aizuchi over Ping makes it carry on instead of answering, and is counted', async () => {
+  const context = await connected();
+  await talkOverPing(context, 'u1');
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  const before = replies(context).length;
+  await context.fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'うん。' });
+  assert.equal(replies(context).length, before + 1);
+  assert.match(systemNotes(context)[0].item.content[0].text, /Carry on from the exact point/);
+  const order = context.sent.map((event) => event.type).slice(-2);
+  assert.deepEqual(order, ['conversation.item.create', 'response.create']);
+
+  context.call.hangUp();
+  await context.settle();
+  const metrics = context.events.apiCalls.find((call) => call.path === '/api/calls/c1/metrics').options.body;
+  assert.equal(metrics.ignoredAizuchi, 1);
+  assert.equal(metrics.bargeIns, 0);
+});
+
+test('a real sentence over Ping gets a normal reply once its words arrive', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  await talkOverPing(context, 'u1');
+  const before = replies(context).length;
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  assert.equal(replies(context).length, before, 'waits for the words first');
+  await context.fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'いや、それは早すぎ。' });
+  assert.equal(replies(context).length, before + 1);
+  assert.deepEqual(systemNotes(context), []);
+});
+
+test('if the words never arrive, the turn still gets a normal reply', async (t) => {
+  // Fake timers from the start, so the call's own timers are fake too and stop when it ends.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const context = await connected();
+  t.after(() => finishCall(context));
+  await talkOverPing(context, 'u1');
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  const before = replies(context).length;
+  t.mock.timers.tick(1499);
+  assert.equal(replies(context).length, before);
+  t.mock.timers.tick(1);
+  assert.equal(replies(context).length, before + 1);
+  assert.deepEqual(systemNotes(context), []);
+});
+
+test('a failed transcription gets a normal reply without waiting', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  await talkOverPing(context, 'u1');
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  const before = replies(context).length;
+  await context.fire({ type: 'conversation.item.input_audio_transcription.failed', item_id: 'u1', error: { code: 'audio_unintelligible' } });
+  assert.equal(replies(context).length, before + 1);
+});
+
+test('a turn that ends while a reply is still being written waits for it to finish', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  await context.fire({ type: 'response.created' });
+  const before = replies(context).length;
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  assert.equal(replies(context).length, before);
+  await context.fire({ type: 'response.done', response: { output: [] } });
+  assert.equal(replies(context).length, before + 1);
+});

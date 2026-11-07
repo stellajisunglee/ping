@@ -132,7 +132,7 @@ test('silence mode waits a set silence for every thinking time, as before', () =
     assert.deepEqual(turnDetection({ thinkingTime, speed: 0.9, turnMode: 'silence' }), {
       type: 'server_vad',
       silence_duration_ms: silenceMs(thinkingTime, 0.9),
-      create_response: true,
+      create_response: false,
       interrupt_response: true,
     });
   }
@@ -141,7 +141,7 @@ test('silence mode waits a set silence for every thinking time, as before', () =
 
 test('semantic mode is patient: short is medium, normal and long are low', () => {
   const eagerness = (thinkingTime) => turnDetection({ thinkingTime, speed: 0.9, turnMode: 'semantic' });
-  assert.deepEqual(eagerness('short'), { type: 'semantic_vad', eagerness: 'medium', create_response: true, interrupt_response: true });
+  assert.deepEqual(eagerness('short'), { type: 'semantic_vad', eagerness: 'medium', create_response: false, interrupt_response: true });
   assert.equal(eagerness('normal').eagerness, 'low');
   assert.equal(eagerness('long').eagerness, 'low');
   assert.equal(eagerness('nonsense').eagerness, 'low');
@@ -152,4 +152,12 @@ test('the session uses the turn mode it is given', () => {
   const build = (turnMode) => buildSession({ model: 'm', voice: 'marin', question: QUESTIONS[0], settings: DEFAULT_SETTINGS, localHour: 12, turnMode });
   assert.equal(build('semantic').audio.input.turn_detection.type, 'semantic_vad');
   assert.equal(build(undefined).audio.input.turn_detection.type, 'server_vad');
+});
+
+test('in both modes OpenAI stops the contact when the user speaks, but leaves replies to the app', () => {
+  for (const turnMode of ['silence', 'semantic']) {
+    const detection = turnDetection({ thinkingTime: 'normal', speed: 0.9, turnMode });
+    assert.equal(detection.create_response, false, turnMode);
+    assert.equal(detection.interrupt_response, true, turnMode);
+  }
 });

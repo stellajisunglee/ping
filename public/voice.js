@@ -1,11 +1,15 @@
 // One phone call with a contact: a WebRTC connection straight from this browser to the voice model.
 
+import { classifyTurn, RESUME_NOTE } from './aizuchi.js';
 import { summarizeTurns, TIMED_EVENTS } from './turn-metrics.js';
 
 const DATA_CHANNEL = 'oai-events';
 const WRAP_UP_BEFORE_END_SECONDS = 20;
 const HANG_UP_AFTER_GOODBYE_MS = 600;
 const GOODBYE_TIMEOUT_MS = 10_000;
+// A turn that talked over the contact waits this long for its words. Transcripts usually take 0.3 to 0.5 seconds.
+const TRANSCRIPT_WAIT_MS = 1500;
+const WRAP_UP_NOTE = 'Time is nearly up. Say a short warm goodbye in Japanese, then call end_call.';
 
 export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, onSpeaking, onSettings, onEnded, onNeedsTap }) {
   let pc = null;
@@ -22,6 +26,10 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
   let pendingVoiceUpdate = null;
   let maxCallSeconds = 0;
   let connectedAt = null;
+  let queuedReply = null; // a reply asked for while another was still being written
+  let waitingTurn = null; // a turn that talked over the contact, waiting for its words
+  const talkedOver = new Set(); // turns that started while the contact was speaking
+  const transcripts = new Map(); // the user's words for each turn, as they arrive
   const turnLog = []; // when each turn-taking event arrived, for the call's timing summary
   const timers = [];
 
@@ -66,6 +74,45 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
       },
       () => onNeedsTap(),
     );
+  }
+
+  // OpenAI doesn't reply on its own, so the app asks for every reply. Only one reply can be
+  // written at a time, so one asked for mid-reply waits for that reply to finish.
+  function requestReply(note = null) {
+    if (responding) {
+      queuedReply = { note };
+      return;
+    }
+    // A system message steers this one reply without replacing the contact's instructions.
+    if (note) send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: note }] } });
+    send({ type: 'response.create' });
+  }
+
+  function answerTurn(itemId, { timedOut = false } = {}) {
+    const transcript = transcripts.get(itemId) ?? (timedOut ? '' : null);
+    const decision = classifyTurn({ talkedOverContact: talkedOver.has(itemId), transcript });
+    if (decision === 'wait') {
+      waitingTurn = { itemId, timer: setTimeout(() => answerTurn(itemId, { timedOut: true }), TRANSCRIPT_WAIT_MS) };
+      timers.push(waitingTurn.timer);
+      return;
+    }
+    if (waitingTurn?.itemId === itemId) {
+      clearTimeout(waitingTurn.timer);
+      waitingTurn = null;
+    }
+    talkedOver.delete(itemId);
+    transcripts.delete(itemId);
+    if (decision === 'resume') {
+      turnLog.push({ type: 'aizuchi', at: performance.now() });
+      requestReply(RESUME_NOTE);
+    } else {
+      requestReply();
+    }
+  }
+
+  function heardWords(itemId, words) {
+    transcripts.set(itemId, words);
+    if (waitingTurn?.itemId === itemId) answerTurn(itemId);
   }
 
   // The speed can only change between turns, so a change made mid-sentence waits for the turn to end.
@@ -130,12 +177,20 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
       case 'response.output_audio_transcript.delta':
         onLine({ id: event.item_id, from: 'contact', delta: event.delta });
         break;
+      case 'input_audio_buffer.speech_started':
+        if (speaking) talkedOver.add(event.item_id);
+        break;
       // This holds the user's place in the transcript, because their words arrive after the reply has started.
       case 'input_audio_buffer.committed':
         onLine({ id: event.item_id, from: 'you', text: '' });
+        answerTurn(event.item_id);
         break;
       case 'conversation.item.input_audio_transcription.completed':
         onLine({ id: event.item_id, from: 'you', text: event.transcript });
+        heardWords(event.item_id, event.transcript ?? '');
+        break;
+      case 'conversation.item.input_audio_transcription.failed':
+        heardWords(event.item_id, '');
         break;
       case 'output_audio_buffer.started':
         speaking = true;
@@ -153,6 +208,11 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
         if (pendingVoiceUpdate) {
           send(pendingVoiceUpdate);
           pendingVoiceUpdate = null;
+        }
+        if (queuedReply) {
+          const { note } = queuedReply;
+          queuedReply = null;
+          requestReply(note);
         }
         handleToolCalls(event.response?.output ?? []);
         break;
@@ -202,9 +262,7 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
     await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() });
 
     timers.push(
-      setTimeout(() => {
-        send({ type: 'response.create', response: { instructions: 'Time is nearly up. Say a short warm goodbye in Japanese, then call end_call.' } });
-      }, (maxSeconds - WRAP_UP_BEFORE_END_SECONDS) * 1000),
+      setTimeout(() => requestReply(WRAP_UP_NOTE), (maxSeconds - WRAP_UP_BEFORE_END_SECONDS) * 1000),
       setTimeout(() => end('time-limit'), maxSeconds * 1000),
     );
   }
