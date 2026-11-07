@@ -306,6 +306,10 @@ const METRICS = {
   userTurns: 5,
   agentTurns: 6,
   callSeconds: 95,
+  turnEndWaitMedianMs: 1290,
+  turnEndWaitP90Ms: 1400,
+  replyGapMedianMs: 1900,
+  replyGapP90Ms: 2300,
 };
 
 test('turn metrics are stored on the call with their settings, and logged once', async () => {

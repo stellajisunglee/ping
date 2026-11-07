@@ -84,6 +84,8 @@ This work also doubles as a portfolio piece for voice AI conversation design rol
 
 **Done when:** I make two test calls and see two `turn-metrics` lines with sensible numbers.
 
+**Added after Session 3:** `replyLatencyMs` starts when OpenAI decides the turn is over, so it hides the detector's own wait. In semantic mode at `low` eagerness that wait reached 7 seconds while reply latency read under 1 second. The summary now also estimates `turnEndWait` (from the user going quiet to OpenAI ending the turn) and `replyGap` (from the user going quiet to Ping's voice), using the audio times OpenAI puts on the speech events. Compare modes on `replyGap`, not `replyLatency`.
+
 ---
 
 ## Session 2: Semantic turn detection as an admin switch

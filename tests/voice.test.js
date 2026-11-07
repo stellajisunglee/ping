@@ -283,3 +283,18 @@ test('after aizuchi, the note gives back the reply OpenAI cut short', async (t) 
   await context.fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'はい' });
   assert.match(systemNotes(context).at(-1).item.content[0].text, /「お寿司、いいですね！どんなネタが好きですか？」/);
 });
+
+test('the call records OpenAI audio times and turn settings for the hidden-wait estimate', async () => {
+  const context = await connected();
+  await context.fire({ type: 'session.created', session: { audio: { input: { turn_detection: { type: 'server_vad', silence_duration_ms: 1300, prefix_padding_ms: 300 } } } } });
+  await context.fire({ type: 'input_audio_buffer.speech_started', item_id: 'u1', audio_start_ms: 1000 });
+  await context.fire({ type: 'input_audio_buffer.speech_stopped', item_id: 'u1', audio_end_ms: 3000 });
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  await context.fire({ type: 'output_audio_buffer.started', response_id: 'r1' });
+  context.call.hangUp();
+  await context.settle();
+  const metrics = context.events.apiCalls.find((call) => call.path === '/api/calls/c1/metrics').options.body;
+  // The events arrive almost at once here, so this only checks the estimate is made and sent.
+  assert.equal(typeof metrics.turnEndWaitMedianMs, 'number');
+  assert.equal(typeof metrics.replyGapMedianMs, 'number');
+});

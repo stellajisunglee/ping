@@ -156,7 +156,7 @@ Use **New > Blueprint** and point it at this repo. `render.yaml` sets up a web s
 - `public/sw.js`: shows the ring and missed call notifications, and handles tapping them.
 - `public/voice.js`: the WebRTC call, including running the voice model's tools.
 - `public/aizuchi.js`: decides whether talking over the contact was only aizuchi, so the contact carries on instead of answering.
-- `public/turn-metrics.js`: turns a call's turn-taking event times into numbers, such as reply latency, suspected cut-offs and barge-ins. The server uses it to check what the phone sends, and logs one `turn-metrics` line per call.
+- `public/turn-metrics.js`: turns a call's turn-taking event times into numbers, such as reply latency, suspected cut-offs, barge-ins, and an estimate of how long OpenAI waited after the user stopped talking before ending their turn (`turnEndWait`) and the gap the user heard before Ping replied (`replyGap`). The server uses it to check what the phone sends, and logs one `turn-metrics` line per call.
 - `public/app.js`: signing up, Home, ringing and the call screen, with no framework or build step.
 - `public/stack.js`, `public/contacts.js`, `public/settings.js`: the other screens.
 - `public/lib.js`: what the screens share.

@@ -114,3 +114,47 @@ test('talking over Ping with aizuchi counts as ignored aizuchi, not a barge-in',
   assert.equal(summary.ignoredAizuchi, 1);
   assert.equal(summary.bargeIns, 1);
 });
+
+// Real timings from two test calls: [arrival time on the phone, OpenAI audio time].
+const turn = (started, stopped, replyAt) => [
+  { type: 'input_audio_buffer.speech_started', at: started[0], audioMs: started[1] },
+  { type: 'input_audio_buffer.speech_stopped', at: stopped[0], audioMs: stopped[1] },
+  { type: 'input_audio_buffer.committed', at: stopped[0] },
+  { type: 'output_audio_buffer.started', at: replyAt },
+  { type: 'output_audio_buffer.stopped', at: replyAt + 2000 },
+];
+
+test('in silence mode, the hidden wait is the silence setting', () => {
+  const summary = summarize([
+    { type: 'turn-detection', at: 0, silenceMs: 1300, paddingMs: 300 },
+    ...turn([9253, 7380], [15256, 13792], 15616),
+    ...turn([37868, 36084], [39678, 38208], 40552),
+  ]);
+  assert.equal(summary.turnEndWaitMedianMs, 1191);
+  assert.equal(summary.turnEndWaitP90Ms, 1286);
+  assert.equal(summary.replyGapMedianMs, 1551);
+  assert.equal(summary.replyGapP90Ms, 2160);
+});
+
+test('in semantic mode, a turn that sounded unfinished shows its long hidden wait', () => {
+  const summary = summarize([
+    { type: 'turn-detection', at: 0, silenceMs: 0, paddingMs: 0 },
+    ...turn([10830, 8940], [14411, 13040], 14791),
+    ...turn([18528, 16620], [27020, 18340], 27914),
+    ...turn([67925, 65996], [78171, 69100], 78566),
+  ]);
+  assert.equal(summary.turnEndWaitMedianMs, 6772);
+  assert.equal(summary.turnEndWaitP90Ms, 7142);
+  assert.equal(summary.replyGapMedianMs, 7537);
+  assert.equal(summary.replyGapP90Ms, 7666);
+  assert.ok(summary.replyLatencyMedianMs < 1000, 'reply latency alone hides the wait');
+});
+
+test('the hidden wait is never negative, and is left out when OpenAI sends no audio times', () => {
+  const quick = summarize(turn([10830, 8940], [14411, 13040], 14791));
+  assert.equal(quick.turnEndWaitMedianMs, 0);
+  const noAudioTimes = summarize(timeline(['speechStarted', 0], ['speechStopped', 1000], ['agentStarted', 1500]));
+  assert.equal(noAudioTimes.turnEndWaitMedianMs, null);
+  assert.equal(noAudioTimes.replyGapMedianMs, null);
+  assert.equal(noAudioTimes.replyLatencyMedianMs, 500);
+});

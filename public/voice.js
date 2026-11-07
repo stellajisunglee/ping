@@ -172,7 +172,14 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
   }
 
   function handleEvent(event) {
-    if (TIMED_EVENTS.has(event.type)) turnLog.push({ type: event.type, at: performance.now() });
+    const at = performance.now();
+    if (TIMED_EVENTS.has(event.type)) turnLog.push({ type: event.type, at, audioMs: event.audio_start_ms ?? event.audio_end_ms });
+    // The silence and padding settings OpenAI is using, which the hidden-wait estimate needs.
+    const detection = event.session?.audio?.input?.turn_detection;
+    if (detection) {
+      const silenceMode = detection.type === 'server_vad';
+      turnLog.push({ type: 'turn-detection', at, silenceMs: silenceMode ? detection.silence_duration_ms ?? 0 : 0, paddingMs: silenceMode ? detection.prefix_padding_ms ?? 0 : 0 });
+    }
     switch (event.type) {
       case 'response.created':
         responding = true;

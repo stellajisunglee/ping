@@ -30,14 +30,40 @@ export const METRIC_FIELDS = [
   'userTurns',
   'agentTurns',
   'callSeconds',
+  'turnEndWaitMedianMs',
+  'turnEndWaitP90Ms',
+  'replyGapMedianMs',
+  'replyGapP90Ms',
 ];
-const MAY_BE_EMPTY = new Set(['replyLatencyMedianMs', 'replyLatencyP90Ms']); // a call with no replies has no latency
+// A call with no replies has no latency or gap to report.
+const MAY_BE_EMPTY = new Set(['replyLatencyMedianMs', 'replyLatencyP90Ms', 'turnEndWaitMedianMs', 'turnEndWaitP90Ms', 'replyGapMedianMs', 'replyGapP90Ms']);
 
 // Nearest rank: the smallest value with at least that share of all values at or below it.
 const percentile = (sorted, share) => (sorted.length ? sorted[Math.ceil(share * sorted.length) - 1] : null);
+const spread = (values) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  return { median: percentile(sorted, 0.5), p90: percentile(sorted, 0.9) };
+};
+
+// OpenAI only tells the app a turn is over once it has decided so, which can be well after the user
+// actually stopped talking. This estimates that hidden wait. Each speech event carries a time on
+// OpenAI's audio clock (audio_start_ms, audio_end_ms) as well as the time it reached the phone, so
+// the difference between the two durations is how long the decision took after the audio ended.
+// In silence mode audio_end_ms already includes the silence wait and the start includes the prefix
+// padding, so both are added back. It's an estimate, good to a few hundred milliseconds.
+function hiddenWait(start, stop, detection) {
+  if (start?.audioMs === undefined || stop.audioMs === undefined) return null;
+  const wait = stop.at - start.at - (stop.audioMs - start.audioMs) + detection.silenceMs + detection.paddingMs;
+  return Math.max(0, Math.round(wait));
+}
 
 export function summarizeTurns(events, { connectedAt = null, endedAt }) {
   const latencies = [];
+  const waits = [];
+  const gaps = [];
+  let detection = { silenceMs: 0, paddingMs: 0 }; // the turn detection settings in use, from OpenAI
+  let speechStart = null;
+  let userStoppedTalkingAt = null; // estimated moment the user actually went quiet
   let userTurns = 0;
   let agentTurns = 0;
   let suspectedCutoffs = 0;
@@ -49,11 +75,17 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
   let cutoffCounted = false;
   let userSpokeOver = false;
 
-  for (const { type, at } of events) {
+  for (const event of events) {
+    const { type, at } = event;
     switch (type) {
+      case 'turn-detection':
+        detection = { silenceMs: event.silenceMs ?? 0, paddingMs: event.paddingMs ?? 0 };
+        break;
       case 'input_audio_buffer.speech_started':
+        speechStart = event;
         // Talking again before Ping replies means the earlier stop wasn't the end of their turn.
         userStoppedAt = null;
+        userStoppedTalkingAt = null;
         if (agentPlaying) {
           userSpokeOver = true;
           if (!cutoffCounted && at - agentStartedAt <= SUSPECTED_CUTOFF_WINDOW_MS) {
@@ -62,9 +94,15 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
           }
         }
         break;
-      case 'input_audio_buffer.speech_stopped':
+      case 'input_audio_buffer.speech_stopped': {
         userStoppedAt = at;
+        const wait = hiddenWait(speechStart, event, detection);
+        if (wait !== null) {
+          waits.push(wait);
+          userStoppedTalkingAt = at - wait;
+        }
         break;
+      }
       case 'input_audio_buffer.committed':
         userTurns += 1;
         break;
@@ -75,7 +113,9 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
         cutoffCounted = false;
         userSpokeOver = false;
         if (userStoppedAt !== null) latencies.push(Math.round(at - userStoppedAt));
+        if (userStoppedTalkingAt !== null) gaps.push(Math.round(at - userStoppedTalkingAt));
         userStoppedAt = null;
+        userStoppedTalkingAt = null;
         break;
       case 'output_audio_buffer.stopped':
         agentPlaying = false;
@@ -94,6 +134,8 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
   }
 
   const sorted = latencies.sort((a, b) => a - b);
+  const wait = spread(waits);
+  const gap = spread(gaps);
   return {
     replyLatencyMedianMs: percentile(sorted, 0.5),
     replyLatencyP90Ms: percentile(sorted, 0.9),
@@ -104,6 +146,10 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
     userTurns,
     agentTurns,
     callSeconds: connectedAt === null ? 0 : Math.max(0, Math.round((endedAt - connectedAt) / 1000)),
+    turnEndWaitMedianMs: wait.median,
+    turnEndWaitP90Ms: wait.p90,
+    replyGapMedianMs: gap.median, // what the user hears: from going quiet to Ping's voice
+    replyGapP90Ms: gap.p90,
   };
 }
 
