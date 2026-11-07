@@ -29,6 +29,9 @@ FRAME_S = 0.02
 # A frame counts as silence below this point between the clip's background noise (0) and its speech (1).
 # Relative to each clip, so quiet recordings and noisy rooms work the same way.
 SILENCE_SHARE = 1 / 3
+JOIN_GAP_S = 0.1  # sound broken by a gap this short is still one word
+MIN_SOUND_S = 0.15  # a sound shorter than this on its own is a click, tap or breath, not speech
+QUIET_SOUND_DB = 12  # a sound peaking this far below the clip's speech is a breath or mouth sound, not a word
 # Silence added after every clip, longer than any detector's own timeout, so a final pause can always be caught.
 END_PAD_S = 9.0
 # An end-of-turn event can arrive just after the user starts talking again. It still cuts them off.
@@ -52,7 +55,15 @@ def find_pauses(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> list[tuple
     rms = np.sqrt(np.mean(audio[: frames * frame].reshape(frames, frame) ** 2, axis=1))
     loudness = 20 * np.log10(rms + 1e-10)
     noise_level, speech_level = np.percentile(loudness, [10, 95])
-    silent = loudness < noise_level + SILENCE_SHARE * (speech_level - noise_level)
+    sound = loudness >= noise_level + SILENCE_SHARE * (speech_level - noise_level)
+    # Join the short gaps inside words first, then drop what's still too short to be speech,
+    # like the key click at the start of a recording.
+    sound = _set_short_runs(sound, value=False, frames=round(JOIN_GAP_S / FRAME_S), to=True, inner_only=True)
+    sound = _set_short_runs(sound, value=True, frames=round(MIN_SOUND_S / FRAME_S), to=False)
+    for start, end in _runs(sound):
+        if loudness[start:end].max() < speech_level - QUIET_SOUND_DB:
+            sound[start:end] = False
+    silent = ~sound
 
     pauses = []
     heard_speech = False
@@ -73,6 +84,28 @@ def find_pauses(audio: np.ndarray, sample_rate: int = SAMPLE_RATE) -> list[tuple
         for start, end in pauses
         if (end - start) * FRAME_S >= MIN_PAUSE_S
     ]
+
+
+def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """The start and end frame of every run of True."""
+    edges = np.flatnonzero(np.diff(np.concatenate([[False], mask, [False]]).astype(int)))
+    return list(zip(edges[::2], edges[1::2]))
+
+
+def _set_short_runs(mask: np.ndarray, value: bool, frames: int, to: bool, inner_only: bool = False) -> np.ndarray:
+    """Sets runs of `value` shorter than `frames` to `to`. With inner_only, runs touching either end are left alone."""
+    result = mask.copy()
+    start = None
+    for index in range(len(mask) + 1):
+        inside = index < len(mask) and mask[index] == value
+        if inside and start is None:
+            start = index
+        elif not inside and start is not None:
+            touches_end = start == 0 or index == len(mask)
+            if index - start < frames and not (inner_only and touches_end):
+                result[start:index] = to
+            start = None
+    return result
 
 
 def in_turns(groups: list[list]) -> list:

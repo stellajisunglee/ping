@@ -61,7 +61,7 @@ Answer each of Ping's six questions out loud, in Japanese, three times each, for
 .venv/bin/python label.py
 ```
 
-It finds every pause over 300 ms on its own, so there's nothing to mark by hand. A pause is audio quieter than a point a third of the way from the clip's background noise up to its speech, so it adapts to quiet recordings and noisy rooms. For each pause, it plays the 3 seconds before it and 1.5 seconds after it, and asks:
+It finds every pause over 300 ms on its own, so there's nothing to mark by hand. A pause is audio quieter than a point a third of the way from the clip's background noise up to its speech, so it adapts to quiet recordings and noisy rooms. Clicks, taps and breaths don't count as speech: sounds shorter than 0.15 seconds, or peaking 12 dB or more below your speech, are treated as silence. For each pause, it plays the 3 seconds before it and 1.5 seconds after it, and asks:
 - `t` if you were still thinking
 - `d` if you were done
 - `r` to replay, `s` to skip, `q` to quit
@@ -69,6 +69,8 @@ It finds every pause over 300 ms on its own, so there's nothing to mark by hand.
 Labels go to `labels.csv` as you go, so you can stop and come back later. Pauses come from each clip in turn, so wherever you stop, your labels cover every question and take. 18 clips usually have far more than 60 pauses. Aim for at least 60, roughly two thirds of them `t`, and label more if you have time.
 
 Skip (`s`) anything that isn't a real pause, like a dip in the middle of a word.
+
+To start labeling over, delete or rename `labels.csv`.
 
 ## 3. Run
 

@@ -42,6 +42,32 @@ class FindPauses(unittest.TestCase):
         audio = np.concatenate([room(0.5), speech(1.5), room(0.7), speech(1.5), room(0.5), speech(1.0), room(1.0)])
         self.assertEqual(len(find_pauses(audio)), 3)
 
+    def test_a_click_before_speaking_does_not_make_a_pause(self):
+        click = tone(0.04)
+        audio = np.concatenate([quiet(0.3), click, quiet(1.2), tone(1.5), quiet(0.6), tone(1.0), quiet(1.0)])
+        pauses = find_pauses(audio)
+        self.assertEqual(len(pauses), 2, pauses)
+        self.assertAlmostEqual(pauses[0][0], 3.04, delta=0.03)
+
+    def test_a_breath_before_speaking_does_not_make_a_pause(self):
+        breath = tone(0.4) * 0.15  # about 16 dB quieter than the speech
+        audio = np.concatenate([quiet(0.3), breath, quiet(1.0), tone(1.5), quiet(0.6), tone(1.0), quiet(1.0)])
+        pauses = find_pauses(audio)
+        self.assertEqual(len(pauses), 2, pauses)
+        self.assertGreater(pauses[0][0], 3.0)
+
+    def test_a_click_inside_a_pause_does_not_split_it(self):
+        audio = np.concatenate([tone(1.0), quiet(0.5), tone(0.04), quiet(0.5), tone(1.0), quiet(1.0)])
+        pauses = find_pauses(audio)
+        self.assertEqual(len(pauses), 2, pauses)
+        self.assertAlmostEqual(pauses[0][1] - pauses[0][0], 1.04, delta=0.05)
+
+    def test_a_word_broken_by_tiny_gaps_is_still_one_sound(self):
+        choppy = np.concatenate([tone(0.06), quiet(0.04), tone(0.06), quiet(0.04), tone(0.06)])
+        audio = np.concatenate([quiet(0.5), choppy, quiet(0.8), tone(1.0), quiet(1.0)])
+        pauses = find_pauses(audio)
+        self.assertEqual(len(pauses), 2, pauses)
+
     def test_silent_clip_has_no_pauses(self):
         self.assertEqual(find_pauses(quiet(2.0)), [])
 
