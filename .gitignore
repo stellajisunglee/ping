@@ -3,3 +3,7 @@ node_modules/
 .env
 .DS_Store
 data/
+bench/.env
+bench/audio/
+.venv/
+__pycache__/

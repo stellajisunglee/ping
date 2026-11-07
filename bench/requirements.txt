@@ -1,0 +1,8 @@
+# The end-of-turn benchmark. Python 3.12. Never deployed, and separate from the Node app.
+numpy>=2.0
+soundfile>=0.12        # reading and writing WAV clips
+sounddevice>=0.5       # recording and playing audio
+onnxruntime>=1.20      # Smart Turn, on the CPU
+transformers>=4.48     # Smart Turn's audio feature extractor (no PyTorch needed)
+huggingface_hub>=0.26  # downloads the Smart Turn model
+websockets>=14.0       # streaming to Deepgram Flux

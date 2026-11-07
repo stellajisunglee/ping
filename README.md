@@ -160,4 +160,5 @@ Use **New > Blueprint** and point it at this repo. `render.yaml` sets up a web s
 - `public/app.js`: signing up, Home, ringing and the call screen, with no framework or build step.
 - `public/stack.js`, `public/contacts.js`, `public/settings.js`: the other screens.
 - `public/lib.js`: what the screens share.
+- `bench/`: a Python benchmark of end-of-turn detectors on Japanese learner speech. It runs only on a developer's computer and is never deployed. See `bench/README.md`.
 - `scripts/build-icons.js`: draws the "ping" logo into `public/icons`.
