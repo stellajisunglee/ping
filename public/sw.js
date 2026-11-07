@@ -1,7 +1,7 @@
 // Makes the phone "ring" while the app is closed, and keeps the app shell available offline.
 
 const CACHE = 'ping-v2';
-const SHELL = ['/', '/index.html', '/app.js', '/lib.js', '/stack.js', '/contacts.js', '/settings.js', '/voice.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
+const SHELL = ['/', '/index.html', '/app.js', '/lib.js', '/stack.js', '/contacts.js', '/settings.js', '/turn-metrics.js', '/voice.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
 const NOTIFICATION_TAG = 'ping-call';
 const RING_AGAIN_EVERY_MS = 2_500;
 const RING_AGAIN_TIMES = 3; // keeps it inside the 10 seconds, after which the server sends the missed call

@@ -295,3 +295,46 @@ test('plans are checked', async () => {
   const token = await join();
   assert.equal((await request('/api/plan', { method: 'PUT', token, body: { plan: 'free-forever' } })).status, 400);
 });
+
+const METRICS = {
+  replyLatencyMedianMs: 640,
+  replyLatencyP90Ms: 910,
+  replyLatencyCount: 4,
+  suspectedCutoffs: 1,
+  bargeIns: 0,
+  ignoredAizuchi: 0,
+  userTurns: 5,
+  agentTurns: 6,
+  callSeconds: 95,
+};
+
+test('turn metrics are stored on the call with their settings, and logged once', async () => {
+  const token = await join();
+  const { data: call } = await request('/api/calls', { method: 'POST', token });
+  const lines = [];
+  const log = console.log;
+  console.log = (line) => lines.push(line);
+  try {
+    assert.equal((await request(`/api/calls/${call.id}/metrics`, { method: 'POST', token, body: METRICS })).status, 201);
+  } finally {
+    console.log = log;
+  }
+  const stored = engine.store.calls[call.id].turnMetrics;
+  assert.deepEqual(stored, { callId: call.id, ...METRICS, turnMode: 'silence', thinkingTime: 'normal', speed: 0.9, proficiency: 'beginner' });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^turn-metrics \{/);
+  assert.deepEqual(JSON.parse(lines[0].slice('turn-metrics '.length)), stored);
+});
+
+test('turn metrics must be the known numbers, for the user\'s own call', async () => {
+  const [owner, stranger] = [await join(), await join()];
+  const { data: call } = await request('/api/calls', { method: 'POST', token: owner });
+  const path = `/api/calls/${call.id}/metrics`;
+  for (const body of [{ ...METRICS, transcript: 'こんにちは' }, { ...METRICS, bargeIns: 'two' }, { ...METRICS, userTurns: -1 }, {}]) {
+    assert.equal((await request(path, { method: 'POST', token: owner, body })).status, 400, JSON.stringify(body));
+  }
+  assert.equal(engine.store.calls[call.id].turnMetrics, undefined);
+  assert.equal((await request(path, { method: 'POST', token: stranger, body: METRICS })).status, 404);
+  assert.equal((await request('/api/calls/not-a-call/metrics', { method: 'POST', token: owner, body: METRICS })).status, 404);
+  assert.equal((await request(path, { method: 'POST', body: METRICS })).status, 401);
+});

@@ -1,5 +1,7 @@
 // One phone call with a contact: a WebRTC connection straight from this browser to the voice model.
 
+import { summarizeTurns, TIMED_EVENTS } from './turn-metrics.js';
+
 const DATA_CHANNEL = 'oai-events';
 const WRAP_UP_BEFORE_END_SECONDS = 20;
 const HANG_UP_AFTER_GOODBYE_MS = 600;
@@ -19,15 +21,26 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
   let responding = false;
   let pendingVoiceUpdate = null;
   let maxCallSeconds = 0;
+  let connectedAt = null;
+  const turnLog = []; // when each turn-taking event arrived, for the call's timing summary
   const timers = [];
 
   const send = (event) => {
     if (channel?.readyState === 'open') channel.send(JSON.stringify(event));
   };
 
+  // Fire and forget: measuring the call must never get in the way of ending it.
+  function sendTurnMetrics() {
+    const endedAt = performance.now();
+    Promise.resolve()
+      .then(() => api(`/api/calls/${callId}/metrics`, { method: 'POST', body: summarizeTurns(turnLog, { connectedAt, endedAt }) }))
+      .catch((error) => console.warn('Could not send turn metrics', error));
+  }
+
   function end(reason) {
     if (ended) return;
     ended = true;
+    sendTurnMetrics();
     timers.forEach(clearTimeout);
     channel?.close();
     pc?.close();
@@ -40,6 +53,7 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
   function greetWhenReady() {
     if (greeted || !channelOpen || !audioPlaying) return;
     greeted = true;
+    connectedAt = performance.now();
     onStatus('connected', maxCallSeconds);
     send({ type: 'response.create' });
   }
@@ -107,6 +121,7 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
   }
 
   function handleEvent(event) {
+    if (TIMED_EVENTS.has(event.type)) turnLog.push({ type: event.type, at: performance.now() });
     switch (event.type) {
       case 'response.created':
         responding = true;

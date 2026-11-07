@@ -27,6 +27,7 @@ const MAX_LINE_LENGTH = 500;
 const KEEP_FEEDBACK = 1000;
 const SCHEDULE_FIELDS = ['frequency', 'customDays', 'callStartHour', 'callEndHour'];
 const RENAMED_PLANS = { plus: 'premium', pro: 'platinum' };
+const TURN_MODE = 'silence'; // Ping only detects the end of a turn from silence so far
 
 export const hashToken = (token) => createHash('sha256').update(token).digest('hex');
 
@@ -285,6 +286,16 @@ export class CallEngine {
     user.streak = recordCallDay(user.streak, localDayNumber(this.now(), user.timeZone), user.settings);
     this.store.save();
     return true;
+  }
+
+  // Saves a call's turn-taking numbers with the settings they were measured under, and returns the record.
+  saveTurnMetrics(user, callId, metrics) {
+    const call = this.store.calls[callId];
+    if (!call || call.userId !== user.id) return null;
+    const { thinkingTime, speed, proficiency } = user.settings;
+    call.turnMetrics = { callId, ...metrics, turnMode: TURN_MODE, thinkingTime, speed, proficiency };
+    this.store.save();
+    return call.turnMetrics;
   }
 
   streak(user) {

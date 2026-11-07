@@ -10,6 +10,7 @@ import { PING } from './contacts.js';
 import { createPushSender } from './push.js';
 import { createOpenAI } from './openai.js';
 import { isValidTimeZone } from './schedule.js';
+import { cleanMetrics } from '../public/turn-metrics.js';
 import { FREE_WORD_LIMIT } from './stack.js';
 import { buildSession, turnDetection, voiceMessageFor } from './tutor.js';
 
@@ -278,6 +279,17 @@ export function createApp({ engine, openai, config }) {
     if (method === 'POST' && connected) {
       if (!engine.markConnected(user, connected[1])) return json(res, 409, { error: 'This call has ended.' });
       return json(res, 200, { streak: engine.streak(user) });
+    }
+
+    // Timing numbers only, which is why every user's are accepted, unlike transcripts.
+    const metricsRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/metrics$/);
+    if (method === 'POST' && metricsRoute) {
+      const metrics = cleanMetrics(await readJson(req));
+      if (!metrics) return json(res, 400, { error: 'Invalid metrics.' });
+      const record = engine.saveTurnMetrics(user, metricsRoute[1], metrics);
+      if (!record) return json(res, 404, { error: 'Call not found.' });
+      console.log(`turn-metrics ${JSON.stringify(record)}`);
+      return json(res, 201, {});
     }
 
     const transcript = pathname.match(/^\/api\/calls\/([\w-]+)\/transcript$/);

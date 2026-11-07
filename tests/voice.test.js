@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { startCall } from '../public/voice.js';
 
 // A stand-in for the browser's WebRTC, so the call's event handling runs without a real connection.
-function setupCall({ apiResponses = {} } = {}) {
+function setupCall({ apiResponses = {}, failPaths = [] } = {}) {
   const sent = [];
   const channel = {
     readyState: 'open',
@@ -40,6 +40,7 @@ function setupCall({ apiResponses = {} } = {}) {
     audio,
     api: async (path, options) => {
       events.apiCalls.push({ path, options });
+      if (failPaths.includes(path)) throw new Error('offline');
       if (path.endsWith('/session')) return { clientSecret: 'ek', sdpUrl: 'https://voice.test', maxSeconds: 180 };
       return apiResponses[path];
     },
@@ -154,4 +155,33 @@ test('the speaker switch reports when the phone does not allow it', async (t) =>
   assert.equal(await context.call.setSpeaker(true), true);
   assert.equal(await context.call.setSpeaker(false), true);
   assert.deepEqual(sinks, ['loud', 'default']);
+});
+
+test('ending a call sends its timing numbers', async () => {
+  const context = await connected();
+  await context.fire({ type: 'input_audio_buffer.speech_stopped', item_id: 'u1', audio_end_ms: 4000 });
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  await context.fire({ type: 'output_audio_buffer.started', response_id: 'r1' });
+  context.call.hangUp();
+  await context.settle();
+  const sent = context.events.apiCalls.find((call) => call.path === '/api/calls/c1/metrics');
+  assert.equal(sent.options.method, 'POST');
+  assert.equal(sent.options.body.replyLatencyCount, 1);
+  assert.equal(sent.options.body.userTurns, 1);
+  assert.equal(sent.options.body.agentTurns, 1);
+  assert.ok(Object.values(sent.options.body).every((value) => value === null || typeof value === 'number'));
+  assert.deepEqual(context.events.ended, ['hung-up']);
+});
+
+test('a failure sending the numbers never stops the call from ending', async () => {
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const context = await connected({ failPaths: ['/api/calls/c1/metrics'] });
+    context.call.hangUp();
+    await context.settle();
+    assert.deepEqual(context.events.ended, ['hung-up']);
+  } finally {
+    console.warn = warn;
+  }
 });

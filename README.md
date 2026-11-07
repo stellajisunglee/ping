@@ -128,6 +128,7 @@ Use **New > Blueprint** and point it at this repo. `render.yaml` sets up a web s
 ## Privacy
 
 - Audio goes directly from the browser to OpenAI during a call. Ping's server never sees it and doesn't record calls.
+- At the end of a call, the app sends timing numbers (no audio, no words) to the server to measure conversation quality.
 - Transcripts appear on the call screen. On a free plan they're never sent to Ping's server. On a paid plan, the text of the last 20 calls is stored to personalize later calls.
 - The server stores each user's time zone, settings, plan, streak, contacts, stack, push subscription, voicemail list and recent call times, in one JSON file. Calls are deleted after 7 days.
 - There are no names or emails. "Delete my account" removes everything for that user.
@@ -148,6 +149,7 @@ Use **New > Blueprint** and point it at this repo. `render.yaml` sets up a web s
 - `server/store.js`: saves state to one JSON file.
 - `public/sw.js`: shows the ring and missed call notifications, and handles tapping them.
 - `public/voice.js`: the WebRTC call, including running the voice model's tools.
+- `public/turn-metrics.js`: turns a call's turn-taking event times into numbers, such as reply latency, suspected cut-offs and barge-ins. The server uses it to check what the phone sends, and logs one `turn-metrics` line per call.
 - `public/app.js`: signing up, Home, ringing and the call screen, with no framework or build step.
 - `public/stack.js`, `public/contacts.js`, `public/settings.js`: the other screens.
 - `public/lib.js`: what the screens share.
