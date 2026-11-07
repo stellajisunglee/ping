@@ -1,5 +1,5 @@
 """Finds every pause over 300 ms in the recorded clips, plays the audio around it, and asks whether you
-were still thinking (t) or done (d). Each answer is saved to labels.csv straight away, so you can stop
+were still thinking (t) or done (d). A soft beep marks where the pause being asked about starts. Each answer is saved to labels.csv straight away, so you can stop
 and pick up later. Pauses already labeled are skipped.
 
 Each clip's final pause comes first, since those are nearly all the "done" pauses. The rest come
@@ -12,15 +12,18 @@ import sys
 
 import sounddevice
 
-from core import AUDIO_DIR, LABELS, SAMPLE_RATE, Pause, append_label, find_pauses, labeling_order, read_clip, read_labels
+from core import AUDIO_DIR, LABELS, SAMPLE_RATE, Pause, append_label, find_pauses, labeling_order, read_clip, read_labels, with_beep
 
 CONTEXT_BEFORE_S = 3.0  # enough of the sentence to remember what you were saying
 CONTEXT_AFTER_S = 1.5  # enough to hear whether you carried on
 TARGET_PAUSES = 60
 
 
-def play(audio, start_s: float, end_s: float) -> None:
-    sounddevice.play(audio[int(max(0, start_s) * SAMPLE_RATE) : int(end_s * SAMPLE_RATE)], SAMPLE_RATE)
+def play(audio, pause_start_s: float, pause_end_s: float) -> None:
+    """Plays the speech before the pause, a soft beep where the pause starts, then the pause and what came after."""
+    start_s = max(0.0, pause_start_s - CONTEXT_BEFORE_S)
+    snippet = audio[int(start_s * SAMPLE_RATE) : int((pause_end_s + CONTEXT_AFTER_S) * SAMPLE_RATE)]
+    sounddevice.play(with_beep(snippet, pause_start_s - start_s), SAMPLE_RATE)
     sounddevice.wait()
 
 
@@ -44,7 +47,7 @@ def main() -> None:
         where = "end of clip" if final else f"{end_s - start_s:.2f} s"
         print(f"\n{name}  pause at {start_s:.2f} s ({where})   labeled so far: {counts['thinking']} thinking, {counts['done']} done of ~{TARGET_PAUSES}")
         while True:
-            play(clip, start_s - CONTEXT_BEFORE_S, end_s + CONTEXT_AFTER_S)
+            play(clip, start_s, end_s)
             answer = input("  t = still thinking, d = done, r = replay, s = skip, q = quit: ").strip().lower()
             if answer == "q":
                 return

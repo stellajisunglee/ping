@@ -114,6 +114,22 @@ def in_turns(groups: list[list]) -> list:
     return [group[index] for index in range(longest) for group in groups if index < len(group)]
 
 
+BEEP_S = 0.08
+BEEP_HZ = 880
+BEEP_LEVEL = 0.08  # soft, so it marks the spot without startling
+
+
+def with_beep(audio: np.ndarray, at_s: float, sample_rate: int = SAMPLE_RATE) -> np.ndarray:
+    """A copy of the audio with a short beep added at at_s, to mark which pause is being asked about."""
+    marked = audio.astype(np.float32).copy()
+    start = max(0, int(at_s * sample_rate))
+    length = min(int(BEEP_S * sample_rate), len(marked) - start)
+    if length > 0:
+        times = np.arange(length) / sample_rate
+        marked[start : start + length] += (BEEP_LEVEL * np.sin(2 * np.pi * BEEP_HZ * times)).astype(np.float32)
+    return np.clip(marked, -1, 1)
+
+
 def labeling_order(pauses_by_clip: list[list], is_final) -> list:
     """Every clip's final pause first, since those are nearly all the scarcer "done" pauses,
     then the rest one clip at a time, so stopping early still covers every question and take."""

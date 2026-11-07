@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from core import END_PAD_S, SAMPLE_RATE, Pause, append_label, drop_labels, find_pauses, flux_decisions, in_turns, labeling_order, next_free_clip_number, read_labels, release_within, silence_decisions, summarize
+from core import END_PAD_S, SAMPLE_RATE, Pause, append_label, drop_labels, find_pauses, flux_decisions, in_turns, labeling_order, next_free_clip_number, read_labels, release_within, with_beep, silence_decisions, summarize
 
 
 def tone(seconds: float) -> np.ndarray:
@@ -146,6 +146,19 @@ class LabelingOrder(unittest.TestCase):
         clips = [["a1", "a2", "a-end"], ["b1", "b-end"], ["c1", "c2"]]
         order = labeling_order(clips, lambda pause: pause.endswith("end"))
         self.assertEqual(order, ["a-end", "b-end", "a1", "b1", "c1", "a2", "c2"])
+
+
+class PauseMarker(unittest.TestCase):
+    def test_the_beep_lands_where_the_pause_starts_and_nowhere_else(self):
+        audio = quiet(2.0)
+        marked = with_beep(audio, 1.0)
+        loud = np.flatnonzero(np.abs(marked) > 0.001) / SAMPLE_RATE
+        self.assertAlmostEqual(loud.min(), 1.0, delta=0.01)
+        self.assertLess(loud.max(), 1.1)
+        self.assertTrue(np.array_equal(audio, quiet(2.0)), "the original audio is left alone")
+
+    def test_a_beep_at_the_very_end_is_cut_short_rather_than_failing(self):
+        self.assertEqual(len(with_beep(quiet(1.0), 0.99)), SAMPLE_RATE)
 
 
 class ReleasingTheMicrophone(unittest.TestCase):

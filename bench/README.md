@@ -61,7 +61,7 @@ Answer each of Ping's six questions out loud, in Japanese, three times each, for
 .venv/bin/python label.py
 ```
 
-It finds every pause over 300 ms on its own, so there's nothing to mark by hand. A pause is audio quieter than a point a third of the way from the clip's background noise up to its speech, so it adapts to quiet recordings and noisy rooms. Clicks, taps and breaths don't count as speech: sounds shorter than 0.15 seconds, or peaking 12 dB or more below your speech, are treated as silence. For each pause, it plays the 3 seconds before it and 1.5 seconds after it, and asks:
+It finds every pause over 300 ms on its own, so there's nothing to mark by hand. A pause is audio quieter than a point a third of the way from the clip's background noise up to its speech, so it adapts to quiet recordings and noisy rooms. Clicks, taps and breaths don't count as speech: sounds shorter than 0.15 seconds, or peaking 12 dB or more below your speech, are treated as silence. For each pause, it plays the 3 seconds before it and 1.5 seconds after it, with a soft beep where the pause starts. The snippet can contain other short gaps; the question is only about the one after the beep. Then it asks:
 - `t` if you were still thinking
 - `d` if you were done
 - `r` to replay, `s` to skip, `q` to quit
