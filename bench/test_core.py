@@ -1,11 +1,13 @@
 """Checks the benchmark's pause finding and scoring without a microphone or network:
     python -m unittest discover bench"""
 
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
-from core import END_PAD_S, SAMPLE_RATE, Pause, find_pauses, flux_decisions, silence_decisions, summarize
+from core import END_PAD_S, SAMPLE_RATE, Pause, append_label, drop_labels, find_pauses, flux_decisions, next_free_clip_number, read_labels, silence_decisions, summarize
 
 
 def tone(seconds: float) -> np.ndarray:
@@ -81,6 +83,23 @@ class Summary(unittest.TestCase):
         self.assertEqual(summary["cutoff_rate"], 0.25)
         self.assertEqual(summary["catch_rate"], 1.0)
         self.assertEqual(summary["median_catch_ms"], 400)
+
+
+class ClipFiles(unittest.TestCase):
+    def test_new_clips_take_the_lowest_free_number(self):
+        self.assertEqual(next_free_clip_number([]), 1)
+        self.assertEqual(next_free_clip_number([".DS_Store", "clip_001.wav", "clip_002.wav"]), 3)
+        self.assertEqual(next_free_clip_number(["clip_001.wav", "clip_003.wav"]), 2)
+        self.assertEqual(next_free_clip_number(["clip_002.wav", "notes.txt"]), 1)
+
+    def test_re_recording_a_clip_drops_only_its_labels(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "labels.csv"
+            for pause in [Pause("clip_001.wav", 1.0, 2.0, "thinking"), Pause("clip_002.wav", 1.0, 2.0, "done"), Pause("clip_001.wav", 3.0, 4.0, "done")]:
+                append_label(pause, path)
+            self.assertEqual(drop_labels("clip_001.wav", path), 2)
+            self.assertEqual([pause.clip for pause in read_labels(path)], ["clip_002.wav"])
+            self.assertEqual(drop_labels("clip_009.wav", path), 0)
 
 
 if __name__ == "__main__":

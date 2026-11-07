@@ -38,6 +38,8 @@ DEEPGRAM_API_KEY=your key here
 
 Press Enter to start a clip and Enter to stop. Clips are saved to `bench/audio/` as `clip_001.wav`, `clip_002.wav` and so on, and git ignores that folder. After you finish answering, stay quiet for about a second before stopping.
 
+To redo a take, delete its file. The next recording takes the lowest free number, so the retake gets the same name. If that clip was already labeled, its old labels are removed so you can label it again.
+
 Answer each of Ping's six questions out loud, in Japanese, three times each, for 18 clips:
 
 | Question | English |

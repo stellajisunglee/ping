@@ -4,6 +4,7 @@ finding pauses, reading and writing labels, and scoring each detector. Only need
 from __future__ import annotations
 
 import csv
+import re
 import statistics
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,6 +82,15 @@ def available_silence_s(pause: Pause, clip_seconds: float) -> float:
     return length + END_PAD_S if is_final(pause, clip_seconds) else length
 
 
+def next_free_clip_number(names: list[str]) -> int:
+    """The lowest clip number not in use, so deleting a bad take frees its number for the retake."""
+    used = {int(match.group(1)) for name in names if (match := re.fullmatch(r"clip_(\d+)\.wav", name))}
+    number = 1
+    while number in used:
+        number += 1
+    return number
+
+
 def read_labels(path: Path = LABELS_CSV) -> list[Pause]:
     if not path.exists():
         return []
@@ -98,6 +108,17 @@ def append_label(pause: Pause, path: Path = LABELS_CSV) -> None:
         if new_file:
             writer.writerow(LABEL_COLUMNS)
         writer.writerow([pause.clip, f"{pause.start_s:.2f}", f"{pause.end_s:.2f}", pause.label])
+
+
+def drop_labels(clip: str, path: Path = LABELS_CSV) -> int:
+    """Removes a clip's labels, because a re-recorded clip has different pauses. Returns how many went."""
+    kept = [pause for pause in read_labels(path) if pause.clip != clip]
+    dropped = len(read_labels(path)) - len(kept)
+    if dropped:
+        path.unlink()
+        for pause in kept:
+            append_label(pause, path)
+    return dropped
 
 
 def decision(detector: str, setting: str, pause: Pause, ended: bool, catch_ms: float | None = None, detail: str = "") -> dict:
