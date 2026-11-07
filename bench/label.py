@@ -4,6 +4,9 @@ and pick up later. Pauses already labeled are skipped."""
 
 from __future__ import annotations
 
+import os
+import sys
+
 import sounddevice
 
 from core import AUDIO_DIR, LABELS, SAMPLE_RATE, Pause, append_label, find_pauses, read_clip, read_labels
@@ -52,4 +55,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (KeyboardInterrupt, EOFError):
+        print("\nStopped. Every label so far is saved.")
+    # The audio library's own shutdown can hang on a Mac, so leave without it. Labels are saved as you go.
+    sys.stdout.flush()
+    os._exit(0)
