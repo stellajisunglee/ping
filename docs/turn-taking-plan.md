@@ -212,10 +212,43 @@ Does it queue a new reply to the うん? Does it error because a response is alr
 
 ---
 
-## After all four sessions
+## Session 5: Adaptive patience within a call
+
+**Why:** sessions 1 to 4 compare fixed settings. This one lets Ping react during the call: when it cuts the learner off, it waits longer for the rest of that call. It's a simple feedback rule built on the Session 1 measurement, and it only comes after the comparison so the earlier numbers stay clean. It applies to whichever detector the earlier sessions point to.
+
+**What to build**
+
+1. In `voice.js`, when a suspected cut-off happens (the user starts speaking within `SUSPECTED_CUTOFF_WINDOW_MS` of Ping's audio starting, and Session 3 didn't classify it as aizuchi), raise Ping's patience one step for the rest of the call:
+   - **Silence mode:** multiply the silence length by `PATIENCE_STEP`, capped at `MAX_SILENCE_MS`.
+   - **Semantic mode:** move eagerness down one level, for example `medium` to `low`. `low` is the floor, so a user already at `low` stays there.
+   - Send the change with `session.update`, through the same path as `updateVoice`, so it waits for Ping's turn to end. Check in the current docs that `turn_detection` can change mid-session, and don't guess.
+
+2. Only ever step up, never back down, during a call, and stop after `MAX_PATIENCE_STEPS`. Put all three values in named constants, each with a one-line comment explaining why.
+
+3. Keep the change to that call only. Don't save it to the user's settings, so every call starts from the same baseline and the numbers stay comparable. Whether to carry patience across calls is a later decision, made with data.
+
+4. Add an admin switch, `adaptivePatience` (default off), next to the turn mode switch, so I can compare the same detector with and without adaptation.
+
+5. Add `patienceSteps` to the Session 1 summary and to the server's list of allowed fields. The server adds `adaptivePatience` to the log line from the user's settings, the same way it adds `turnMode`, so the phone still sends numbers only.
+
+6. Tests:
+   - Pull the decision into a pure function: given the current turn detection and the steps taken so far, it returns the next turn detection, or nothing at the cap.
+   - Test both modes, the cap and the semantic floor.
+   - Route tests show a non-admin can't change `adaptivePatience`.
+
+7. README: explain the behavior in two or three sentences under "How a call works", and add `adaptivePatience` to the admin table.
+
+**Known gap to watch:** the cut-off count is a proxy. A learner answering quickly after a very short reply from Ping can look like a cut-off and make Ping slower than needed. The step cap limits the damage. If calls start to feel sluggish, tighten what counts as a cut-off before tuning the steps.
+
+**Done when:** on a test call, I get cut off on purpose and Ping waits noticeably longer afterwards. Over several calls, the metrics show `patienceSteps` above 0, and fewer suspected cut-offs with the switch on than off.
+
+---
+
+## After all five sessions
 
 - Merge `turn-taking-v2` only after I've used it on my own calls for a few days.
 - Use the Session 1 numbers and the benchmark to decide between three options:
   - Keep OpenAI semantic mode
   - Move to Pipecat with Smart Turn
   - Try Deepgram Flux in the live app
+- Use the Session 5 numbers to decide whether adaptive patience stays on, and whether it should carry across calls.
