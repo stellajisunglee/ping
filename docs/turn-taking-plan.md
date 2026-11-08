@@ -251,38 +251,72 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
 
 **Go/no-go:** go ahead if Smart Turn's slowest decision on my phone is under about 300 ms, and its verdicts match my sense of when I'm done. Otherwise stop, and we decide from the numbers.
 
-**Step 5b: build (after I say go on the spike)**
+**What the spike found**
 
-1. Add a third turn mode, `smartTurn`, to the admin switch from Session 2, so the three modes can be compared on the Session 1 numbers.
-2. In `smartTurn` mode:
-   - OpenAI keeps `server_vad` with a long silence, about 2.5 s, as the backup. This is subject to what 5a found.
-   - When the user goes quiet, the browser runs Smart Turn. If the model says done, Ping ends the turn right away and replies through the existing `requestReply` path, so the Session 3 aizuchi rules still apply.
-3. Keep the browser logic in its own file (for example `public/smart-turn.js`). Split it into pure functions that can be tested without a model or mic:
+- **The audio conversion is exact.** The plain-JavaScript log-mel features match Python's to within 0.000006. On four benchmark pauses, the browser gives the same Smart Turn scores as Python to four decimal places.
+- **Speed needs several threads.** Smart Turn took 345 ms per decision in browser WebAssembly on one thread on my laptop, and about 100 ms on four. Threads only work when the page is "cross-origin isolated", which takes two response headers (`Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy`). The larger full-precision model was slower (443 ms on four threads), so the small CPU model stays.
+- **My iPhone (iOS 18.7, Safari, 4 threads):** median 230 ms and slowest 250 ms per decision, from 200 ms of quiet to verdict. Under the 300 ms target. Silero costs about 1 ms per 32 ms block, and loading takes about 4 s.
+- **Accuracy matches the benchmark,** at about 10% cut-offs on both laptop and phone. On the phone, more ends fell through to the 2.5 s backup: 5 of 10, against 2 of 16 on the laptop. It's a small sample, so watch `backupEnds` in real calls.
+- **Download:** about 12 MB with brotli. The runtime is 14.2 MB raw and 2.7 MB compressed. Smart Turn is 8.7 MB and 7.4 MB. Silero is 2.3 MB and 1.8 MB. Ping's server doesn't compress files today.
+- **WebAssembly needs `'wasm-unsafe-eval'` in Ping's CSP.** It only allows WebAssembly to compile, not `eval()`.
+- **Echo on the phone is still untested.** The test sentence didn't play on the iPhone, probably because of the silent switch. Check it on a real call in 5b.
+- **Ending a turn early doesn't work while `server_vad` stays on.** Sending `input_audio_buffer.commit` works: the turn is committed within about 0.1 s, and Ping's voice starts about 0.5 s later. But OpenAI's VAD still thinks the user is mid-speech. About 2.5 s later it commits the audio after the early commit as a new turn that never had a `speech_started`, so the app replies twice.
+  - If that leftover audio is silence, Ping asks the question again on top of its own reply.
+  - If the user kept talking, OpenAI never sees them start again, so it doesn't stop Ping, and Ping talks over them.
+
+  So `server_vad` can't be the backup. In `smartTurn` mode, the browser has to handle all of turn-taking.
+
+**Step 5b: build (after I say go)**
+
+1. **Check OpenAI first, and stop if any of this fails.** Check the docs, then confirm on a laptop call, that with `turn_detection: null` over WebRTC:
+   - `input_audio_buffer.commit` creates the user's turn, and transcription still runs.
+   - `input_audio_buffer.clear` drops buffered audio.
+   - `output_audio_buffer.clear` stops Ping's audio (WebRTC only), and `response.cancel` stops the reply being written.
+   - `conversation.item.truncate` with `audio_end_ms` trims Ping's reply to what the user heard.
+2. Add a third turn mode, `smartTurn`, to the admin switch from Session 2, so the three modes can be compared on the Session 1 numbers. In this mode the server sends `turn_detection: null`. Silence and semantic modes don't change at all.
+3. **In `smartTurn` mode, the browser does turn-taking** on the call's own microphone stream:
+   - **Speech start and stop:** Silero.
+   - **End of turn:** after 200 ms of quiet, Smart Turn decides. If it says done, the app sends `input_audio_buffer.commit`. If not, a 2.5 s backup timer commits instead. Either way, the existing `committed` → `answerTurn` → `requestReply` path replies, so the Session 3 aizuchi rules still apply.
+   - **Talking over Ping:** if Silero hears speech while Ping is speaking, the app sends `output_audio_buffer.clear` and `response.cancel`, then truncates Ping's reply to the audio played so far. It marks the turn as talked-over, so うん still resumes Ping as it does today.
+   - **Buffer hygiene:** clear the input buffer when Ping starts speaking, unless the user is mid-turn, so a turn never includes echo or long silences from before it started.
+4. Keep the browser logic in its own files: `public/smart-turn.js`, plus `public/features.js` from the spike. Split it into pure functions that can be tested without a model or mic:
    - The log-mel features
-   - The pause-and-decide logic
+   - The turn state machine: blocks of speech probability and verdicts in, actions out (`commit`, `bargeIn`, `askSmartTurn`)
    - The fallback rule
-4. Fallback: if the models fail to load, or a decision takes too long, that call quietly falls back to silence mode. A slow phone can never make Ping worse than today.
-5. The service worker saves the model files in advance, so only the first call ever downloads them.
-6. Add numbers to the Session 1 summary and the server's list of allowed fields:
-   - `smartTurnEnds`: turns Smart Turn ended
-   - `backupEnds`: turns the silence backup ended
-   - `smartTurnMedianMs` and `smartTurnP90Ms`: decision times
+5. **Fallback:** if the models fail to load, or a decision takes over about 600 ms, that call switches to silence mode with `session.update`, using the user's own silence settings. A slow phone can never make Ping worse than today.
+6. **Serving:**
+   - Put the runtime and models under `public/`, with their license files.
+   - Add the content types for `.wasm`, `.mjs` and `.onnx`.
+   - Serve them brotli-compressed with Node's built-in `zlib`, not a new dependency.
+   - Add the two cross-origin isolation headers and `'wasm-unsafe-eval'` to Ping's pages, and check that push, the OpenAI connection and icons still work.
+   - **Ask me first:** commit the model files to git (about 25 MB), or fetch them at deploy time.
+7. **Only `smartTurn` calls download the models,** and the service worker caches them after the first call. Users in other modes never download them.
+8. **Metrics, numbers only.** Add these to the Session 1 summary and the server's list of allowed fields:
+   - `smartTurnEnds` and `backupEnds`
+   - `smartTurnMedianMs` and `smartTurnP90Ms`
    - `modelLoadMs`
    - `smartTurnFallback`: 0 or 1
 
-   Numbers only, as always. Compare modes on `replyGap` and `suspectedCutoffs`.
-7. Tests:
-   - The features match the Python fixture within a small tolerance.
-   - The decision logic is right for done, not done, and a slow model.
+   OpenAI no longer sends speech events in this mode, so the browser logs its own speech start and stop. `turnEndWait` and `replyGap` are then measured directly rather than estimated. Compare modes on `replyGap` and `suspectedCutoffs`.
+9. Tests:
+   - The features match a small Python fixture within a small tolerance.
+   - The state machine is right for done, not done, the backup, talking over Ping, and a slow model.
    - The fallback works.
+   - `turnDetection` returns null for `smartTurn`.
    - The new metric fields pass `cleanMetrics`.
    - Route tests still show only admins can pick the mode.
-8. README:
-   - Add `smartTurn` to the admin table.
-   - Explain the behavior under "How a call works".
-   - Under privacy, say that Smart Turn runs on the phone and the audio stays there.
+10. README:
+    - Add `smartTurn` to the admin table.
+    - Explain under "How a call works" that the phone handles turn-taking in this mode.
+    - Under privacy: Smart Turn runs on the phone, and the audio stays there.
+    - Add a third-party licenses note.
 
-**Done when:** on my phone in `smartTurn` mode, most turns end within about half a second of my finishing, `suspectedCutoffs` is no worse than silence mode over several calls, and the metrics show `smartTurnEnds` well above `backupEnds`.
+**Done when:** on my phone in `smartTurn` mode:
+- Most turns end within about half a second of my finishing.
+- Ping replies once per turn, never twice.
+- When I talk over Ping, it stops within about half a second, and うん still resumes it.
+- On speaker, Ping's own voice never interrupts it.
+- Over several calls, `suspectedCutoffs` is no worse than silence mode, and `smartTurnEnds` is well above `backupEnds`.
 
 ---
 
@@ -295,7 +329,7 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
 1. In `voice.js`, when a suspected cut-off happens (the user starts speaking within `SUSPECTED_CUTOFF_WINDOW_MS` of Ping's audio starting, and Session 3 didn't classify it as aizuchi), raise Ping's patience one step for the rest of the call:
    - **Silence mode:** multiply the silence length by `PATIENCE_STEP`, capped at `MAX_SILENCE_MS`.
    - **Semantic mode:** move eagerness down one level, for example `medium` to `low`. `low` is the floor, so a user already at `low` stays there.
-   - **Smart Turn mode:** raise the probability Smart Turn needs to call a turn done by `SMART_TURN_STEP`, for example 0.5 to 0.6, capped at `MAX_SMART_TURN_THRESHOLD`. Also lengthen the silence backup the same way silence mode does. The threshold lives in the browser, so it needs no `session.update`. The backup does.
+   - **Smart Turn mode:** raise the probability Smart Turn needs to call a turn done by `SMART_TURN_STEP`, for example 0.5 to 0.6, capped at `MAX_SMART_TURN_THRESHOLD`. Also lengthen the backup timer the same way silence mode does. Both live in the browser in this mode, so neither needs a `session.update`.
    - Send any OpenAI change with `session.update`, through the same path as `updateVoice`, so it waits for Ping's turn to end. Check in the current docs that `turn_detection` can change mid-session, and don't guess.
 
 2. Only ever step up, never back down, during a call, and stop after `MAX_PATIENCE_STEPS`. Put all three values in named constants, each with a one-line comment explaining why.
@@ -327,4 +361,8 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
 
 ## Known issues to fix later
 
-- **The call transcript shows words Ping never said.** OpenAI writes a reply in about a second but takes several seconds to speak it, so the full reply appears on screen right away. When the user interrupts, OpenAI cuts the audio and trims its own copy of the reply (`conversation.item.truncated`), but the screen keeps the whole text. Fix: on `conversation.item.truncated`, cut or grey out the unheard part of that line. Found in the Session 3a spike.
+- **The call transcript shows words Ping never said.** OpenAI writes a reply in about a second but takes several seconds to speak it, so the full reply appears on screen right away. When the user interrupts, OpenAI cuts the audio and trims its own copy of the reply (`conversation.item.truncated`), but the screen keeps the whole text. Fix: on `conversation.item.truncated`, cut or grey out the unheard part of that line. Found in the Session 3a spike. In `smartTurn` mode the app does the truncating itself (Session 5b), so it knows exactly where the cut is.
+
+## Separate from this plan
+
+- **English questions about Japanese language or culture get "try saying it in Japanese".** Rule 6 in `server/tutor.js` catches any non-Japanese turn. A question like "is it rude to…?" or "what's the difference between は and が?" is a real inquiry, so it should get a short answer in English and then a return to Japanese. This is only a change to the contact's instructions; turn-taking isn't affected. Decide how it fits with rule 1 (saving words), how long the answer can be, and whether off-topic culture questions are answered or redirected. Since it doesn't depend on this branch, it can ship to `main` on its own.
