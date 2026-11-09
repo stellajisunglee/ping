@@ -229,6 +229,10 @@ export function startCall({
       if (added) onWordAdded(saved);
       return { ok: true, added };
     },
+    // Nothing to run: the answer to a language or culture question ends here, and the conversation picks up as a new message.
+    async back_to_conversation() {
+      return { ok: true };
+    },
   };
 
   async function runTool(call) {

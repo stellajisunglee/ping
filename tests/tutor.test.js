@@ -35,6 +35,16 @@ test('the instructions ask this call\'s question and cover each behavior', () =>
   assert.match(instructions, /add_to_stack/);
 });
 
+test('a language or culture question in English gets a short answer before the Japanese nudge', () => {
+  const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12 });
+  const rule = (text) => instructions.indexOf(text);
+  assert.match(instructions, /how do you say umbrella/);
+  assert.match(instructions, /back_to_conversation/);
+  // The rules are checked in order, so an off-topic culture question is answered before the off-topic rule could catch it.
+  assert.ok(rule('Japanese language or Japanese culture') < rule('ちょっとわかりません'));
+  assert.ok(rule('Japanese language or Japanese culture') < rule('Try saying that in Japanese'));
+});
+
 test('Ping is formal by default, says it\'s not sure when off topic, and sticks to two languages', () => {
   const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12 });
   assert.match(instructions, /You are Ping/);
@@ -88,7 +98,7 @@ test('the session carries the user speed and thinking time', () => {
   assert.equal(session.audio.output.voice, 'marin');
   assert.equal(session.audio.input.turn_detection.silence_duration_ms, silenceMs('long', 0.75));
   assert.deepEqual(session.audio.input.transcription.languages, ['ja', 'en']);
-  assert.deepEqual(session.tools.map((tool) => tool.name), ['add_to_stack', 'update_settings', 'end_call']);
+  assert.deepEqual(session.tools.map((tool) => tool.name), ['add_to_stack', 'update_settings', 'back_to_conversation', 'end_call']);
 });
 
 test('speed steps stay inside the allowed range', () => {
