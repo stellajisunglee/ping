@@ -23,6 +23,7 @@ export function startCall({
   onSettings,
   onEnded,
   onNeedsTap,
+  onContactAudio = () => {}, // when the contact's voice starts, finishes or is cut off, per line
   smartTurnEngine = { load: loadSmartTurn, start: startSmartTurn }, // swapped for a stand-in in tests
 }) {
   let pc = null;
@@ -46,6 +47,9 @@ export function startCall({
   const plannedReplies = new Map(); // the contact's full text for each reply, even the parts never spoken
   let cutReply = ''; // the full text of the reply the user last cut off
   const turnLog = []; // when each turn-taking event arrived, for the call's timing summary
+  // Which line each reply's voice belongs to. The voice can start before the reply's first words arrive.
+  const replyLines = new Map(); // response id -> item id
+  let playing = null; // { responseId, itemId, at }
   const timers = [];
   // Smart Turn mode: the call starts in silence mode, then the phone takes over turn-taking once the
   // models have loaded, and OpenAI's own detection is switched off. Any trouble and it switches back.
@@ -93,7 +97,10 @@ export function startCall({
     send({ type: 'response.create' });
     // Smart Turn takes over once it has loaded and is hearing the microphone. Until then, and if it
     // can't, the call runs in silence mode.
-    smart.loading?.then(startSmartTurnMode).catch((error) => fallBackToSilence(error.message));
+    smart.loading?.then(startSmartTurnMode).catch((error) => {
+      console.warn('Smart Turn could not start', error);
+      fallBackToSilence(error.message === 'no audio from the microphone' ? 'no-audio' : 'load');
+    });
   }
 
   function playAudio() {
@@ -181,7 +188,7 @@ export function startCall({
   }
 
   function fallBackToSilence(reason) {
-    turnLog.push({ type: 'smart-turn-fallback', at: performance.now() });
+    turnLog.push({ type: 'smart-turn-fallback', at: performance.now(), reason });
     console.warn(`Smart Turn is off for this call (${reason}), so Ping is using silence detection.`);
     smart.engine?.stop();
     smart.engine = null;
@@ -194,6 +201,7 @@ export function startCall({
   function onSmartTurnEvent(event) {
     if (event.type === 'fallback') return fallBackToSilence(event.reason);
     if (event.type === 'decision') return turnLog.push({ type: 'smart-turn-decision', at: event.at, ms: event.ms });
+    if (event.type === 'audio-restart') return turnLog.push({ type: 'smart-turn-audio-restart', at: performance.now() });
     if (!smart.active) return;
     if (event.type === 'speech-start') {
       // Logged as OpenAI would have, so the call's numbers work the same in every mode.
@@ -269,10 +277,16 @@ export function startCall({
       case 'response.output_audio_transcript.delta':
         plannedReplies.set(event.item_id, (plannedReplies.get(event.item_id) ?? '') + event.delta);
         onLine({ id: event.item_id, from: 'contact', delta: event.delta });
+        if (event.response_id) replyLines.set(event.response_id, event.item_id);
+        if (playing && !playing.itemId && playing.responseId === event.response_id) {
+          playing.itemId = event.item_id;
+          onContactAudio({ type: 'start', itemId: playing.itemId, at: playing.at });
+        }
         break;
       // OpenAI trimmed this reply to what the user heard, so keep the full version in case they only said うん.
       case 'conversation.item.truncated':
         cutReply = plannedReplies.get(event.item_id) ?? '';
+        onContactAudio({ type: 'heard', itemId: event.item_id, audioEndMs: event.audio_end_ms });
         break;
       case 'input_audio_buffer.speech_started':
         smart.openAiHearsSpeech = true;
@@ -300,12 +314,16 @@ export function startCall({
       case 'output_audio_buffer.started':
         speaking = true;
         onSpeaking(true);
+        playing = { responseId: event.response_id, itemId: replyLines.get(event.response_id) ?? null, at };
+        if (playing.itemId) onContactAudio({ type: 'start', itemId: playing.itemId, at });
         // Without OpenAI's detection, the input buffer keeps everything since the last turn. Start the
         // next turn clean, so it never includes silence or echo from while the contact was talking.
         if (smart.active && !smart.engine?.inTurn) send({ type: 'input_audio_buffer.clear' });
         break;
       case 'output_audio_buffer.stopped':
       case 'output_audio_buffer.cleared':
+        if (playing?.itemId) onContactAudio({ type: event.type.endsWith('stopped') ? 'end' : 'cut', itemId: playing.itemId, at });
+        playing = null;
         speaking = false;
         audioFinished = true;
         onSpeaking(false);

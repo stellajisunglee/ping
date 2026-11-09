@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanMetrics, METRIC_FIELDS, SUSPECTED_CUTOFF_WINDOW_MS, summarizeTurns } from '../public/turn-metrics.js';
+import { cleanMetrics, METRIC_FIELDS, metricsProblems, SUSPECTED_CUTOFF_WINDOW_MS, summarizeTurns } from '../public/turn-metrics.js';
 
 const SHORT = {
   speechStarted: 'input_audio_buffer.speech_started',
@@ -182,11 +182,22 @@ test('in Smart Turn mode the wait is measured on the phone, and each kind of tur
   assert.deepEqual(cleanMetrics(summary), summary);
 });
 
-test('a call that fell back to silence mode says so, and other modes report no Smart Turn numbers', () => {
-  assert.equal(summarize([{ type: 'smart-turn-fallback', at: 10 }]).smartTurnFallback, 1);
+test('a call that fell back to silence mode says why, and other modes report no Smart Turn numbers', () => {
+  const fallback = (reason) => summarize([{ type: 'smart-turn-fallback', at: 10, reason }]).smartTurnFallback;
+  assert.deepEqual([fallback('load'), fallback('slow'), fallback('no-audio')], [1, 2, 3]);
+  const restarts = summarize([{ type: 'smart-turn-audio-restart', at: 1 }, { type: 'smart-turn-audio-restart', at: 2 }]);
+  assert.deepEqual([restarts.audioRestarts, restarts.smartTurnFallback], [2, 0]);
   const plain = summarize(timeline(['speechStopped', 1000], ['agentStarted', 1600]));
   assert.deepEqual(
-    [plain.smartTurnEnds, plain.backupEnds, plain.smartTurnMedianMs, plain.smartTurnP90Ms, plain.modelLoadMs, plain.smartTurnFallback],
-    [0, 0, null, null, null, 0],
+    [plain.smartTurnEnds, plain.backupEnds, plain.smartTurnMedianMs, plain.smartTurnP90Ms, plain.modelLoadMs, plain.smartTurnFallback, plain.audioRestarts],
+    [0, 0, null, null, null, 0, 0],
   );
+});
+
+test('a rejected set of metrics is explained by field names only, never values', () => {
+  const good = summarize(timeline(['speechStopped', 1000], ['agentStarted', 1600]));
+  const { bargeIns, ...missing } = good;
+  assert.deepEqual(metricsProblems({ ...missing, callSeconds: 1.5, transcript: 'こんにちは' }), { missing: ['bargeIns'], invalid: ['callSeconds'], unknown: 1 });
+  assert.deepEqual(metricsProblems({ ...good, replyGapMedianMs: null }), { missing: [], invalid: [], unknown: 0 });
+  assert.deepEqual(metricsProblems('words'), { notAnObject: true });
 });

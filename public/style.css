@@ -825,6 +825,23 @@ textarea {
   background: rgb(255 246 236 / 12%);
 }
 
+/* Each batch of the contact's words fades in as it's said. */
+.line .said {
+  animation: said-in 0.35s ease-out;
+}
+
+@keyframes said-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .line .said {
+    animation: none;
+  }
+}
+
 .line.you {
   align-self: flex-end;
   background: var(--accent);

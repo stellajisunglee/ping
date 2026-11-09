@@ -40,8 +40,11 @@ export const METRIC_FIELDS = [
   'smartTurnMedianMs', // how long one Smart Turn decision took on the phone
   'smartTurnP90Ms',
   'modelLoadMs', // how long the runtime and models took to load
-  'smartTurnFallback', // 1 if the call went back to silence mode
+  'smartTurnFallback', // why the call went back to silence mode: 0 it didn't, 1 couldn't load, 2 too slow, 3 audio stopped
+  'audioRestarts', // times the phone paused the microphone audio Smart Turn hears, and it was restarted
 ];
+
+export const FALLBACK_CODES = { load: 1, slow: 2, 'no-audio': 3 };
 // A call with no replies has no latency or gap to report, and only Smart Turn calls have decision times.
 const MAY_BE_EMPTY = new Set([
   'replyLatencyMedianMs',
@@ -96,6 +99,7 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
   let backupEnds = 0;
   let modelLoadMs = null;
   let smartTurnFallback = 0;
+  let audioRestarts = 0;
 
   for (const event of events) {
     const { type, at } = event;
@@ -140,7 +144,10 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
         modelLoadMs = Math.round(event.loadMs);
         break;
       case 'smart-turn-fallback':
-        smartTurnFallback = 1;
+        smartTurnFallback = FALLBACK_CODES[event.reason] ?? FALLBACK_CODES.load;
+        break;
+      case 'smart-turn-audio-restart':
+        audioRestarts += 1;
         break;
       case 'input_audio_buffer.committed':
         userTurns += 1;
@@ -196,7 +203,18 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
     smartTurnP90Ms: decision.p90,
     modelLoadMs,
     smartTurnFallback,
+    audioRestarts,
   };
+}
+
+// Why a set of metrics was rejected, for the server log: the names of known fields that are missing or
+// not whole numbers, and how many unknown fields came with them. Never the values themselves.
+export function metricsProblems(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { notAnObject: true };
+  const missing = METRIC_FIELDS.filter((field) => !(field in body));
+  const invalid = METRIC_FIELDS.filter((field) => field in body && cleanMetrics({ ...Object.fromEntries(METRIC_FIELDS.map((name) => [name, 0])), [field]: body[field] }) === null);
+  const unknown = Object.keys(body).filter((key) => !METRIC_FIELDS.includes(key)).length;
+  return { missing, invalid, unknown };
 }
 
 // Returns the metrics if every known field is there as a whole number, and nothing else is. Otherwise null.

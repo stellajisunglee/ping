@@ -1,4 +1,5 @@
 import { initContacts } from './contacts.js';
+import { charsSaid, createPace } from './reveal.js';
 import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isPaid, onShow, readToken, refresh, setError, show, state, writeToken } from './lib.js';
 import { initSettings } from './settings.js';
 import { initStack } from './stack.js';
@@ -15,6 +16,9 @@ let activeCall = null;
 let activeCallId = null;
 let callCountdown = null;
 let transcript = new Map();
+let pace = createPace(); // how fast the contact speaks on this call, learned as it goes
+let revealTimer = null;
+const REVEAL_EVERY_MS = 80;
 
 const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -284,15 +288,82 @@ function showLine({ id, from, text, delta }) {
   let line = transcript.get(id);
   if (!line) {
     const node = el('p', { className: from === 'you' ? 'line you' : 'line them', lang: 'ja', hidden: true });
-    line = { from, text: '', node };
+    // A contact's line shows only what has been said so far: `shown` characters, once its voice starts.
+    line = { from, text: '', node, shown: 0, startedAt: null, stoppedAt: null, finished: false, cut: false };
     transcript.set(id, line);
     addTranscriptNode(node);
   }
   line.text = delta ? line.text + delta : text;
+  if (from === 'contact') return revealLine(line);
   line.node.textContent = line.text;
   line.node.hidden = !line.text.trim();
   const list = $('call-transcript');
   list.scrollTop = list.scrollHeight;
+}
+
+const speed = () => state.me?.settings?.speed ?? 1;
+
+// How much of a contact's line has been said: all of it once their voice finished, otherwise an
+// estimate from how long they've been speaking, up to the moment they were cut off.
+function saidSoFar(line) {
+  if (line.finished) return line.text.length;
+  if (line.startedAt === null) return 0;
+  const until = line.stoppedAt ?? performance.now();
+  return Math.min(line.text.length, charsSaid(line.text, until - line.startedAt, pace.unitsPerMs(speed())));
+}
+
+// Adds the newly said words to the line, each batch fading in.
+function revealLine(line) {
+  if (line.cut) return;
+  const target = saidSoFar(line);
+  if (target <= line.shown) return;
+  line.node.append(el('span', { className: 'said', textContent: line.text.slice(line.shown, target) }));
+  line.shown = target;
+  line.node.hidden = !line.text.slice(0, target).trim();
+  const list = $('call-transcript');
+  list.scrollTop = list.scrollHeight;
+}
+
+// What the user actually heard of a line, which is also what a paid plan saves.
+const heardText = (line) => (line.from === 'contact' ? line.text.slice(0, line.shown) : line.text);
+
+function revealTick() {
+  const revealing = [...transcript.values()].filter((line) => line.from === 'contact' && line.startedAt !== null && !line.finished && !line.cut);
+  revealing.forEach(revealLine);
+  if (!revealing.length) {
+    clearInterval(revealTimer);
+    revealTimer = null;
+  }
+}
+
+// The user cut the contact off: keep only the words they heard, and mark the line as unfinished.
+function cutLine(line, audioEndMs) {
+  const heard = Math.min(line.text.length, charsSaid(line.text, audioEndMs, pace.unitsPerMs(speed())));
+  line.cut = true;
+  line.shown = heard;
+  const unfinished = heard < line.text.trimEnd().length;
+  line.node.replaceChildren(el('span', { textContent: line.text.slice(0, heard).trimEnd() + (unfinished ? '…' : '') }));
+  line.node.hidden = !heard;
+}
+
+function onContactAudio({ type, itemId, at, audioEndMs }) {
+  const line = transcript.get(itemId);
+  if (!line) return;
+  if (type === 'start') {
+    line.startedAt = at;
+    revealLine(line);
+    revealTimer ??= setInterval(revealTick, REVEAL_EVERY_MS);
+  } else if (type === 'end') {
+    if (line.startedAt !== null) pace.learn(line.text, at - line.startedAt, speed());
+    line.finished = true;
+    revealLine(line);
+  } else if (type === 'cut' && line.startedAt !== null) {
+    // OpenAI says exactly how much was heard a moment later. Until then, stop where the estimate was.
+    line.stoppedAt = at;
+    cutLine(line, at - line.startedAt);
+  } else if (type === 'heard') {
+    cutLine(line, audioEndMs);
+  }
 }
 
 function startCountdown(seconds) {
@@ -307,12 +378,15 @@ function startCountdown(seconds) {
 
 async function saveTranscript(callId) {
   if (!isPaid()) return;
-  const lines = [...transcript.values()].map(({ from, text }) => ({ from, text })).filter((line) => line.text.trim());
+  const lines = [...transcript.values()].map((line) => ({ from: line.from, text: heardText(line) })).filter((line) => line.text.trim());
   await api(`/api/calls/${callId}/transcript`, { method: 'POST', body: { lines } }).catch((error) => console.warn('Could not save the conversation', error));
 }
 
 function beginCall(callId, contactName = 'Ping') {
   transcript = new Map();
+  pace = createPace();
+  clearInterval(revealTimer);
+  revealTimer = null;
   activeCallId = callId;
   $('call-transcript').replaceChildren();
   $('tap-to-hear').hidden = true;
@@ -336,6 +410,7 @@ function beginCall(callId, contactName = 'Ping') {
       api(`/api/calls/${callId}/connected`, { method: 'POST' }).catch((error) => console.warn('Could not count the call', error));
     },
     onLine: showLine,
+    onContactAudio,
     onWordAdded: (word) => {
       addTranscriptNode(el('p', { className: 'line note', textContent: `${word.kanji || word.kana} *added to stack*` }));
     },
@@ -350,6 +425,8 @@ function beginCall(callId, contactName = 'Ping') {
       activeCall = null;
       activeCallId = null;
       clearInterval(callCountdown);
+      clearInterval(revealTimer);
+      revealTimer = null;
       $('call-avatar').classList.remove('speaking');
       await saveTranscript(callId);
       await refresh().catch(() => {});

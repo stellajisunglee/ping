@@ -12,7 +12,7 @@ import { PING } from './contacts.js';
 import { createPushSender } from './push.js';
 import { createOpenAI } from './openai.js';
 import { isValidTimeZone } from './schedule.js';
-import { cleanMetrics } from '../public/turn-metrics.js';
+import { cleanMetrics, metricsProblems } from '../public/turn-metrics.js';
 import { FREE_WORD_LIMIT } from './stack.js';
 import { buildSession, turnDetection, voiceMessageFor } from './tutor.js';
 
@@ -325,10 +325,17 @@ export function createApp({ engine, openai, config }) {
     // Timing numbers only, which is why every user's are accepted, unlike transcripts.
     const metricsRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/metrics$/);
     if (method === 'POST' && metricsRoute) {
-      const metrics = cleanMetrics(await readJson(req));
-      if (!metrics) return json(res, 400, { error: 'Invalid metrics.' });
+      const body = await readJson(req);
+      const metrics = cleanMetrics(body);
+      if (!metrics) {
+        console.warn(`turn-metrics rejected ${JSON.stringify(metricsProblems(body))}`);
+        return json(res, 400, { error: 'Invalid metrics.' });
+      }
       const record = engine.saveTurnMetrics(user, metricsRoute[1], metrics);
-      if (!record) return json(res, 404, { error: 'Call not found.' });
+      if (!record) {
+        console.warn('turn-metrics rejected: call not found');
+        return json(res, 404, { error: 'Call not found.' });
+      }
       console.log(`turn-metrics ${JSON.stringify(record)}`);
       return json(res, 201, {});
     }

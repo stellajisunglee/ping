@@ -14,9 +14,11 @@ const BLOCK = 512; // 32 ms at 16 kHz
 const VAD_CONTEXT = 64; // Silero also looks at the last 64 samples of the previous block
 const PRE_ROLL_BLOCKS = 16; // about half a second of audio from before speech was noticed
 const KEEP_SAMPLES = 8 * SAMPLE_RATE; // Smart Turn only hears the last 8 seconds
-// With OpenAI's detection off, no audio means no turn ever ends, so silence this long from the
-// microphone itself (not the user) sends the call back to silence mode.
-const NO_AUDIO_MS = 2000;
+// With OpenAI's detection off, no audio means no turn ever ends. iOS can pause a page's audio
+// processing, for example when the audio output changes, so a gap first gets a restart, and only
+// a gap this long from the microphone itself (not the user) sends the call back to silence mode.
+const RESTART_AUDIO_AFTER_MS = 600;
+const NO_AUDIO_MS = 3000;
 
 let loading = null; // shared by every call on this page, so the models load once
 
@@ -77,12 +79,14 @@ function makeResampler(fromRate) {
  * - { type: 'speech-start', at }
  * - { type: 'end-turn', reason: 'smartTurn' | 'backup', at, quietSince }
  * - { type: 'decision', at, ms }: how long one Smart Turn decision took
+ * - { type: 'audio-restart' }: the microphone audio paused, so the audio graph was restarted
  * - { type: 'fallback', reason }: Smart Turn is too slow here, or stopped getting audio, so the call
  *   should go back to silence mode
  * Resolves once audio is actually flowing, or rejects if it doesn't start.
  */
 export async function startSmartTurn({ stream, models, onEvent }) {
   const { ort, vad, turn } = models;
+  let stopped = false;
   let context;
   let source;
   try {
@@ -95,6 +99,10 @@ export async function startSmartTurn({ stream, models, onEvent }) {
     source = context.createMediaStreamSource(stream);
   }
   await context.resume();
+  // If the phone pauses the audio graph, start it again straight away.
+  context.onstatechange = () => {
+    if (!stopped && context.state !== 'running' && context.state !== 'closed') context.resume().catch(() => {});
+  };
   await context.audioWorklet.addModule('/capture-worklet.js');
   const capture = new AudioWorkletNode(context, 'capture');
   const mute = context.createGain();
@@ -103,7 +111,6 @@ export async function startSmartTurn({ stream, models, onEvent }) {
   capture.connect(mute).connect(context.destination);
   const resample = makeResampler(context.sampleRate);
 
-  let stopped = false;
   let state = initialTurnState();
   let vadState = new Float32Array(2 * 128);
   let vadContext = new Float32Array(VAD_CONTEXT);
@@ -114,14 +121,21 @@ export async function startSmartTurn({ stream, models, onEvent }) {
   let turnAudio = new Float32Array(0);
   const decisionMs = [];
   let lastAudioAt = null;
+  let restarting = false; // one restart per gap in the audio
   let audioStarted;
   const flowing = new Promise((resolve) => (audioStarted = resolve));
   const watchdog = setInterval(() => {
-    if (lastAudioAt !== null && performance.now() - lastAudioAt > NO_AUDIO_MS) {
+    if (lastAudioAt === null) return;
+    const gap = performance.now() - lastAudioAt;
+    if (gap > NO_AUDIO_MS) {
       onEvent({ type: 'fallback', reason: 'no-audio' });
       stop();
+    } else if (gap > RESTART_AUDIO_AFTER_MS && !restarting) {
+      restarting = true;
+      onEvent({ type: 'audio-restart' });
+      context.resume().catch(() => {});
     }
-  }, 500);
+  }, 300);
 
   function keep(block) {
     const joined = new Float32Array(Math.min(KEEP_SAMPLES, turnAudio.length + block.length));
@@ -204,6 +218,7 @@ export async function startSmartTurn({ stream, models, onEvent }) {
     if (stopped) return;
     const at = performance.now();
     lastAudioAt = at;
+    restarting = false;
     audioStarted();
     const samples = resample(data);
     const joined = new Float32Array(pending.length + samples.length);

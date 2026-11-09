@@ -340,6 +340,7 @@ const METRICS = {
   smartTurnP90Ms: null,
   modelLoadMs: null,
   smartTurnFallback: 0,
+  audioRestarts: 0,
 };
 
 test('turn metrics are stored on the call with their settings, and logged once', async () => {

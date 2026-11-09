@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startCall } from '../public/voice.js';
+import { cleanMetrics } from '../public/turn-metrics.js';
 
 // A stand-in for the browser's WebRTC, so the call's event handling runs without a real connection.
 function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnEngine } = {}) {
@@ -37,7 +38,7 @@ function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnE
   });
   globalThis.fetch = async () => ({ ok: true, text: async () => 'answer' });
 
-  const events = { lines: [], words: [], ended: [], settings: [], apiCalls: [] };
+  const events = { lines: [], words: [], ended: [], settings: [], apiCalls: [], audio: [] };
   const audio = { play: async () => {}, srcObject: null };
   const call = startCall({
     callId: 'c1',
@@ -55,6 +56,7 @@ function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnE
     onSettings: (settings) => events.settings.push(settings),
     onEnded: (reason) => events.ended.push(reason),
     onNeedsTap: () => {},
+    onContactAudio: ({ type, itemId, audioEndMs }) => events.audio.push(audioEndMs === undefined ? `${type} ${itemId}` : `${type} ${itemId} ${audioEndMs}`),
     ...(smartTurnEngine && { smartTurnEngine }),
   });
   const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -385,6 +387,7 @@ test('in Smart Turn mode, talking over Ping stops it, and うん still makes it 
   assert.equal(context.fake.stopped, true);
   const metrics = metricsOf(context);
   assert.deepEqual([metrics.ignoredAizuchi, metrics.smartTurnEnds, metrics.modelLoadMs], [1, 1, 2500]);
+  assert.deepEqual(cleanMetrics(metrics), metrics, 'the server accepts them');
 });
 
 test('a reply already fully written is silenced, not cancelled, when the user talks over it', async (t) => {
@@ -414,7 +417,7 @@ test("a settings change keeps OpenAI's detection off, and a fallback restores th
 
   context.call.hangUp();
   await context.settle();
-  assert.equal(metricsOf(context).smartTurnFallback, 1);
+  assert.equal(metricsOf(context).smartTurnFallback, 2, 'too slow');
 });
 
 test('if Smart Turn cannot load, the call simply stays in silence mode', async () => {
@@ -426,7 +429,7 @@ test('if Smart Turn cannot load, the call simply stays in silence mode', async (
     assert.deepEqual(detectionUpdates(context), []);
     context.call.hangUp();
     await context.settle();
-    assert.equal(metricsOf(context).smartTurnFallback, 1);
+    assert.equal(metricsOf(context).smartTurnFallback, 1, 'could not load');
   } finally {
     console.warn = warn;
   }
@@ -453,4 +456,29 @@ test('other modes never load Smart Turn', async (t) => {
   t.after(() => finishCall(context));
   await context.answer();
   assert.equal(loaded, false);
+});
+
+// ---------- showing the contact's words as they're said ----------
+
+test('the screen hears when each line starts being said and when it finishes, even if the voice comes first', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  await context.fire({ type: 'response.output_audio_transcript.delta', response_id: 'r1', item_id: 'ai1', delta: 'もしもし' });
+  await context.fire({ type: 'output_audio_buffer.started', response_id: 'r1' });
+  await context.fire({ type: 'output_audio_buffer.stopped', response_id: 'r1' });
+  // The next reply's voice starts before its first words arrive.
+  await context.fire({ type: 'output_audio_buffer.started', response_id: 'r2' });
+  assert.deepEqual(context.events.audio, ['start ai1', 'end ai1']);
+  await context.fire({ type: 'response.output_audio_transcript.delta', response_id: 'r2', item_id: 'ai2', delta: '今日は' });
+  await context.fire({ type: 'response.output_audio_transcript.delta', response_id: 'r2', item_id: 'ai2', delta: '何を' });
+  assert.deepEqual(context.events.audio, ['start ai1', 'end ai1', 'start ai2']);
+});
+
+test('when the user cuts the contact off, the screen hears it, then exactly how much was heard', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  await context.fire({ type: 'response.output_audio_transcript.delta', response_id: 'r1', item_id: 'ai1', delta: 'そうなんだ。今日は何を食べた？' });
+  await talkOverPing(context, 'u1');
+  await context.fire({ type: 'conversation.item.truncated', item_id: 'ai1', audio_end_ms: 1980 });
+  assert.deepEqual(context.events.audio.slice(-2), ['cut ai1', 'heard ai1 1980']);
 });

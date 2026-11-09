@@ -285,7 +285,8 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
    - The turn state machine: blocks of speech probability and verdicts in, actions out (`commit`, `bargeIn`, `askSmartTurn`)
    - The fallback rule
 5. **Fallback:** if the models fail to load, or a decision takes over about 600 ms, that call switches to silence mode with `session.update`, using the user's own silence settings. A slow phone can never make Ping worse than today.
-   - *Added while building:* the same happens if the microphone stops sending audio for 2 seconds, since with OpenAI's detection off, no audio would mean no turn ever ends.
+   - *Added while building:* the same happens if the microphone stops sending audio for 3 seconds, since with OpenAI's detection off, no audio would mean no turn ever ends.
+   - *After the first phone call:* that call fell back partway through, very likely because iOS paused the audio when the output changed. Now a pause gets a restart first. `smartTurnFallback` became a reason code (1 couldn't load, 2 too slow, 3 audio stopped), and `audioRestarts` counts the restarts.
 6. **Serving:**
    - Put the runtime and models under `public/`, with their license files.
    - Add the content types for `.wasm`, `.mjs` and `.onnx`.
@@ -364,6 +365,7 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
 ## Known issues to fix later
 
 - **The call transcript shows words Ping never said.** OpenAI writes a reply in about a second but takes several seconds to speak it, so the full reply appears on screen right away. When the user interrupts, OpenAI cuts the audio and trims its own copy of the reply (`conversation.item.truncated`), but the screen keeps the whole text. Fix: on `conversation.item.truncated`, cut or grey out the unheard part of that line. Found in the Session 3a spike. In `smartTurn` mode the app does the truncating itself (Session 5b), so it knows exactly where the cut is.
+  - **Fixed during Session 5b, in every mode.** The contact's words now fade in as they're said, paced from the speed setting and from how long earlier replies took. On `conversation.item.truncated`, the line is cut to about `audio_end_ms` and ends with "…". It's an estimate, since OpenAI sends no word timings over WebRTC. Paid plans save only the heard part.
 
 ## Separate from this plan
 
