@@ -34,9 +34,26 @@ export const METRIC_FIELDS = [
   'turnEndWaitP90Ms',
   'replyGapMedianMs',
   'replyGapP90Ms',
+  // Smart Turn mode only. Zero or empty in the other modes.
+  'smartTurnEnds', // turns Smart Turn ended
+  'backupEnds', // turns the 2.5-second backup ended because Smart Turn kept saying "still thinking"
+  'smartTurnMedianMs', // how long one Smart Turn decision took on the phone
+  'smartTurnP90Ms',
+  'modelLoadMs', // how long the runtime and models took to load
+  'smartTurnFallback', // 1 if the call went back to silence mode
 ];
-// A call with no replies has no latency or gap to report.
-const MAY_BE_EMPTY = new Set(['replyLatencyMedianMs', 'replyLatencyP90Ms', 'turnEndWaitMedianMs', 'turnEndWaitP90Ms', 'replyGapMedianMs', 'replyGapP90Ms']);
+// A call with no replies has no latency or gap to report, and only Smart Turn calls have decision times.
+const MAY_BE_EMPTY = new Set([
+  'replyLatencyMedianMs',
+  'replyLatencyP90Ms',
+  'turnEndWaitMedianMs',
+  'turnEndWaitP90Ms',
+  'replyGapMedianMs',
+  'replyGapP90Ms',
+  'smartTurnMedianMs',
+  'smartTurnP90Ms',
+  'modelLoadMs',
+]);
 
 // Nearest rank: the smallest value with at least that share of all values at or below it.
 const percentile = (sorted, share) => (sorted.length ? sorted[Math.ceil(share * sorted.length) - 1] : null);
@@ -74,6 +91,11 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
   let agentPlaying = false;
   let cutoffCounted = false;
   let userSpokeOver = false;
+  const decisions = [];
+  let smartTurnEnds = 0;
+  let backupEnds = 0;
+  let modelLoadMs = null;
+  let smartTurnFallback = 0;
 
   for (const event of events) {
     const { type, at } = event;
@@ -103,6 +125,23 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
         }
         break;
       }
+      // In Smart Turn mode the phone knows exactly when the user went quiet, so nothing is estimated.
+      case 'smart-turn-end':
+        userStoppedAt = at;
+        userStoppedTalkingAt = event.quietSince;
+        waits.push(Math.max(0, Math.round(at - event.quietSince)));
+        if (event.reason === 'backup') backupEnds += 1;
+        else smartTurnEnds += 1;
+        break;
+      case 'smart-turn-decision':
+        decisions.push(event.ms);
+        break;
+      case 'smart-turn-loaded':
+        modelLoadMs = Math.round(event.loadMs);
+        break;
+      case 'smart-turn-fallback':
+        smartTurnFallback = 1;
+        break;
       case 'input_audio_buffer.committed':
         userTurns += 1;
         break;
@@ -136,6 +175,7 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
   const sorted = latencies.sort((a, b) => a - b);
   const wait = spread(waits);
   const gap = spread(gaps);
+  const decision = spread(decisions);
   return {
     replyLatencyMedianMs: percentile(sorted, 0.5),
     replyLatencyP90Ms: percentile(sorted, 0.9),
@@ -150,6 +190,12 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
     turnEndWaitP90Ms: wait.p90,
     replyGapMedianMs: gap.median, // what the user hears: from going quiet to Ping's voice
     replyGapP90Ms: gap.p90,
+    smartTurnEnds,
+    backupEnds,
+    smartTurnMedianMs: decision.median,
+    smartTurnP90Ms: decision.p90,
+    modelLoadMs,
+    smartTurnFallback,
   };
 }
 

@@ -23,6 +23,8 @@ npm test
 
 Browsers only allow push and the microphone on `localhost` or HTTPS, so testing on a phone needs the deployed HTTPS site.
 
+Pages are served "cross-origin isolated" (`Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy`), which Smart Turn needs to run on several threads. A side effect: the app can't load images, scripts or fonts from other sites unless they explicitly allow it. Today it loads nothing from other sites.
+
 ## How a call works
 
 1. Each user gets a call at a random time inside the hours they set, on the days their call frequency allows. The default is daily, between 10:00 and 20:00 in their time zone.
@@ -36,6 +38,14 @@ Tapping after the 10 seconds opens the voicemail, with the call-back button.
 On a call, the contact can explain a word in one short English sentence and save it to the user's stack, nudge them back to Japanese, say 「ちょっとわかりません」 if they steer off topic, and change settings when asked in plain English. The screen shows a live transcript with `*added to stack*` for each new word, and buttons for speaker, mute, speed and end call.
 
 OpenAI stops the contact's audio as soon as the user makes a sound, and the app, not OpenAI, decides when the contact replies. If the user talked over the contact with only aizuchi, like うん or はい, the app waits for the transcript (usually under half a second), then has the contact carry on from where it was cut off instead of answering. Anything else, or a transcript that doesn't arrive within 1.5 seconds, gets a normal reply.
+
+**Smart Turn mode (admins only, for testing).** The phone, not OpenAI, decides when the user has finished talking:
+- A call starts in silence mode while the phone loads Smart Turn, about 12 MB the first time and from the phone's cache after that. Once Smart Turn is loaded and hearing the microphone, the app switches OpenAI's own turn detection off.
+- Silero, a small voice detector, hears when the user starts and stops talking. After 0.2 seconds of quiet, Smart Turn v3.2 listens to the last 8 seconds and decides whether they've finished. If it says yes, the app ends the turn straight away. If it keeps saying "still thinking", the turn ends after 2.5 seconds of quiet anyway.
+- When the user talks over the contact, the app stops the contact's audio itself, and OpenAI trims the reply to what was heard. The aizuchi rule above works the same way.
+- If the models can't load, the microphone stops sending audio, or Smart Turn decides too slowly (twice over 0.6 seconds, or once over 1.5), the call switches back to silence mode.
+
+On a benchmark of the developer's own speech, Smart Turn with the 2.5-second backup cut off thinking pauses about 14% of the time, against 33% for the 1.3-second silence rule, and usually noticed a finished answer within a quarter of a second. On an iPhone, each decision took about 230 ms. See `bench/` and `docs/turn-taking-plan.md`.
 
 ## Progress and My Stack
 
@@ -67,7 +77,7 @@ The invite code someone joins with decides which version they get. It can't be c
 | Invite code | `ADMIN_INVITE_CODE` | `BETA_INVITE_CODE` |
 | Plan | Can switch freely | Stays on Free |
 | "Ring my phone in 5 seconds" | Yes | No |
-| Turn detection | Can switch between silence and semantic, on the plan page | Silence, the default |
+| Turn detection | Can switch between silence, semantic and Smart Turn, on the plan page | Silence, the default |
 
 The server enforces both limits. Accounts created before there were two codes are admins.
 
@@ -105,12 +115,13 @@ Other rules:
 | Cancellation window | 30 days | `CANCEL_WINDOW_MS` in `server/calls.js` |
 | Example lookups per user per day | 50 | `MAX_LOOKUPS_PER_DAY` in `server/calls.js` |
 | Extra pause time at slow speeds | | `SLOW_SPEED_PATIENCE` in `server/settings.js` |
-| `turnMode`: how Ping decides the user has finished talking | `silence` (OpenAI's `server_vad`) for everyone. Admins can switch their own to `semantic` (`semantic_vad`) | `TURN_MODES` and `SEMANTIC_EAGERNESS` in `server/tutor.js` |
-
-In semantic mode, "Time to answer" sets how eager OpenAI is to reply instead of a silence length. `normal` and `long` currently behave the same there, because `low` is the lowest eagerness level.
+| `turnMode`: how Ping decides the user has finished talking | `silence` (OpenAI's `server_vad`) for everyone. Admins can switch their own to `semantic` (`semantic_vad`) or `smartTurn` (Smart Turn on the phone) | `TURN_MODES` and `SEMANTIC_EAGERNESS` in `server/tutor.js` |
+| Smart Turn's timings: quiet before asking, the backup, and what counts as too slow | 0.2 s, 2.5 s, 0.6 s | `TURN` and `SLOW_DECISION_MS` in `public/turn-machine.js` |
 | Default speed and allowed range | 0.9, from 0.6 to 1.5 | `server/settings.js` |
 | Questions and how contacts behave | | `server/tutor.js` |
 | Contacts and voices | | `server/contacts.js` |
+
+In semantic mode, "Time to answer" sets how eager OpenAI is to reply instead of a silence length. `normal` and `long` currently behave the same there, because `low` is the lowest eagerness level. In Smart Turn mode it only matters if the call falls back to silence mode.
 
 The call length limit and the hang-up run in the browser, so someone who modifies the page could stay on longer. OpenAI's own session limit is the backstop. Set a monthly budget in your OpenAI account too.
 
@@ -135,6 +146,7 @@ Use **New > Blueprint** and point it at this repo. `render.yaml` sets up a web s
 
 - Audio goes directly from the browser to OpenAI during a call. Ping's server never sees it and doesn't record calls.
 - At the end of a call, the app sends timing numbers (no audio, no words) to the server to measure conversation quality.
+- In Smart Turn mode, the voice detector and Smart Turn run on the phone. The audio they hear never leaves it. The server only gets the same kind of timing numbers: how many turns Smart Turn or the backup ended, how long decisions and loading took, and whether the call fell back to silence mode.
 - Transcripts appear on the call screen. On a free plan they're never sent to Ping's server. On a paid plan, the text of the last 20 calls is stored to personalize later calls.
 - The server stores each user's time zone, settings, plan, streak, contacts, stack, push subscription, voicemail list and recent call times, in one JSON file. Calls are deleted after 7 days.
 - There are no names or emails. "Delete my account" removes everything for that user.
@@ -156,6 +168,10 @@ Use **New > Blueprint** and point it at this repo. `render.yaml` sets up a web s
 - `public/sw.js`: shows the ring and missed call notifications, and handles tapping them.
 - `public/voice.js`: the WebRTC call, including running the voice model's tools.
 - `public/aizuchi.js`: decides whether talking over the contact was only aizuchi, so the contact carries on instead of answering.
+- `public/smart-turn.js`: Smart Turn mode on the phone. It loads the WebAssembly runtime and the two models, listens to the call's microphone through `public/capture-worklet.js`, and reports when the user starts talking and when their turn is over.
+- `public/turn-machine.js`: the rules Smart Turn mode follows, as plain functions with no browser code, so they're fully tested.
+- `public/features.js`: turns audio into the spectrogram Smart Turn expects, matching the Python feature extractor the benchmark used.
+- `public/vendor/` and `public/models/`: third-party files, each with its version in the path and its license next to it. `onnxruntime-web` 1.30.0 (MIT, Microsoft) runs the models. Smart Turn v3.2 CPU (BSD 2-Clause, Daily/Pipecat) is from `pipecat-ai/smart-turn-v3` on Hugging Face. Silero VAD (MIT, Silero Team) is from `snakers4/silero-vad`, as of October 2026. The server compresses them and lets browsers keep them for good, so a new version needs a new path.
 - `public/turn-metrics.js`: turns a call's turn-taking event times into numbers, such as reply latency, suspected cut-offs, barge-ins, and an estimate of how long OpenAI waited after the user stopped talking before ending their turn (`turnEndWait`) and the gap the user heard before Ping replied (`replyGap`). The server uses it to check what the phone sends, and logs one `turn-metrics` line per call.
 - `public/app.js`: signing up, Home, ringing and the call screen, with no framework or build step.
 - `public/stack.js`, `public/contacts.js`, `public/settings.js`: the other screens.

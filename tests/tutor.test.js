@@ -154,8 +154,14 @@ test('the session uses the turn mode it is given', () => {
   assert.equal(build(undefined).audio.input.turn_detection.type, 'server_vad');
 });
 
-test('in both modes OpenAI stops the contact when the user speaks, but leaves replies to the app', () => {
-  for (const turnMode of ['silence', 'semantic']) {
+test('Smart Turn mode starts with the same silence detection, for the phone to switch off once ready', () => {
+  for (const thinkingTime of ['short', 'normal', 'long']) {
+    assert.deepEqual(turnDetection({ thinkingTime, speed: 0.9, turnMode: 'smartTurn' }), turnDetection({ thinkingTime, speed: 0.9, turnMode: 'silence' }));
+  }
+});
+
+test('in every mode OpenAI stops the contact when the user speaks, but leaves replies to the app', () => {
+  for (const turnMode of ['silence', 'semantic', 'smartTurn']) {
     const detection = turnDetection({ thinkingTime: 'normal', speed: 0.9, turnMode });
     assert.equal(detection.create_response, false, turnMode);
     assert.equal(detection.interrupt_response, true, turnMode);

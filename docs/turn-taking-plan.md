@@ -273,7 +273,8 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
    - `input_audio_buffer.clear` drops buffered audio.
    - `output_audio_buffer.clear` stops Ping's audio (WebRTC only), and `response.cancel` stops the reply being written.
    - `conversation.item.truncate` with `audio_end_ms` trims Ping's reply to what the user heard.
-2. Add a third turn mode, `smartTurn`, to the admin switch from Session 2, so the three modes can be compared on the Session 1 numbers. In this mode the server sends `turn_detection: null`. Silence and semantic modes don't change at all.
+2. Add a third turn mode, `smartTurn`, to the admin switch from Session 2, so the three modes can be compared on the Session 1 numbers. Silence and semantic modes don't change at all.
+   - *Changed while building:* the call starts with the user's normal silence detection, and the phone sends `turn_detection: null` only once Smart Turn has loaded and is actually hearing the microphone. If it never gets there, the call simply stays in silence mode, so no call is ever left without turn detection.
 3. **In `smartTurn` mode, the browser does turn-taking** on the call's own microphone stream:
    - **Speech start and stop:** Silero.
    - **End of turn:** after 200 ms of quiet, Smart Turn decides. If it says done, the app sends `input_audio_buffer.commit`. If not, a 2.5 s backup timer commits instead. Either way, the existing `committed` → `answerTurn` → `requestReply` path replies, so the Session 3 aizuchi rules still apply.
@@ -284,6 +285,7 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
    - The turn state machine: blocks of speech probability and verdicts in, actions out (`commit`, `bargeIn`, `askSmartTurn`)
    - The fallback rule
 5. **Fallback:** if the models fail to load, or a decision takes over about 600 ms, that call switches to silence mode with `session.update`, using the user's own silence settings. A slow phone can never make Ping worse than today.
+   - *Added while building:* the same happens if the microphone stops sending audio for 2 seconds, since with OpenAI's detection off, no audio would mean no turn ever ends.
 6. **Serving:**
    - Put the runtime and models under `public/`, with their license files.
    - Add the content types for `.wasm`, `.mjs` and `.onnx`.
@@ -302,7 +304,7 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
    - The features match a small Python fixture within a small tolerance.
    - The state machine is right for done, not done, the backup, talking over Ping, and a slow model.
    - The fallback works.
-   - `turnDetection` returns null for `smartTurn`.
+   - A `smartTurn` call starts with silence detection, and the phone switches it off.
    - The new metric fields pass `cleanMetrics`.
    - Route tests still show only admins can pick the mode.
 10. README:

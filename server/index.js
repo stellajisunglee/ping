@@ -1,6 +1,8 @@
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { promisify } from 'node:util';
+import { brotliCompress, constants as zlibConstants } from 'node:zlib';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,16 +30,47 @@ const DEFAULT_BETA_CODE = 'beta-01';
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
   '.png': 'image/png',
+  '.wasm': 'application/wasm',
+  '.onnx': 'application/octet-stream',
 };
+// Image files are already compressed. Everything else is sent brotli-compressed when the browser accepts it.
+const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.webmanifest', '.wasm', '.onnx']);
+// Smart Turn's runtime and models have their version in the path, so a browser can keep them for good.
+const IMMUTABLE_PATHS = ['/vendor/', '/models/'];
+const SMART_TURN_FILES = new Set([
+  'vendor/onnxruntime-web-1.30.0/ort.wasm.min.mjs',
+  'vendor/onnxruntime-web-1.30.0/ort-wasm-simd-threaded.mjs',
+  'vendor/onnxruntime-web-1.30.0/ort-wasm-simd-threaded.wasm',
+  'models/smart-turn-v3.2-cpu.onnx',
+  'models/silero-vad-2026-10.onnx',
+]);
 
 const SECURITY_HEADERS = {
-  'Content-Security-Policy': "default-src 'self'; connect-src 'self' https://api.openai.com; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'",
+  // 'wasm-unsafe-eval' lets Smart Turn's WebAssembly compile. It doesn't allow eval() of JavaScript.
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.openai.com; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'",
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
+  // These two make the page "cross-origin isolated", which browsers require before WebAssembly can use
+  // several threads. Smart Turn needs them to decide fast enough on a phone.
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
 };
+
+const compress = promisify(brotliCompress);
+const compressed = new Map(); // file -> { mtimeMs, bytes: Promise<Buffer> }, made once per version of a file
+
+function compressedFile(file, body, mtimeMs) {
+  const cached = compressed.get(file);
+  if (cached?.mtimeMs === mtimeMs) return cached.bytes;
+  const bytes = compress(body, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 9, [zlibConstants.BROTLI_PARAM_SIZE_HINT]: body.length } });
+  compressed.set(file, { mtimeMs, bytes });
+  bytes.catch(() => compressed.delete(file));
+  return bytes;
+}
 
 const digest = (value) => createHash('sha256').update(String(value)).digest();
 const codesMatch = (given, expected) => timingSafeEqual(digest(given), digest(expected));
@@ -322,6 +355,7 @@ export function createApp({ engine, openai, config }) {
         sdpUrl: openai.sdpUrl,
         maxSeconds: MAX_CALL_SECONDS,
         question: details.question,
+        turnMode: details.turnMode,
       });
     }
 
@@ -354,8 +388,16 @@ export function createApp({ engine, openai, config }) {
       return;
     }
     try {
-      const body = await readFile(file);
-      res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
+      const [body, info] = await Promise.all([readFile(file), stat(file)]);
+      const immutable = IMMUTABLE_PATHS.some((path) => pathname.startsWith(path));
+      const headers = { 'Content-Type': type, 'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache', ...SECURITY_HEADERS };
+      if (COMPRESSIBLE.has(extname(file)) && /\bbr\b/.test(req.headers['accept-encoding'] ?? '')) {
+        const bytes = await compressedFile(file, body, info.mtimeMs);
+        res.writeHead(200, { ...headers, 'Content-Encoding': 'br', 'Content-Length': bytes.length, Vary: 'Accept-Encoding' });
+        res.end(bytes);
+        return;
+      }
+      res.writeHead(200, { ...headers, 'Content-Length': body.length, Vary: 'Accept-Encoding' });
       res.end(body);
     } catch {
       res.writeHead(404).end();
@@ -419,5 +461,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(port, () => {
     console.log(`Ping running on http://localhost:${port}`);
     if (!process.env.OPENAI_API_KEY) console.warn('OPENAI_API_KEY is not set: calls and voice messages will not work.');
+    warmCompression();
   });
+}
+
+// Compressing Smart Turn's 25 MB of files takes a few seconds, so do it once at start-up
+// rather than making the first caller wait.
+async function warmCompression() {
+  const files = [...SMART_TURN_FILES].map((path) => join(PUBLIC_DIR, path));
+  for (const file of files) {
+    try {
+      const [body, info] = await Promise.all([readFile(file), stat(file)]);
+      await compressedFile(file, body, info.mtimeMs);
+    } catch (error) {
+      console.warn(`Could not prepare ${file}`, error.message);
+    }
+  }
 }

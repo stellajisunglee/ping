@@ -158,3 +158,35 @@ test('the hidden wait is never negative, and is left out when OpenAI sends no au
   assert.equal(noAudioTimes.replyGapMedianMs, null);
   assert.equal(noAudioTimes.replyLatencyMedianMs, 500);
 });
+
+test('in Smart Turn mode the wait is measured on the phone, and each kind of turn end is counted', () => {
+  const events = [
+    { type: 'smart-turn-loaded', at: 0, loadMs: 3012.4 },
+    { type: 'input_audio_buffer.speech_started', at: 1000 },
+    { type: 'smart-turn-decision', at: 3430, ms: 230 },
+    { type: 'smart-turn-end', at: 3430, quietSince: 3000, reason: 'smartTurn' },
+    { type: 'input_audio_buffer.committed', at: 3470 },
+    { type: 'output_audio_buffer.started', at: 4000 },
+    { type: 'output_audio_buffer.stopped', at: 7000 },
+    { type: 'input_audio_buffer.speech_started', at: 8000 },
+    { type: 'smart-turn-decision', at: 9440, ms: 250 },
+    { type: 'smart-turn-end', at: 11_500, quietSince: 9000, reason: 'backup' },
+    { type: 'output_audio_buffer.started', at: 12_100 },
+  ];
+  const summary = summarize(events);
+  assert.deepEqual([summary.smartTurnEnds, summary.backupEnds, summary.modelLoadMs, summary.smartTurnFallback], [1, 1, 3012, 0]);
+  assert.deepEqual([summary.turnEndWaitMedianMs, summary.turnEndWaitP90Ms], [430, 2500]);
+  assert.deepEqual([summary.replyGapMedianMs, summary.replyGapP90Ms], [1000, 3100]);
+  assert.deepEqual([summary.replyLatencyMedianMs, summary.replyLatencyP90Ms], [570, 600]);
+  assert.deepEqual([summary.smartTurnMedianMs, summary.smartTurnP90Ms], [230, 250]);
+  assert.deepEqual(cleanMetrics(summary), summary);
+});
+
+test('a call that fell back to silence mode says so, and other modes report no Smart Turn numbers', () => {
+  assert.equal(summarize([{ type: 'smart-turn-fallback', at: 10 }]).smartTurnFallback, 1);
+  const plain = summarize(timeline(['speechStopped', 1000], ['agentStarted', 1600]));
+  assert.deepEqual(
+    [plain.smartTurnEnds, plain.backupEnds, plain.smartTurnMedianMs, plain.smartTurnP90Ms, plain.modelLoadMs, plain.smartTurnFallback],
+    [0, 0, null, null, null, 0],
+  );
+});

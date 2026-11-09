@@ -3,14 +3,18 @@ import assert from 'node:assert/strict';
 import { startCall } from '../public/voice.js';
 
 // A stand-in for the browser's WebRTC, so the call's event handling runs without a real connection.
-function setupCall({ apiResponses = {}, failPaths = [] } = {}) {
+function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnEngine } = {}) {
   const sent = [];
+  const peers = [];
   const channel = {
     readyState: 'open',
     send: (event) => sent.push(JSON.parse(event)),
     close() {},
   };
   globalThis.RTCPeerConnection = class {
+    constructor() {
+      peers.push(this);
+    }
     addTrack() {}
     createDataChannel() {
       return channel;
@@ -41,7 +45,7 @@ function setupCall({ apiResponses = {}, failPaths = [] } = {}) {
     api: async (path, options) => {
       events.apiCalls.push({ path, options });
       if (failPaths.includes(path)) throw new Error('offline');
-      if (path.endsWith('/session')) return { clientSecret: 'ek', sdpUrl: 'https://voice.test', maxSeconds: 180 };
+      if (path.endsWith('/session')) return { clientSecret: 'ek', sdpUrl: 'https://voice.test', maxSeconds: 180, ...session };
       return apiResponses[path];
     },
     onStatus: () => {},
@@ -51,13 +55,21 @@ function setupCall({ apiResponses = {}, failPaths = [] } = {}) {
     onSettings: (settings) => events.settings.push(settings),
     onEnded: (reason) => events.ended.push(reason),
     onNeedsTap: () => {},
+    ...(smartTurnEngine && { smartTurnEngine }),
   });
   const settle = () => new Promise((resolve) => setImmediate(resolve));
   const fire = async (event) => {
     channel.onmessage({ data: JSON.stringify(event) });
     await settle();
   };
-  return { call, sent, events, fire, settle, channel, audio };
+  // The data channel opens and the contact's audio starts playing, so the contact greets the user.
+  const answer = async () => {
+    channel.onopen();
+    peers[0].ontrack({ streams: [{}] });
+    await settle();
+    await settle();
+  };
+  return { call, sent, events, fire, settle, channel, audio, answer };
 }
 
 async function connected(options) {
@@ -297,4 +309,148 @@ test('the call records OpenAI audio times and turn settings for the hidden-wait 
   // The events arrive almost at once here, so this only checks the estimate is made and sent.
   assert.equal(typeof metrics.turnEndWaitMedianMs, 'number');
   assert.equal(typeof metrics.replyGapMedianMs, 'number');
+});
+
+// ---------- Smart Turn mode ----------
+
+const SILENCE = { type: 'server_vad', silence_duration_ms: 1300, create_response: false, interrupt_response: true };
+
+// A stand-in for the models and microphone: the test plays Smart Turn's part by calling `hear`.
+function fakeSmartTurn({ loadFails = false } = {}) {
+  const fake = { stopped: false, inTurn: false, hear: null };
+  fake.engine = {
+    load: async () => {
+      if (loadFails) throw new Error('offline');
+      return { loadMs: 2500 };
+    },
+    start: async ({ onEvent }) => {
+      fake.hear = onEvent;
+      return {
+        stop: () => (fake.stopped = true),
+        get inTurn() {
+          return fake.inTurn;
+        },
+      };
+    },
+  };
+  return fake;
+}
+
+async function smartTurnCall(options = {}) {
+  const fake = fakeSmartTurn(options);
+  const context = await connected({ session: { turnMode: 'smartTurn' }, smartTurnEngine: fake.engine });
+  await context.fire({ type: 'session.created', session: { audio: { input: { turn_detection: SILENCE } } } });
+  return { ...context, fake };
+}
+
+const detectionUpdates = (context) =>
+  context.sent.filter((event) => event.type === 'session.update' && 'turn_detection' in (event.session.audio?.input ?? {})).map((event) => event.session.audio.input.turn_detection);
+const sentTypes = (context) => context.sent.map((event) => event.type);
+const metricsOf = (context) => context.events.apiCalls.find((call) => call.path === '/api/calls/c1/metrics').options.body;
+
+test("once Smart Turn is ready, OpenAI's detection goes off and the phone ends each turn", async (t) => {
+  const context = await smartTurnCall();
+  t.after(() => finishCall(context));
+  await context.answer();
+  assert.deepEqual(detectionUpdates(context), [null]);
+  assert.ok(sentTypes(context).includes('input_audio_buffer.clear'), 'audio from before the switch is dropped');
+
+  context.fake.hear({ type: 'speech-start', at: 1000 });
+  context.fake.hear({ type: 'end-turn', reason: 'smartTurn', at: 3430, quietSince: 3000 });
+  assert.equal(sentTypes(context).at(-1), 'input_audio_buffer.commit');
+  const before = replies(context).length;
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  assert.equal(replies(context).length, before + 1, 'one reply, through the usual path');
+});
+
+test('in Smart Turn mode, talking over Ping stops it, and うん still makes it carry on', async () => {
+  const context = await smartTurnCall();
+  await context.answer();
+  await context.fire({ type: 'response.created' });
+  await context.fire({ type: 'output_audio_buffer.started', response_id: 'r1' });
+  context.fake.hear({ type: 'speech-start', at: 5000 });
+  assert.deepEqual(sentTypes(context).slice(-2), ['response.cancel', 'output_audio_buffer.clear']);
+  await context.fire({ type: 'output_audio_buffer.cleared', response_id: 'r1' });
+  await context.fire({ type: 'response.done' });
+
+  context.fake.hear({ type: 'end-turn', reason: 'smartTurn', at: 5600, quietSince: 5300 });
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  const before = replies(context).length;
+  await context.fire({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'u1', transcript: 'うん' });
+  assert.equal(replies(context).length, before + 1);
+  assert.match(systemNotes(context)[0].item.content[0].text, /Carry on from the exact point/);
+
+  context.call.hangUp();
+  await context.settle();
+  assert.equal(context.fake.stopped, true);
+  const metrics = metricsOf(context);
+  assert.deepEqual([metrics.ignoredAizuchi, metrics.smartTurnEnds, metrics.modelLoadMs], [1, 1, 2500]);
+});
+
+test('a reply already fully written is silenced, not cancelled, when the user talks over it', async (t) => {
+  const context = await smartTurnCall();
+  t.after(() => finishCall(context));
+  await context.answer();
+  await context.fire({ type: 'response.created' });
+  await context.fire({ type: 'response.done' });
+  await context.fire({ type: 'output_audio_buffer.started', response_id: 'r1' });
+  const sentBefore = context.sent.length;
+  context.fake.hear({ type: 'speech-start', at: 5000 });
+  assert.deepEqual(sentTypes(context).slice(sentBefore), ['output_audio_buffer.clear']);
+});
+
+test("a settings change keeps OpenAI's detection off, and a fallback restores the newest silence settings", async () => {
+  const context = await smartTurnCall();
+  await context.answer();
+  const longer = { ...SILENCE, silence_duration_ms: 2500 };
+  context.call.updateVoice({ settings: { speed: 1 }, turnDetection: longer });
+  assert.deepEqual(detectionUpdates(context), [null, null]);
+
+  context.fake.hear({ type: 'fallback', reason: 'slow' });
+  assert.deepEqual(detectionUpdates(context), [null, null, longer]);
+  assert.equal(context.fake.stopped, true);
+  context.fake.hear({ type: 'end-turn', reason: 'smartTurn', at: 1, quietSince: 0 });
+  assert.notEqual(sentTypes(context).at(-1), 'input_audio_buffer.commit', 'Smart Turn no longer ends turns');
+
+  context.call.hangUp();
+  await context.settle();
+  assert.equal(metricsOf(context).smartTurnFallback, 1);
+});
+
+test('if Smart Turn cannot load, the call simply stays in silence mode', async () => {
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    const context = await smartTurnCall({ loadFails: true });
+    await context.answer();
+    assert.deepEqual(detectionUpdates(context), []);
+    context.call.hangUp();
+    await context.settle();
+    assert.equal(metricsOf(context).smartTurnFallback, 1);
+  } finally {
+    console.warn = warn;
+  }
+});
+
+test("Smart Turn waits for a turn OpenAI is already hearing to end before taking over", async (t) => {
+  const context = await smartTurnCall();
+  t.after(() => finishCall(context));
+  await context.fire({ type: 'input_audio_buffer.speech_started', item_id: 'u1' });
+  await context.answer();
+  assert.deepEqual(detectionUpdates(context), []);
+  await context.fire({ type: 'input_audio_buffer.committed', item_id: 'u1' });
+  assert.deepEqual(detectionUpdates(context), [null]);
+});
+
+test('other modes never load Smart Turn', async (t) => {
+  const fake = fakeSmartTurn();
+  let loaded = false;
+  fake.engine.load = async () => {
+    loaded = true;
+    return { loadMs: 1 };
+  };
+  const context = await connected({ smartTurnEngine: fake.engine });
+  t.after(() => finishCall(context));
+  await context.answer();
+  assert.equal(loaded, false);
 });

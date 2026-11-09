@@ -1,6 +1,7 @@
 // One phone call with a contact: a WebRTC connection straight from this browser to the voice model.
 
 import { classifyTurn, resumeNote } from './aizuchi.js';
+import { loadSmartTurn, startSmartTurn } from './smart-turn.js';
 import { summarizeTurns, TIMED_EVENTS } from './turn-metrics.js';
 
 const DATA_CHANNEL = 'oai-events';
@@ -11,7 +12,19 @@ const GOODBYE_TIMEOUT_MS = 10_000;
 const TRANSCRIPT_WAIT_MS = 1500;
 const WRAP_UP_NOTE = 'Time is nearly up. Say a short warm goodbye in Japanese, then call end_call.';
 
-export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, onSpeaking, onSettings, onEnded, onNeedsTap }) {
+export function startCall({
+  callId,
+  api,
+  audio,
+  onStatus,
+  onLine,
+  onWordAdded,
+  onSpeaking,
+  onSettings,
+  onEnded,
+  onNeedsTap,
+  smartTurnEngine = { load: loadSmartTurn, start: startSmartTurn }, // swapped for a stand-in in tests
+}) {
   let pc = null;
   let channel = null;
   let microphone = null;
@@ -34,6 +47,17 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
   let cutReply = ''; // the full text of the reply the user last cut off
   const turnLog = []; // when each turn-taking event arrived, for the call's timing summary
   const timers = [];
+  // Smart Turn mode: the call starts in silence mode, then the phone takes over turn-taking once the
+  // models have loaded, and OpenAI's own detection is switched off. Any trouble and it switches back.
+  const smart = {
+    loading: null, // the models loading, in smartTurn mode only
+    engine: null, // listening to the microphone
+    active: false, // the phone is deciding turns, and OpenAI's detection is off
+    silenceDetection: null, // OpenAI's silence settings for this call, to switch back to
+    openAiHearsSpeech: false, // OpenAI's detection is mid-turn, so switching now would cut it short
+    switchWhenQuiet: false,
+    talkedOver: false, // the turn in progress started while the contact was speaking
+  };
 
   const send = (event) => {
     if (channel?.readyState === 'open') channel.send(JSON.stringify(event));
@@ -50,6 +74,7 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
   function end(reason) {
     if (ended) return;
     ended = true;
+    smart.engine?.stop();
     sendTurnMetrics();
     timers.forEach(clearTimeout);
     channel?.close();
@@ -66,6 +91,9 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
     connectedAt = performance.now();
     onStatus('connected', maxCallSeconds);
     send({ type: 'response.create' });
+    // Smart Turn takes over once it has loaded and is hearing the microphone. Until then, and if it
+    // can't, the call runs in silence mode.
+    smart.loading?.then(startSmartTurnMode).catch((error) => fallBackToSilence(error.message));
   }
 
   function playAudio() {
@@ -121,12 +149,64 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
 
   // The speed can only change between turns, so a change made mid-sentence waits for the turn to end.
   function updateVoice({ settings, turnDetection }) {
+    // While the phone is deciding turns, OpenAI's detection stays off. The new silence settings are
+    // kept for switching back.
+    if (turnDetection?.type === 'server_vad') smart.silenceDetection = turnDetection;
     const update = {
       type: 'session.update',
-      session: { type: 'realtime', audio: { input: { turn_detection: turnDetection }, output: { speed: settings.speed } } },
+      session: { type: 'realtime', audio: { input: { turn_detection: smart.active ? null : turnDetection }, output: { speed: settings.speed } } },
     };
     if (responding) pendingVoiceUpdate = update;
     else send(update);
+  }
+
+  // ---------- Smart Turn mode ----------
+
+  async function startSmartTurnMode(models) {
+    if (ended) return;
+    turnLog.push({ type: 'smart-turn-loaded', at: performance.now(), loadMs: models.loadMs });
+    smart.engine = await smartTurnEngine.start({ stream: microphone, models, onEvent: onSmartTurnEvent });
+    if (ended) return smart.engine.stop();
+    // Switching while OpenAI is in the middle of the user's turn would lose that turn's end.
+    if (smart.openAiHearsSpeech) smart.switchWhenQuiet = true;
+    else switchToSmartTurn();
+  }
+
+  function switchToSmartTurn() {
+    smart.switchWhenQuiet = false;
+    smart.active = true;
+    send({ type: 'session.update', session: { type: 'realtime', audio: { input: { turn_detection: null } } } });
+    // Audio from before the switch belongs to no turn.
+    if (!smart.engine.inTurn) send({ type: 'input_audio_buffer.clear' });
+  }
+
+  function fallBackToSilence(reason) {
+    turnLog.push({ type: 'smart-turn-fallback', at: performance.now() });
+    console.warn(`Smart Turn is off for this call (${reason}), so Ping is using silence detection.`);
+    smart.engine?.stop();
+    smart.engine = null;
+    smart.switchWhenQuiet = false;
+    if (!smart.active) return; // OpenAI's silence detection never went off
+    smart.active = false;
+    if (smart.silenceDetection) send({ type: 'session.update', session: { type: 'realtime', audio: { input: { turn_detection: smart.silenceDetection } } } });
+  }
+
+  function onSmartTurnEvent(event) {
+    if (event.type === 'fallback') return fallBackToSilence(event.reason);
+    if (event.type === 'decision') return turnLog.push({ type: 'smart-turn-decision', at: event.at, ms: event.ms });
+    if (!smart.active) return;
+    if (event.type === 'speech-start') {
+      // Logged as OpenAI would have, so the call's numbers work the same in every mode.
+      turnLog.push({ type: 'input_audio_buffer.speech_started', at: event.at });
+      smart.talkedOver = speaking;
+      // The user talking over the contact stops them, as OpenAI's own detection would. OpenAI trims the
+      // reply to what was heard by itself. A reply already fully written can't be cancelled, only silenced.
+      if (responding) send({ type: 'response.cancel' });
+      if (speaking) send({ type: 'output_audio_buffer.clear' });
+    } else if (event.type === 'end-turn') {
+      turnLog.push({ type: 'smart-turn-end', at: event.at, quietSince: event.quietSince, reason: event.reason });
+      send({ type: 'input_audio_buffer.commit' });
+    }
   }
 
   const TOOLS = {
@@ -178,6 +258,7 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
     const detection = event.session?.audio?.input?.turn_detection;
     if (detection) {
       const silenceMode = detection.type === 'server_vad';
+      if (silenceMode && !smart.silenceDetection) smart.silenceDetection = detection;
       turnLog.push({ type: 'turn-detection', at, silenceMs: silenceMode ? detection.silence_duration_ms ?? 0 : 0, paddingMs: silenceMode ? detection.prefix_padding_ms ?? 0 : 0 });
     }
     switch (event.type) {
@@ -194,12 +275,20 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
         cutReply = plannedReplies.get(event.item_id) ?? '';
         break;
       case 'input_audio_buffer.speech_started':
+        smart.openAiHearsSpeech = true;
         if (speaking) talkedOver.add(event.item_id);
+        break;
+      case 'input_audio_buffer.speech_stopped':
+        smart.openAiHearsSpeech = false;
         break;
       // This holds the user's place in the transcript, because their words arrive after the reply has started.
       case 'input_audio_buffer.committed':
+        smart.openAiHearsSpeech = false;
+        if (smart.active && smart.talkedOver) talkedOver.add(event.item_id);
+        smart.talkedOver = false;
         onLine({ id: event.item_id, from: 'you', text: '' });
         answerTurn(event.item_id);
+        if (smart.switchWhenQuiet) switchToSmartTurn();
         break;
       case 'conversation.item.input_audio_transcription.completed':
         onLine({ id: event.item_id, from: 'you', text: event.transcript });
@@ -211,6 +300,9 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
       case 'output_audio_buffer.started':
         speaking = true;
         onSpeaking(true);
+        // Without OpenAI's detection, the input buffer keeps everything since the last turn. Start the
+        // next turn clean, so it never includes silence or echo from while the contact was talking.
+        if (smart.active && !smart.engine?.inTurn) send({ type: 'input_audio_buffer.clear' });
         break;
       case 'output_audio_buffer.stopped':
       case 'output_audio_buffer.cleared':
@@ -222,6 +314,7 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
       case 'response.done':
         responding = false;
         if (pendingVoiceUpdate) {
+          if (smart.active) pendingVoiceUpdate.session.audio.input.turn_detection = null;
           send(pendingVoiceUpdate);
           pendingVoiceUpdate = null;
         }
@@ -241,7 +334,12 @@ export function startCall({ callId, api, audio, onStatus, onLine, onWordAdded, o
 
   async function connect() {
     onStatus('connecting');
-    const { clientSecret, sdpUrl, maxSeconds } = await api(`/api/calls/${callId}/session`, { method: 'POST' });
+    const { clientSecret, sdpUrl, maxSeconds, turnMode } = await api(`/api/calls/${callId}/session`, { method: 'POST' });
+    // Start loading Smart Turn straight away, so it's usually ready by the time the greeting ends.
+    if (turnMode === 'smartTurn') {
+      smart.loading = smartTurnEngine.load();
+      smart.loading.catch(() => {}); // a failure is handled once the call connects, below
+    }
     maxCallSeconds = maxSeconds;
     if (ended) return;
     microphone = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });

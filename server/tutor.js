@@ -157,9 +157,9 @@ const TOOLS = [
   },
 ];
 
-// How Ping decides the user has finished their turn: after enough silence, or when OpenAI
-// judges from the words said so far that they're done.
-export const TURN_MODES = ['silence', 'semantic'];
+// How Ping decides the user has finished their turn: after enough silence, when OpenAI
+// judges from the words said so far that they're done, or with Smart Turn on the phone.
+export const TURN_MODES = ['silence', 'semantic', 'smartTurn'];
 
 // Semantic mode has no silence length to tune, only how eager the model is to reply.
 // Learners pause to find words, so even "short" stops at medium, and "normal" and "long"
@@ -170,6 +170,8 @@ const SEMANTIC_EAGERNESS = { short: 'medium', normal: 'low', long: 'low' };
 // (create_response). The app asks for each reply, so it can let the contact carry on after aizuchi.
 const REPLY_CONTROL = { create_response: false, interrupt_response: true };
 
+// In smartTurn mode the call starts in silence mode, and the phone switches OpenAI's detection off
+// once Smart Turn has loaded. If it never loads, the call simply stays in silence mode.
 export function turnDetection({ thinkingTime, speed, turnMode = 'silence' }) {
   if (turnMode === 'semantic') return { type: 'semantic_vad', eagerness: SEMANTIC_EAGERNESS[thinkingTime] ?? 'low', ...REPLY_CONTROL };
   return { type: 'server_vad', silence_duration_ms: silenceMs(thinkingTime, speed), ...REPLY_CONTROL };

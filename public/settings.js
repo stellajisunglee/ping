@@ -5,7 +5,7 @@ import { $, api, clearWarning, el, go, isAdmin, onShow, setError, show, state, w
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FREQUENCY_BUTTONS = { daily: 'Daily', 'every-other-day': 'Every other day', weekdays: 'Weekdays only', weekends: 'Weekends only', custom: 'Custom' };
 const PLAN_NAMES = { free: 'Free', premium: 'Premium', platinum: 'Platinum' };
-const TURN_MODE_NAMES = { silence: 'Silence', semantic: 'Semantic' };
+const TURN_MODE_NAMES = { silence: 'Silence', semantic: 'Semantic', smartTurn: 'Smart Turn' };
 const PLAN_DETAILS = {
   free: 'Ping as your contact, and your latest 25 words.',
   premium: 'A lifetime word bank, removing words, example sentences, and calls that remember past conversations.',

@@ -1,7 +1,11 @@
 // Makes the phone "ring" while the app is closed, and keeps the app shell available offline.
 
-const CACHE = 'ping-v2';
-const SHELL = ['/', '/index.html', '/app.js', '/lib.js', '/stack.js', '/contacts.js', '/settings.js', '/aizuchi.js', '/turn-metrics.js', '/voice.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
+const CACHE = 'ping-v3';
+const SHELL = ['/', '/index.html', '/app.js', '/lib.js', '/stack.js', '/contacts.js', '/settings.js', '/aizuchi.js', '/turn-metrics.js', '/turn-machine.js', '/smart-turn.js', '/features.js', '/capture-worklet.js', '/voice.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
+// Smart Turn's runtime and models: about 25 MB, versioned by path, and only fetched by Smart Turn calls.
+// They live in their own cache, kept across app updates, so a phone downloads them once.
+const MODEL_CACHE = 'ping-smart-turn-1';
+const isModelFile = (url) => url.pathname.startsWith('/vendor/') || url.pathname.startsWith('/models/');
 const NOTIFICATION_TAG = 'ping-call';
 const RING_AGAIN_EVERY_MS = 2_500;
 const RING_AGAIN_TIMES = 3; // keeps it inside the 10 seconds, after which the server sends the missed call
@@ -14,7 +18,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => key !== CACHE && key !== MODEL_CACHE).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
 });
@@ -23,6 +27,18 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/') || url.pathname.endsWith('.mp3')) return;
+  if (isModelFile(url)) {
+    event.respondWith(
+      caches.open(MODEL_CACHE).then(async (cache) => {
+        const saved = await cache.match(event.request);
+        if (saved) return saved;
+        const response = await fetch(event.request);
+        if (response.ok) cache.put(event.request, response.clone());
+        return response;
+      }),
+    );
+    return;
+  }
   event.respondWith(
     fetch(event.request)
       .then((response) => {

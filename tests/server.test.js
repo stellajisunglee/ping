@@ -152,6 +152,30 @@ test('static files are served with a strict content policy, and nothing outside 
   assert.equal((await fetch(`${baseUrl}/%2e%2e/server/index.js`)).status, 404);
 });
 
+test('pages are cross-origin isolated and allow WebAssembly, so Smart Turn can use several threads', async () => {
+  const page = await fetch(`${baseUrl}/`);
+  assert.equal(page.headers.get('cross-origin-opener-policy'), 'same-origin');
+  assert.equal(page.headers.get('cross-origin-embedder-policy'), 'require-corp');
+  assert.match(page.headers.get('content-security-policy'), /script-src 'self' 'wasm-unsafe-eval'/);
+  assert.equal(page.headers.get('cache-control'), 'no-cache');
+});
+
+test("Smart Turn's files are served compressed, with the right types, and kept by the browser for good", async () => {
+  const runtime = await fetch(`${baseUrl}/vendor/onnxruntime-web-1.30.0/ort-wasm-simd-threaded.wasm`, { headers: { 'accept-encoding': 'br' } });
+  assert.equal(runtime.status, 200);
+  assert.equal(runtime.headers.get('content-type'), 'application/wasm');
+  assert.equal(runtime.headers.get('content-encoding'), 'br');
+  assert.match(runtime.headers.get('cache-control'), /immutable/);
+  const bytes = new Uint8Array(await runtime.arrayBuffer()); // fetch undoes the compression
+  assert.deepEqual([...bytes.subarray(0, 4)], [0x00, 0x61, 0x73, 0x6d], 'a WebAssembly file');
+
+  const model = await fetch(`${baseUrl}/models/silero-vad-2026-10.onnx`, { headers: { 'accept-encoding': 'identity' } });
+  assert.equal(model.headers.get('content-encoding'), null);
+  assert.equal(Number(model.headers.get('content-length')), (await model.arrayBuffer()).byteLength);
+  assert.equal((await fetch(`${baseUrl}/vendor/onnxruntime-web-1.30.0/ort.wasm.min.mjs`)).headers.get('content-type'), 'text/javascript; charset=utf-8');
+  assert.equal((await fetch(`${baseUrl}/models/LICENSE-smart-turn`)).status, 404, 'files without a known type stay private');
+});
+
 const WORD = { kanji: '元気', kana: 'げんき', romaji: 'genki', english: 'healthy, well' };
 
 test('a word can be added on any plan, but only subscribers can remove it', async () => {
@@ -310,6 +334,12 @@ const METRICS = {
   turnEndWaitP90Ms: 1400,
   replyGapMedianMs: 1900,
   replyGapP90Ms: 2300,
+  smartTurnEnds: 0,
+  backupEnds: 0,
+  smartTurnMedianMs: null,
+  smartTurnP90Ms: null,
+  modelLoadMs: null,
+  smartTurnFallback: 0,
 };
 
 test('turn metrics are stored on the call with their settings, and logged once', async () => {
@@ -372,4 +402,15 @@ test('only admins can change the turn mode, and it reaches the call, mid-call ch
     console.log = log;
   }
   assert.equal(engine.store.calls[call.id].turnMetrics.turnMode, 'semantic');
+});
+
+test('a Smart Turn call starts in silence mode, and the phone is told to take over', async () => {
+  const { token } = (await request('/api/register', { method: 'POST', body: { inviteCode: INVITE_CODE, timeZone: 'Asia/Tokyo' } })).data;
+  assert.equal((await request('/api/turn-mode', { method: 'PUT', token, body: { turnMode: 'smartTurn' } })).data.turnMode, 'smartTurn');
+  const { data: call } = await request('/api/calls', { method: 'POST', token });
+  const { data: session } = await request(`/api/calls/${call.id}/session`, { method: 'POST', token });
+  assert.equal(session.turnMode, 'smartTurn');
+  assert.equal(minted.at(-1).session.audio.input.turn_detection.type, 'server_vad');
+  const { data: changed } = await request('/api/settings', { method: 'PATCH', token, body: { thinkingTime: 'long' } });
+  assert.equal(changed.turnDetection.type, 'server_vad', 'the silence settings to switch back to');
 });
