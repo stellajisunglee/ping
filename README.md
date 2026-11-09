@@ -33,7 +33,7 @@ Browsers only allow push and the microphone on `localhost` or HTTPS, so testing 
 
 Tapping after the 10 seconds opens the voicemail, with the call-back button.
 
-On a call, the contact can explain a word in one short English sentence and save it to the user's stack, nudge them back to Japanese, say 「ちょっとわかりません」 if they steer off topic, and change settings when asked in plain English. The screen shows a live transcript with `*added to stack*` for each new word, and buttons for speaker, mute, speed and end call.
+On a call, the contact can explain a word in one short English sentence and save it to the user's stack, and answer a question asked in English about Japanese language or culture in one or two short sentences. That includes "how do you say...?", which also saves the word, and it works even when the question is off the contact's topic. The answer comes as its own message, and the contact then picks the conversation back up in Japanese as a second message. The contact can also nudge the user back to Japanese when they say anything else in English, say 「ちょっとわかりません」 if they steer off topic, and change settings when asked in plain English. The screen shows a live transcript with `*added to stack*` for each new word, and buttons for speaker, mute, speed and end call.
 
 ## Progress and My Stack
 

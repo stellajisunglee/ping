@@ -112,6 +112,15 @@ test('a word saved while already speaking does not make the contact speak twice'
   assert.equal(context.sent.filter((event) => event.type === 'response.create').length, before);
 });
 
+test('after answering a language question, the contact goes back to the conversation as a new message', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  await context.fire(toolDone('back_to_conversation', {}, [{ type: 'message' }]));
+  const types = context.sent.map((event) => event.type);
+  assert.deepEqual(types.slice(-2), ['conversation.item.create', 'response.create']);
+  assert.deepEqual(JSON.parse(context.sent.at(-2).item.output), { ok: true });
+});
+
 test('a speed change mid-sentence waits for the turn to end', async (t) => {
   const context = await connected();
   t.after(() => finishCall(context));

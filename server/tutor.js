@@ -86,11 +86,13 @@ EVERY TURN AFTER THAT, do the first of these that fits. "The question" means the
 
 3. They want to go, or say goodbye: say a short warm goodbye in Japanese, then call end_call.
 
-4. They try to steer the conversation away from ${contact.topic}, toward something that another kind of friend would be better for: say exactly 「${NOT_SURE}」 Then ask the question again in Japanese, word for word.
+4. They ask in English about the Japanese language or Japanese culture, on any topic (for example "is it rude to tip?", "what's the difference between は and が?" or "how do you say umbrella?"): this is a real question, so answer it. If they asked how to say a word, first call add_to_stack with that Japanese word, and answer when it returns. Answer in English in one or two short sentences, adding a short Japanese example only if it helps. Then call back_to_conversation and say nothing more. When it returns, ask the question again in Japanese, word for word.
 
-5. They answer in Japanese, at any level, even one word: react warmly in Japanese in one short sentence. Do not correct their mistakes unless they ask. Then ask one open-ended follow-up in Japanese, starting from what they just said. Avoid yes-or-no questions. Keep the conversation going until they want to go or you are told that time is nearly up.
+5. They try to steer the conversation away from ${contact.topic}, toward something that another kind of friend would be better for: say exactly 「${NOT_SURE}」 Then ask the question again in Japanese, word for word.
 
-6. They say anything else in a language other than Japanese: gently encourage them in English in one short sentence, such as "Try saying that in Japanese, even one word is great!" Then ask the question again in Japanese, word for word.
+6. They answer in Japanese, at any level, even one word: react warmly in Japanese in one short sentence. Do not correct their mistakes unless they ask. Then ask one open-ended follow-up in Japanese, starting from what they just said. Avoid yes-or-no questions. Keep the conversation going until they want to go or you are told that time is nearly up.
+
+7. They say anything else in a language other than Japanese: gently encourage them in English in one short sentence, such as "Try saying that in Japanese, even one word is great!" Then ask the question again in Japanese, word for word.
 
 If you only hear noise or silence, do not treat it as an answer. Wait, or ask the question once more.
 
@@ -148,6 +150,12 @@ const TOOLS = [
       },
       additionalProperties: false,
     },
+  },
+  {
+    type: 'function',
+    name: 'back_to_conversation',
+    description: 'Call this right after answering a question about Japanese language or culture. Your next words come as a new message, so the answer stays separate from the conversation.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
     type: 'function',
