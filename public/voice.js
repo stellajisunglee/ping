@@ -16,6 +16,8 @@ const WRAP_UP_NOTE = 'Time is nearly up. Say a short warm goodbye in Japanese, t
 // type "insufficient_quota", code "credit_balance_exhausted", so any error mentioning quota or credit counts.
 export const isOutOfCredit = (error) => Boolean(error) && /quota|credit/i.test(`${error.type ?? ''} ${error.code ?? ''}`);
 
+const withoutPunctuation = (text) => text.replace(/[\s、。！？!?.,…・「」]/g, '');
+
 export function startCall({
   callId,
   api,
@@ -45,6 +47,8 @@ export function startCall({
   let responding = false;
   let pendingVoiceUpdate = null;
   let maxCallSeconds = 0;
+  let hangUpLines = []; // goodbyes that end the call, like "I'll call another time"
+
   let connectedAt = null;
   let queuedReply = null; // a reply asked for while another was still being written
   let waitingTurn = null; // a turn that talked over the contact, waiting for its words
@@ -261,10 +265,18 @@ export function startCall({
     }
   }
 
+  // Whether a reply said one of the goodbyes that end the call.
+  function saidHangUpLine(items) {
+    if (!hangUpLines.length) return false;
+    const said = withoutPunctuation(items.filter((item) => item.type === 'message').flatMap((item) => item.content ?? []).map((part) => part.transcript ?? part.text ?? '').join(''));
+    return hangUpLines.some((line) => said.includes(line));
+  }
+
   async function handleToolCalls(items) {
     const calls = items.filter((item) => item.type === 'function_call');
-    if (!calls.length) return;
-    if (calls.some((call) => call.name === 'end_call')) {
+    const endsCall = calls.some((call) => call.name === 'end_call') || saidHangUpLine(items);
+    if (!calls.length && !endsCall) return;
+    if (endsCall) {
       hangingUp = true;
       // The reply finishes generating before it finishes playing, so wait for the goodbye to be heard.
       const goodbyeStillPlaying = speaking || (items.some((item) => item.type === 'message') && !audioFinished);
@@ -375,7 +387,8 @@ export function startCall({
 
   async function connect() {
     onStatus('connecting');
-    const { clientSecret, sdpUrl, maxSeconds, turnMode, smartTurn } = await api(`/api/calls/${callId}/session`, { method: 'POST' });
+    const { clientSecret, sdpUrl, maxSeconds, turnMode, smartTurn, hangUpLines: lines = [] } = await api(`/api/calls/${callId}/session`, { method: 'POST' });
+    hangUpLines = lines.map(withoutPunctuation);
     smart.rules = smartTurn ?? null;
     // Start loading Smart Turn straight away, so it's usually ready by the time the greeting ends.
     if (turnMode === 'smartTurn') {

@@ -29,6 +29,29 @@ export function addWord(user, word, { id, now, paid }) {
   return saved;
 }
 
+// A few words and sentences an account can start with, so a new visitor sees what a stack looks like.
+export const STARTER_STACK = {
+  words: [
+    { kanji: '忙しい', kana: 'いそがしい', romaji: 'isogashii', english: 'busy' },
+    { kanji: '散歩', kana: 'さんぽ', romaji: 'sanpo', english: 'a walk' },
+    { kanji: '美味しい', kana: 'おいしい', romaji: 'oishii', english: 'delicious' },
+    { kanji: '週末', kana: 'しゅうまつ', romaji: 'shuumatsu', english: 'weekend' },
+  ],
+  sentences: [
+    { japanese: '今週はちょっと忙しいです。', romaji: 'konshuu wa chotto isogashii desu.', english: "I'm a little busy this week.", word: '忙しい' },
+    { japanese: '週末は友達と散歩しました。', romaji: 'shuumatsu wa tomodachi to sanpo shimashita.', english: 'I went for a walk with a friend on the weekend.', word: '散歩' },
+    { japanese: 'このラーメンはとても美味しいです。', romaji: 'kono raamen wa totemo oishii desu.', english: 'This ramen is really delicious.', word: '美味しい' },
+  ],
+};
+
+// Listed first to last, so each gets a slightly earlier time and they keep that order.
+export function addStarterStack(user, { now, newId, paid }) {
+  STARTER_STACK.words.forEach((word, index) => addWord(user, word, { id: newId(), now: now - index * 1000, paid }));
+  STARTER_STACK.sentences.forEach((sentence, index) => addSentence(user, sentence, { id: newId(), now: now - index * 1000 }));
+  user.words.sort((a, b) => b.at - a.at);
+  user.sentences.sort((a, b) => b.at - a.at);
+}
+
 export function cleanSentence(input = {}) {
   const sentence = { japanese: text(input.japanese), romaji: text(input.romaji), english: text(input.english), word: text(input.word) };
   return JAPANESE_TEXT.test(sentence.japanese) && sentence.romaji && sentence.english ? sentence : null;

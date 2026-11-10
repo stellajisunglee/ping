@@ -324,7 +324,7 @@ test('the streak grows once per day and survives only unbroken days', () => {
 const pick = ({ current, best }) => ({ current, best });
 const practicedIn = (week) => week.map((day) => (day.practiced ? 'x' : '.')).join('');
 
-test("Home's week shows the last 7 days, today last, with the days the user practiced", () => {
+test("Home's week runs Sunday to Saturday, with the days the user practiced and the days still to come", () => {
   const context = setup();
   connectToday(context);
   context.clock.now += DAY_MS;
@@ -332,10 +332,13 @@ test("Home's week shows the last 7 days, today last, with the days the user prac
   context.clock.now += 2 * DAY_MS;
   connectToday(context);
   const { week } = context.engine.streak(context.user);
+  // Practiced Saturday, Sunday and Tuesday. Today is Tuesday in Tokyo, so this week starts on Sunday.
   assert.equal(week.length, 7);
-  assert.equal(practicedIn(week), '...xx.x');
-  assert.deepEqual(week.map((day) => day.today), [false, false, false, false, false, false, true]);
-  assert.equal(week[6].weekday, new Date(context.clock.now + 9 * 3_600_000).getUTCDay(), 'the weekday in Tokyo');
+  assert.deepEqual(week.map((day) => day.weekday), [0, 1, 2, 3, 4, 5, 6]);
+  assert.equal(practicedIn(week), 'x.x....');
+  assert.deepEqual(week.map((day) => day.today), [false, false, true, false, false, false, false]);
+  assert.deepEqual(week.map((day) => day.upcoming), [false, false, false, true, true, true, true]);
+  assert.equal(week[2].weekday, new Date(context.clock.now + 9 * 3_600_000).getUTCDay(), 'the weekday in Tokyo');
   assert.equal(context.user.streak.days.length, 3, 'only day numbers are kept');
 });
 

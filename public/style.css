@@ -1,31 +1,31 @@
 :root {
   color-scheme: light dark;
-  --background: #f7f1e8;
-  --surface: #fffaf3;
-  --text: #2c2320;
-  --muted: #75675f;
-  --line: #e4d9ca;
-  --accent: #c8543f;
+  --background: #f1f7fc;
+  --surface: #ffffff;
+  --text: #1b2a38;
+  --muted: #5b6e81;
+  --line: #d4e3f0;
+  --accent: #3a8acb;
   --accent-text: #ffffff;
   --answer: #2e7d55;
   --decline: #bf3b32;
-  --neutral: #6b5f58;
+  --neutral: #66788a;
   --error: #a92f27;
-  --phone-background: #2b211d;
-  --phone-text: #fff6ec;
-  --phone-muted: #cbbbaf;
+  --phone-background: #13202c;
+  --phone-text: #eef6fd;
+  --phone-muted: #a8bccf;
   font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic UI', 'Segoe UI', 'Noto Sans JP', sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #1f1a17;
-    --surface: #2a2320;
-    --text: #f6ece1;
-    --muted: #b7a79b;
-    --line: #40362f;
-    --accent: #e0705a;
-    --accent-text: #24130e;
+    --background: #101a23;
+    --surface: #182531;
+    --text: #e8f1f9;
+    --muted: #9db0c2;
+    --line: #2b3b4a;
+    --accent: #7cbcef;
+    --accent-text: #0b1824;
     --error: #ff9c91;
   }
 }
@@ -376,6 +376,16 @@ section .text-danger {
   margin-top: 0;
 }
 
+/* Several lines of plain text in one paragraph, one per line break. */
+.lines {
+  white-space: pre-line;
+}
+
+/* Sits at the bottom of a page, just above the navigation. */
+.bottom-button {
+  margin-top: auto;
+}
+
 .hero {
   position: fixed;
   inset: auto 0 0;
@@ -523,20 +533,31 @@ svg .stroke {
   white-space: nowrap;
 }
 
-.home-greeting > div:not(.avatar) {
-  flex: 1;
-  min-width: 0;
-}
-
-/* Shrinks a little on narrow phones, so the greeting stays on one line beside the plan. */
-.home-greeting h1 {
-  font-size: min(1.9rem, 7.2vw);
-  white-space: nowrap;
+/* The avatar and plan share the top row, and the greeting gets a line of its own below, large. */
+.home-greeting {
+  flex-wrap: wrap;
+  row-gap: 10px;
 }
 
 .home-greeting .plan-badge {
-  align-self: flex-start;
-  margin-top: 4px;
+  margin-left: auto;
+}
+
+.home-greeting > div:not(.avatar) {
+  order: 1;
+  flex-basis: 100%;
+}
+
+.home-greeting h1 {
+  margin: 0;
+  color: var(--accent);
+  font-size: min(2.6rem, 11vw);
+  line-height: 1.15;
+}
+
+.home-greeting p {
+  margin: 2px 0 0;
+  font-size: 1.05rem;
 }
 
 .plan-badge.free {
@@ -966,7 +987,7 @@ textarea {
 .line.you {
   align-self: flex-end;
   background: var(--accent);
-  color: #24130e;
+  color: var(--accent-text);
 }
 
 .line.note {

@@ -151,7 +151,7 @@ const homeContact = () => state.me.contacts.find((contact) => contact.selected) 
 function renderWeek(week = []) {
   $('home-week').replaceChildren(
     ...week.map((day) => {
-      const status = day.practiced ? 'practiced' : day.callDay ? 'missed' : 'day off';
+      const status = day.practiced ? 'practiced' : !day.callDay ? 'day off' : day.upcoming ? 'upcoming' : day.today ? 'not yet' : 'missed';
       const mark = el('span', { className: 'week-mark', textContent: day.practiced ? '✓' : day.callDay ? '' : '休' });
       return el(
         'li',

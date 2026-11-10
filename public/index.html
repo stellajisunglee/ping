@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Ping</title>
     <meta name="description" content="An app that calls you to practice speaking Japanese." />
-    <meta name="theme-color" content="#f7f1e8" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#1f1a17" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f1f7fc" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#101a23" media="(prefers-color-scheme: dark)" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
@@ -60,7 +60,7 @@
       <section class="card call-card" aria-label="Call">
         <p id="home-status" class="muted"></p>
         <button id="home-call-button" class="primary wide call-now" type="button">Call Ping now</button>
-        <p id="home-minutes" class="muted" hidden></p>
+        <p id="home-minutes" class="muted lines" hidden></p>
       </section>
       <section class="card streak-card" aria-labelledby="streak-title">
         <div class="streak-head">
@@ -128,12 +128,13 @@
         <button id="contact-new-button" class="primary small" type="button" data-go="contact-new">Create New Contact</button>
       </header>
       <div id="contacts-upgrade" class="notice upgrade">
-        <p>You're on <strong id="contacts-plan" class="badge plan-badge"></strong>. Creating your own contacts is part of Platinum.</p>
+        <p>You're on <strong id="contacts-plan" class="badge plan-badge"></strong> Creating your own contacts is part of Platinum.</p>
         <button class="secondary" type="button" data-go="plan">Upgrade Plan</button>
       </div>
       <p id="contacts-error" class="error" role="alert" hidden></p>
-      <p id="contacts-minutes" class="muted" hidden></p>
+      <p id="contacts-minutes" class="muted lines" hidden></p>
       <ul id="contacts-list" class="plain-list contacts"></ul>
+      <button class="row-button bottom-button" type="button" data-go="manage-calls">Manage Calls</button>
     </main>
 
     <main id="screen-contact-new" class="screen tabbed" hidden>
@@ -155,7 +156,6 @@
       <h1>Settings</h1>
       <div class="menu">
         <button class="row-button" type="button" data-go="account">Manage Account</button>
-        <button class="row-button" type="button" data-go="manage-calls">Manage Calls</button>
         <button id="plan-button" class="row-button" type="button">Upgrade Plan</button>
         <button class="row-button" type="button" data-go="privacy">Privacy Policy</button>
         <button class="row-button" type="button" data-go="terms">Terms of Service</button>
@@ -172,7 +172,7 @@
     </main>
 
     <main id="screen-manage-calls" class="screen tabbed" hidden>
-      <button class="back" type="button" data-back>‹ Settings</button>
+      <button class="back" type="button" data-back>‹ Contacts</button>
       <h1>Manage Calls</h1>
       <p class="muted">On a call, you can also just ask: "can you slow down?" or "give me more time to answer."</p>
       <p id="calls-error" class="error" role="alert" hidden></p>

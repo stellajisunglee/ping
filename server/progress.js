@@ -34,13 +34,16 @@ export function recordCallDay(streak, today, settings) {
   return { current, best: Math.max(streak.best, current), lastDay: today, days };
 }
 
-// Home's row of the last 7 days, today last. weekday 0 is Sunday.
+const weekdayOf = (day) => (((day + 4) % 7) + 7) % 7; // day 0, 1 January 1970, was a Thursday
+
+// Home's row for this week, Sunday to Saturday. weekday 0 is Sunday. Days after today are upcoming.
 export function streakToShow(streak, today, settings) {
   const broken = streak.lastDay === null || brokenSince(streak.lastDay, today, settings);
   const practiced = new Set(practiceDays(streak, settings));
+  const sunday = today - weekdayOf(today);
   const week = Array.from({ length: WEEK_DAYS }, (_, index) => {
-    const day = today - (WEEK_DAYS - 1) + index;
-    return { weekday: (day + 4) % 7, practiced: practiced.has(day), callDay: isCallDay(day, settings), today: day === today };
+    const day = sunday + index;
+    return { weekday: weekdayOf(day), practiced: practiced.has(day), callDay: isCallDay(day, settings), today: day === today, upcoming: day > today };
   });
   return { current: broken ? 0 : streak.current, best: streak.best, week };
 }

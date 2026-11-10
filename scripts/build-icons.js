@@ -1,4 +1,4 @@
-// Draws the app logo, the word "ping" in white on coral, with no image tools needed.
+// Draws the app logo, the word "ping" in white on blue, with no image tools needed.
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '../public/icons');
-const BACKGROUND = [200, 84, 63];
+const BACKGROUND = [58, 138, 203]; // --accent in public/style.css
 const FOREGROUND = [255, 255, 255];
 const SUPERSAMPLE = 3;
 

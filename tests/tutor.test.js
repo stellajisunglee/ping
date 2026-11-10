@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applySettings, DEFAULT_SETTINGS, MAX_SPEED, MIN_SPEED, SILENCE_MS, silenceMs } from '../server/settings.js';
-import { buildInstructions, buildSession, pickQuestion, QUESTIONS, turnDetection, voiceMessageFor } from '../server/tutor.js';
+import { buildInstructions, buildSession, NOT_NOW_GOODBYES, pickQuestion, QUESTIONS, turnDetection, voiceMessageFor } from '../server/tutor.js';
 import { describeDay, PING_BIO, PING_DAYS, pingsDay } from '../server/persona.js';
 
 test('every question is open-ended, with a polite and a casual version', () => {
@@ -256,4 +256,17 @@ test("a custom contact makes up small details that fit its topic, not Ping's lif
   const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12, contact });
   assert.match(instructions, /You are a friend who loves cooking/);
   assert.ok(!instructions.includes(PING_BIO));
+});
+
+test('when Ping calls it first asks if it is a good time, and a callback goes straight to the question', () => {
+  const calling = buildInstructions({ question: QUESTIONS[0], localHour: 15 });
+  assert.match(calling, /今、お時間大丈夫ですか？/);
+  assert.match(calling, /wait for their answer/);
+  assert.ok(calling.includes(NOT_NOW_GOODBYES.formal));
+  const casual = buildInstructions({ question: QUESTIONS[0], localHour: 15, settings: { ...DEFAULT_SETTINGS, formality: 'casual' } });
+  assert.match(casual, /今、話せる？/);
+  assert.ok(casual.includes(NOT_NOW_GOODBYES.casual));
+  const calledBack = buildInstructions({ question: QUESTIONS[0], localHour: 15, calledBack: true });
+  assert.doesNotMatch(calledBack, /大丈夫ですか|wait for their answer/);
+  assert.match(calledBack, /折り返してくれて/);
 });

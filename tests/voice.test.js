@@ -554,3 +554,25 @@ test('Smart Turn starts from the "time to answer" setting, and follows a change 
   context.call.updateVoice({ settings: { speed: 1 }, turnDetection: SILENCE, smartTurn: { doneAt: 0.5, backupMs: 2000 } });
   assert.deepEqual(fake.ruleChanges, [{ doneAt: 0.5, backupMs: 2000 }]);
 });
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("when Ping says its not-a-good-time goodbye, the call ends even if the voice engine doesn't end it", async (t) => {
+  const context = await connected({ session: { hangUpLines: ['わかった。また電話するね！'] } });
+  t.after(() => finishCall(context));
+  const before = replies(context).length;
+  await context.fire({ type: 'response.done', response: { output: [{ type: 'message', content: [{ type: 'output_audio', transcript: 'わかった、また電話するね！' }] }] } });
+  assert.equal(replies(context).length, before, 'no new reply is asked for');
+  await context.fire({ type: 'output_audio_buffer.stopped', response_id: 'r1' });
+  await pause(700); // hangs up shortly after the goodbye finishes playing
+  assert.deepEqual(context.events.ended, ['finished']);
+});
+
+test('other replies never end the call by themselves', async (t) => {
+  const context = await connected({ session: { hangUpLines: ['わかった。また電話するね！'] } });
+  t.after(() => finishCall(context));
+  await context.fire({ type: 'response.done', response: { output: [{ type: 'message', content: [{ type: 'output_audio', transcript: 'よかった！今日はどんな一日だった？' }] }] } });
+  await context.fire({ type: 'output_audio_buffer.stopped', response_id: 'r1' });
+  await pause(700);
+  assert.deepEqual(context.events.ended, []);
+});

@@ -48,12 +48,27 @@ function greetingFor({ localHour, calledBack, contact, formality }) {
   if (calledBack) return `${intro}折り返してくれて、${thanks}`;
   const morning = formal ? 'おはようございます' : 'おはよう';
   const hello = localHour < 11 ? morning : localHour < 18 ? 'こんにちは' : 'こんばんは';
-  return `${intro}${hello}！電話に出てくれて、${thanks}`;
+  const goodTime = formal ? '今、お時間大丈夫ですか？' : '今、話せる？';
+  return `${intro}${hello}！${goodTime}`;
 }
 
 function openingQuestion({ question, contact, formality }) {
-  if (contact.id !== PING.id) return 'Then ask one simple open-ended question in Japanese about your topic.';
-  return `Then ask exactly: 「${formality === 'formal' ? question.japanese : question.casual}」`;
+  if (contact.id !== PING.id) return 'ask one simple open-ended question in Japanese about your topic.';
+  return `ask exactly: 「${formality === 'formal' ? question.japanese : question.casual}」`;
+}
+
+// What the contact says when it isn't a good time. The phone hangs up after hearing it, even if the
+// voice engine forgets to call end_call, which it sometimes does after speaking.
+export const NOT_NOW_GOODBYES = { formal: 'わかりました。また電話しますね！', casual: 'わかった。また電話するね！' };
+
+// When the contact calls, it first asks if it's a good time, like a friend would. When the user calls, it goes straight in.
+function opening({ question, contact, formality, calledBack, localHour }) {
+  const greeting = `When the call connects, say exactly: 「${greetingFor({ localHour, calledBack, contact, formality })}」`;
+  if (calledBack) return `${greeting}\nThen ${openingQuestion({ question, contact, formality })}`;
+  const later = NOT_NOW_GOODBYES[formality === 'formal' ? 'formal' : 'casual'];
+  return `${greeting}
+Then wait for their answer. If it's a good time, or they don't say it isn't, ${openingQuestion({ question, contact, formality })}
+If they say it's not a good time or they're busy, in any language, say exactly 「${later}」 and call end_call.`;
 }
 
 function memorySection(memories) {
@@ -96,8 +111,7 @@ Only ever speak Japanese or English. If they ask for another language, stay in J
 ${lifeSection({ contact, localDate, localHour })}
 
 OPENING
-When the call connects, say exactly: 「${greetingFor({ localHour, calledBack, contact, formality })}」
-${openingQuestion({ question, contact, formality })}
+${opening({ question, contact, formality, calledBack, localHour })}
 
 EVERY TURN AFTER THAT, do the first of these that fits. "The question" means the question you asked most recently.
 

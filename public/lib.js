@@ -12,7 +12,7 @@ const SCREEN_TABS = {
   'contact-new': 'contacts',
   settings: 'settings',
   account: 'settings',
-  'manage-calls': 'settings',
+  'manage-calls': 'contacts',
   plan: 'settings',
   privacy: 'settings',
   terms: 'settings',
@@ -48,13 +48,13 @@ export function showPlanBadge(id) {
   $(id).classList.toggle('free', plan === 'free');
 }
 
-// One line on whether the user can call now, and their minutes. Null when there's nothing to say.
+// Whether the user can call now and their minutes, then on its own line how long calls last on their plan.
 export function callingNote() {
   const calling = state.me?.calling;
   if (!calling) return null;
-  if (calling.monthlyMinutes === null) return calling.canCall ? null : calling.reason;
-  if (!calling.canCall) return calling.reason;
-  return `${calling.minutesLeft} of ${calling.monthlyMinutes} minutes left this month. Calls last up to ${calling.perCallMinutes} minutes.`;
+  const length = `Calls last up to ${calling.perCallMinutes} minutes in your ${PLAN_LABELS[state.me.plan] ?? state.me.plan} plan.`;
+  const status = !calling.canCall ? calling.reason : calling.monthlyMinutes === null ? null : `${calling.minutesLeft} of ${calling.monthlyMinutes} minutes left this month.`;
+  return status ? `${status}\n${length}` : length;
 }
 
 export function showCallingNote(id) {

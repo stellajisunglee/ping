@@ -267,6 +267,11 @@ test('YC reviewers join as beta testers, and admins can see who joined with each
   const { data: reviewer } = await signUp('yc-demo'); // any capitalization works
   assert.equal(reviewer.role, 'beta');
   assert.equal(reviewer.plan, 'premium');
+  // Reviewers start with a few example words and sentences; other accounts start empty.
+  assert.deepEqual(reviewer.words.map((word) => word.kanji), ['忙しい', '散歩', '美味しい', '週末']);
+  assert.equal(reviewer.sentences.length, 3);
+  assert.ok(reviewer.sentences.every((sentence) => sentence.romaji && reviewer.words.some((word) => word.kanji === sentence.word)));
+  assert.equal((await signUp(BETA_CODE)).data.words.length, 0);
   assert.equal(reviewer.calling.monthlyMinutes, 120);
   // Still not an admin: no plan switching, test rings or turn-detection switch.
   assert.equal((await request('/api/plan', { method: 'PUT', token: reviewer.token, body: { plan: 'platinum' } })).status, 403);

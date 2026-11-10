@@ -14,7 +14,7 @@ import { createOpenAI } from './openai.js';
 import { isValidTimeZone } from './schedule.js';
 import { cleanMetrics, metricsProblems } from '../public/turn-metrics.js';
 import { FREE_WORD_LIMIT } from './stack.js';
-import { buildSession, smartTurnRules, turnDetection, voiceMessageFor } from './tutor.js';
+import { buildSession, NOT_NOW_GOODBYES, smartTurnRules, turnDetection, voiceMessageFor } from './tutor.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = join(ROOT, 'public');
@@ -27,6 +27,7 @@ const DEFAULT_ADMIN_CODE = 'minabystella_admin_only';
 const DEFAULT_BETA_CODE = 'beta-01';
 const DEFAULT_YC_CODE = 'YC-Demo'; // for YC reviewers: the beta tester's version on Premium, counted separately
 const PLAN_FOR_CODE = { yc: 'premium' }; // codes not listed start on Free
+const STARTER_STACK_CODES = new Set(['yc']); // accounts that start with a few example words and sentences
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -197,7 +198,7 @@ export function createApp({ engine, openai, config }) {
         return json(res, 403, { error: "That invite code isn't right." });
       }
       if (!isValidTimeZone(body.timeZone)) return json(res, 400, { error: 'Your time zone was not recognized.' });
-      const { user, token } = engine.register(body.timeZone, codeName === 'admin' ? 'admin' : 'beta', codeName, PLAN_FOR_CODE[codeName]);
+      const { user, token } = engine.register(body.timeZone, codeName === 'admin' ? 'admin' : 'beta', codeName, PLAN_FOR_CODE[codeName], STARTER_STACK_CODES.has(codeName));
       return json(res, 201, { token, ...publicUser(user) });
     }
 
@@ -381,6 +382,7 @@ export function createApp({ engine, openai, config }) {
         clientSecret,
         sdpUrl: openai.sdpUrl,
         maxSeconds: details.maxSeconds,
+        hangUpLines: details.calledBack ? [] : Object.values(NOT_NOW_GOODBYES),
         question: details.question,
         turnMode: details.turnMode,
         smartTurn: smartTurnRules(details.settings.thinkingTime),

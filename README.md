@@ -29,7 +29,7 @@ Pages are served "cross-origin isolated" (`Cross-Origin-Opener-Policy` and `Cros
 
 1. Each user gets a call at a random time inside the hours they set, on the days their call frequency allows. The default is daily, between 10:00 and 20:00 in their time zone.
 2. The server sends a push and the phone shows "Ping is calling". The phone confirms the push arrived, and that starts the 10 seconds. The notification re-alerts every 2.5 seconds until then.
-3. Tapping the notification answers. The browser gets a one-minute key from the server and connects straight to OpenAI over WebRTC. The contact greets the user and asks the question. Calls stop at the plan's longest call (see "Plans").
+3. Tapping the notification answers. The browser gets a one-minute key from the server and connects straight to OpenAI over WebRTC. When the contact calls, it greets the user and first asks if it's a good time (「今、お時間大丈夫ですか？」, or 「今、話せる？」 when casual). If yes, it asks the question. If not, it says it'll call another time and hangs up; the phone hangs up after hearing that goodbye even if the voice engine forgets to. When the user calls, the contact thanks them for calling and goes straight to the question. Calls stop at the plan's longest call (see "Plans").
 4. If nobody taps in 10 seconds, the call is missed. The notification changes to "Missed call", and a voicemail with a call-back button appears on Home.
 5. If the phone never confirms the push, for example because it's offline, the call counts as missed after 30 seconds.
 
@@ -56,7 +56,7 @@ On a benchmark of the developer's own speech, Smart Turn with the 2.5-second bac
 Home is the first screen after joining:
 - **A greeting from the contact,** by the time of day: 「おはよう！」, 「こんにちは！」 or 「こんばんは！」, with the English underneath.
 - **A "Call Ping now" button,** which calls whoever calls the user, under their call schedule.
-- **The streak and the last 7 days,** today last: a tick for each day with a connected call, 休 for days off in the schedule, and the best streak.
+- **The streak and this week,** Sunday to Saturday: a tick for each day with a connected call, 休 for days off in the schedule, and the best streak. Days still to come are empty.
 - **The last call,** if one connected in the past week: when, how long, and how many words it saved, with a button to see them.
 - **My Stack's Words and Sentences buttons,** with how many of each. Empty, they say how to fill them.
 
@@ -77,7 +77,7 @@ Plans are a test switch under Settings for now, with no payment. Only admins can
 | Longest call | 3 minutes | 5 minutes | 10 minutes |
 | Calling a contact yourself | Your first call, then only to call back after missing a call | From 120 minutes a month | From 250 minutes a month |
 
-Calls on the paid plans use minutes from the month, counted in the user's time zone, and Ping's own calls count too. Once the minutes run out, Ping still calls, up to the plan's longest call, but the user can't call until the next month. A call the user makes also stops early if the month's minutes run out during it. Home and Contacts show the minutes left, and the plan page shows each plan's limits, which come from the server. The user's plan shows as a badge at the top right of Home (tapping it opens the plan page) and in the upgrade note on Contacts.
+Calls on the paid plans use minutes from the month, counted in the user's time zone, and Ping's own calls count too. Once the minutes run out, Ping still calls, up to the plan's longest call, but the user can't call until the next month. A call the user makes also stops early if the month's minutes run out during it. Home and Contacts show the minutes left, and the plan page shows each plan's limits, which come from the server. Manage Calls, for call times and how the contact talks, is at the bottom of Contacts. The user's plan shows as a badge at the top right of Home (tapping it opens the plan page) and in the upgrade note on Contacts.
 
 On Free, the user can call Ping themselves once on a new account, and after that only to call back when they've missed or declined a call since they last talked. That keeps Free at about one call a day.
 
@@ -101,7 +101,7 @@ The invite code someone joins with decides which version they get. It can't be c
 
 The server enforces both limits. Accounts created before there were two codes are admins.
 
-A third code, `YC_INVITE_CODE` (`YC-Demo` by default), is for YC reviewers. It gives the beta tester's version, so no admin settings, but on Premium instead of Free, and its accounts are counted separately. Like other beta testers, reviewers can't change their plan. Which plan each code starts on is `PLAN_FOR_CODE` in `server/index.js`. Codes aren't case-sensitive.
+A third code, `YC_INVITE_CODE` (`YC-Demo` by default), is for YC reviewers. It gives the beta tester's version, so no admin settings, but on Premium instead of Free, and its accounts are counted separately. Reviewers start with 4 example words and 3 example sentences in their stack (`STARTER_STACK` in `server/stack.js`), so the stack isn't empty when they first look. Like other beta testers, reviewers can't change their plan. Which plan each code starts on is `PLAN_FOR_CODE` in `server/index.js`. Codes aren't case-sensitive.
 
 Admins see "Invite codes" at the bottom of the plan page (Settings, then Upgrade Plan or Manage Plan). For each code it shows how many accounts joined, how many made a call, how many calls connected in all, and the 20 newest accounts with when they joined, their calls and their words. Joining is what creates an account, so each account is one phone or browser, and someone who deletes their account and rejoins counts twice. Codes and call counts are only recorded from this version on, so older accounts show "before this was tracked".
 

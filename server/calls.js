@@ -7,7 +7,7 @@ import { canCall, cleanContact, contactList, findContact, isPaid, MAX_CUSTOM_CON
 import { recordCallDay, streakToShow } from './progress.js';
 import { localDay, localDayNumber, localParts, nextCallTime } from './schedule.js';
 import { applySettings, DEFAULT_SETTINGS } from './settings.js';
-import { addSentence, addWord, cleanSentence, cleanWord, clearSubscriptionData } from './stack.js';
+import { addSentence, addStarterStack, addWord, cleanSentence, cleanWord, clearSubscriptionData } from './stack.js';
 import { pickQuestion, questionById, TURN_MODES } from './tutor.js';
 
 export const RING_MS = 10_000;
@@ -81,7 +81,8 @@ export class CallEngine {
 
   // joinedWith is the invite code's name, which can differ from the role: YC reviewers are beta testers.
   // plan is the plan an invite code starts on: Free unless the code says otherwise.
-  register(timeZone, role = 'beta', joinedWith = role, plan = 'free') {
+  // starterStack gives the account a few example words and sentences to look at.
+  register(timeZone, role = 'beta', joinedWith = role, plan = 'free', starterStack = false) {
     const token = randomBytes(32).toString('base64url');
     const user = {
       id: randomUUID(),
@@ -100,6 +101,7 @@ export class CallEngine {
       joinedWith,
       joinedAt: this.now(),
     };
+    if (starterStack) addStarterStack(user, { now: this.now(), newId: randomUUID, paid: isPaid(user.plan) });
     this.store.users[user.id] = user;
     this.store.save();
     return { user, token };
