@@ -306,18 +306,58 @@ test('the streak grows once per day and survives only unbroken days', () => {
   const context = setup();
   connectToday(context);
   connectToday(context);
-  assert.deepEqual(context.engine.streak(context.user), { current: 1, best: 1 });
+  assert.deepEqual(pick(context.engine.streak(context.user)), { current: 1, best: 1 });
 
   context.clock.now += DAY_MS;
   connectToday(context);
   context.clock.now += DAY_MS;
   connectToday(context);
-  assert.deepEqual(context.engine.streak(context.user), { current: 3, best: 3 });
+  assert.deepEqual(pick(context.engine.streak(context.user)), { current: 3, best: 3 });
 
   context.clock.now += 2 * DAY_MS;
-  assert.deepEqual(context.engine.streak(context.user), { current: 0, best: 3 });
+  assert.deepEqual(pick(context.engine.streak(context.user)), { current: 0, best: 3 });
   connectToday(context);
-  assert.deepEqual(context.engine.streak(context.user), { current: 1, best: 3 });
+  assert.deepEqual(pick(context.engine.streak(context.user)), { current: 1, best: 3 });
+});
+
+const pick = ({ current, best }) => ({ current, best });
+const practicedIn = (week) => week.map((day) => (day.practiced ? 'x' : '.')).join('');
+
+test("Home's week shows the last 7 days, today last, with the days the user practiced", () => {
+  const context = setup();
+  connectToday(context);
+  context.clock.now += DAY_MS;
+  connectToday(context);
+  context.clock.now += 2 * DAY_MS;
+  connectToday(context);
+  const { week } = context.engine.streak(context.user);
+  assert.equal(week.length, 7);
+  assert.equal(practicedIn(week), '...xx.x');
+  assert.deepEqual(week.map((day) => day.today), [false, false, false, false, false, false, true]);
+  assert.equal(week[6].weekday, new Date(context.clock.now + 9 * 3_600_000).getUTCDay(), 'the weekday in Tokyo');
+  assert.equal(context.user.streak.days.length, 3, 'only day numbers are kept');
+});
+
+test('a streak from before practice days were kept is filled in from its count', () => {
+  const context = setup();
+  connectToday(context);
+  const today = context.user.streak.lastDay;
+  context.user.streak = { current: 3, best: 5, lastDay: today }; // an older record, with no days
+  assert.equal(practicedIn(context.engine.streak(context.user).week), '....xxx');
+  context.clock.now += DAY_MS;
+  connectToday(context);
+  assert.deepEqual(context.user.streak.days, [today - 2, today - 1, today, today + 1]);
+});
+
+test("Home's last call says when it was, how long, and how many words it saved", () => {
+  const context = setup();
+  assert.equal(context.engine.lastCall(context.user), null);
+  context.user.words = [{ id: 'old', kana: 'あ', at: context.clock.now - DAY_MS }];
+  const call = context.engine.callBack(context.user);
+  context.engine.markConnected(context.user, call.id);
+  context.user.words.unshift({ id: 'new', kana: 'い', at: context.clock.now + 1000 });
+  context.engine.saveTurnMetrics(context.user, call.id, { callSeconds: 95 });
+  assert.deepEqual(context.engine.lastCall(context.user), { at: context.clock.now, seconds: 95, newWords: 1 });
 });
 
 test('days off in the schedule do not break a streak', () => {

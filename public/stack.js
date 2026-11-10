@@ -9,8 +9,17 @@ let currentWordId = null;
 // The Words and Sentences buttons on Home, with how many of each the user has.
 export function renderStackTiles() {
   const { words, sentences, freeWordLimit } = state.me;
-  $('stack-words-count').textContent = isPaid() ? `${words.length}` : `${words.length} of ${freeWordLimit}`;
-  $('stack-sentences-count').textContent = isPaid() || sentences.length ? `${sentences.length}` : 'Premium';
+  // Empty, each one says how to fill it.
+  $('stack-words-count').textContent = !words.length
+    ? 'Ask Ping what a word means on a call, and it saves here.'
+    : isPaid()
+      ? `${words.length}`
+      : `${words.length} of ${freeWordLimit}`;
+  $('stack-sentences-count').textContent = sentences.length
+    ? `${sentences.length}`
+    : isPaid()
+      ? 'Open a word to find example sentences to save.'
+      : 'Save example sentences with Premium.';
 }
 
 function renderWords() {

@@ -132,11 +132,65 @@ function renderVoicemail() {
   $('voicemail').replaceChildren(card);
 }
 
+// Ping greets the user by the time of day, in Japanese with English underneath for beginners.
+const GREETINGS = [
+  { from: 5, japanese: 'おはよう！', english: 'Good morning' },
+  { from: 11, japanese: 'こんにちは！', english: 'Hello' },
+  { from: 18, japanese: 'こんばんは！', english: 'Good evening' },
+];
+const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土']; // Sunday first, as the server counts them
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function greetingFor(hour) {
+  return GREETINGS.findLast((greeting) => hour >= greeting.from) ?? GREETINGS.at(-1);
+}
+
+// The contact who calls the user is the one Home's button calls.
+const homeContact = () => state.me.contacts.find((contact) => contact.selected) ?? state.me.contacts[0];
+
+function renderWeek(week = []) {
+  $('home-week').replaceChildren(
+    ...week.map((day) => {
+      const status = day.practiced ? 'practiced' : day.callDay ? 'missed' : 'day off';
+      const mark = el('span', { className: 'week-mark', textContent: day.practiced ? '✓' : day.callDay ? '' : '休' });
+      return el(
+        'li',
+        { className: `week-day ${status.replace(' ', '-')}${day.today ? ' today' : ''}`, ariaLabel: `${day.today ? 'Today' : WEEKDAY_NAMES[day.weekday]}: ${status}` },
+        mark,
+        el('span', { className: 'week-label', lang: 'ja', ariaHidden: 'true', textContent: WEEKDAYS[day.weekday] }),
+      );
+    }),
+  );
+}
+
+function renderLastCall() {
+  const { lastCall } = state.me;
+  $('home-last-call').hidden = !lastCall;
+  if (!lastCall) return;
+  const when = new Date(lastCall.at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  const parts = [`Last call · ${when}`];
+  if (lastCall.seconds) parts.push(lastCall.seconds < 60 ? `${lastCall.seconds} sec` : `${Math.round(lastCall.seconds / 60)} min`);
+  parts.push(`${lastCall.newWords} new ${lastCall.newWords === 1 ? 'word' : 'words'}`);
+  const summary = el('p', { textContent: parts.join(' · ') });
+  if (!lastCall.newWords) return $('home-last-call').replaceChildren(summary);
+  const seeWords = el('button', { className: 'secondary small', type: 'button', textContent: 'See words' });
+  seeWords.dataset.go = 'words';
+  $('home-last-call').replaceChildren(summary, seeWords);
+}
+
 function renderHome() {
   const { streak } = state.me;
+  const greeting = greetingFor(new Date().getHours());
+  $('home-greeting-ja').textContent = greeting.japanese;
+  $('home-greeting-en').textContent = greeting.english;
+  const contact = homeContact();
+  $('home-avatar').textContent = initialOf(contact?.name ?? 'Ping');
+  $('home-call-button').textContent = `Call ${contact?.name ?? 'Ping'} now`;
   $('streak-current').textContent = streak.current;
-  $('streak-best').textContent = streak.best;
+  $('streak-best').textContent = streak.best ? `Best: ${streak.best} ${streak.best === 1 ? 'day' : 'days'}` : '';
+  renderWeek(streak.week);
   $('home-status').textContent = describeSchedule();
+  renderLastCall();
   setError('home-clear', clearWarning());
   renderStackTiles();
   renderVoicemail();
@@ -507,6 +561,7 @@ function bindEvents() {
   $('enable-button').addEventListener('click', enable);
   $('answer-button').addEventListener('click', () => answer(ringingCallId));
   $('outgoing-cancel').addEventListener('click', cancelOutgoing);
+  $('home-call-button').addEventListener('click', () => callContact(homeContact()?.id ?? 'ping'));
   $('decline-button').addEventListener('click', decline);
   $('hangup-button').addEventListener('click', () => activeCall?.hangUp());
   $('mute-button').addEventListener('click', () => setMuted($('mute-button').getAttribute('aria-pressed') !== 'true'));

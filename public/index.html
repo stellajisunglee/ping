@@ -48,19 +48,26 @@
     </main>
 
     <main id="screen-home" class="screen tabbed" hidden>
-      <h1>Home</h1>
-      <p id="home-status" class="muted"></p>
+      <header class="home-greeting">
+        <div id="home-avatar" class="avatar small" aria-hidden="true">ピ</div>
+        <div>
+          <h1 id="home-greeting-ja" lang="ja">こんにちは！</h1>
+          <p id="home-greeting-en" class="muted">Hello</p>
+        </div>
+      </header>
       <p id="home-notice" class="notice" role="status" hidden></p>
-      <div class="stats">
-        <div class="stat">
-          <strong id="streak-current" class="stat-value">0</strong>
-          <span class="muted">Streak</span>
+      <section class="card call-card" aria-label="Call">
+        <p id="home-status" class="muted"></p>
+        <button id="home-call-button" class="primary wide call-now" type="button">Call Ping now</button>
+      </section>
+      <section class="card streak-card" aria-labelledby="streak-title">
+        <div class="streak-head">
+          <h2 id="streak-title"><strong id="streak-current" class="streak-number">0</strong> day streak</h2>
+          <span id="streak-best" class="muted"></span>
         </div>
-        <div class="stat">
-          <strong id="streak-best" class="stat-value">0</strong>
-          <span class="muted">All-time streak</span>
-        </div>
-      </div>
+        <ol id="home-week" class="week" aria-label="The last 7 days"></ol>
+      </section>
+      <section id="home-last-call" class="card last-call" aria-label="Your last call" hidden></section>
       <p id="home-clear" class="notice warning" hidden></p>
       <section id="voicemail-section" aria-labelledby="voicemail-title" hidden>
         <h2 id="voicemail-title">Voicemail</h2>

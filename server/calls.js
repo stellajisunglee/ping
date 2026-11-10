@@ -292,6 +292,7 @@ export class CallEngine {
   markConnected(user, callId) {
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id || call.state !== 'answered') return false;
+    call.connectedAt = this.now();
     user.streak = recordCallDay(user.streak, localDayNumber(this.now(), user.timeZone), user.settings);
     this.store.save();
     return true;
@@ -305,6 +306,19 @@ export class CallEngine {
     call.turnMetrics = { callId, ...metrics, turnMode: call.turnMode ?? user.turnMode, thinkingTime, speed, proficiency };
     this.store.save();
     return call.turnMetrics;
+  }
+
+  // Home's summary of the latest call that connected in the last 7 days: when, how long, and how many words
+  // it saved. Words are only saved during calls, so every word since it started came from it.
+  lastCall(user) {
+    const calls = Object.values(this.store.calls).filter((call) => call.userId === user.id && call.connectedAt);
+    if (!calls.length) return null;
+    const last = calls.reduce((latest, call) => (call.connectedAt > latest.connectedAt ? call : latest));
+    return {
+      at: last.connectedAt,
+      seconds: last.turnMetrics?.callSeconds ?? null,
+      newWords: user.words.filter((word) => word.at >= last.connectedAt).length,
+    };
   }
 
   streak(user) {

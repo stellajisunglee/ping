@@ -51,9 +51,14 @@ On a benchmark of the developer's own speech, Smart Turn with the 2.5-second bac
 
 ## Progress and My Stack
 
-Home shows the streak and My Stack's Words and Sentences buttons, with how many of each the user has.
+Home is the first screen after joining:
+- **A greeting from the contact,** by the time of day: 「おはよう！」, 「こんにちは！」 or 「こんばんは！」, with the English underneath.
+- **A "Call Ping now" button,** which calls whoever calls the user, under their call schedule.
+- **The streak and the last 7 days,** today last: a tick for each day with a connected call, 休 for days off in the schedule, and the best streak.
+- **The last call,** if one connected in the past week: when, how long, and how many words it saved, with a button to see them.
+- **My Stack's Words and Sentences buttons,** with how many of each. Empty, they say how to fill them.
 
-- **Streak:** days in a row with a connected call, answered or called back. Days off in the user's schedule don't break it. Home also shows the all-time best.
+- **Streak:** days in a row with a connected call, answered or called back. Days off in the user's schedule don't break it. Home also shows the all-time best. The server keeps the last 14 practice days as day numbers, for Home's week. Streaks from before that are filled in from their count.
 - **Words:** words the user didn't understand, saved by the voice model. Free users keep their latest 25, with the oldest replaced, and can't remove any.
 - **Sentences:** example sentences, looked up one word at a time and stored only if the user saves them. Swipe left to remove.
 
@@ -156,7 +161,7 @@ Use **New > Blueprint** and point it at this repo. `render.yaml` sets up a web s
 - At the end of a call, the app sends timing numbers (no audio, no words) to the server to measure conversation quality.
 - In Smart Turn mode, the voice detector and Smart Turn run on the phone. The audio they hear never leaves it. The server only gets the same kind of timing numbers: how many turns Smart Turn or the backup ended, how long decisions and loading took, and whether the call fell back to silence mode.
 - Transcripts appear on the call screen. On a free plan they're never sent to Ping's server. On a paid plan, the text of the last 20 calls is stored to personalize later calls.
-- The server stores each user's time zone, settings, plan, streak, contacts, stack, push subscription, voicemail list and recent call times, in one JSON file. Calls are deleted after 7 days.
+- The server stores each user's time zone, settings, plan, streak (with the day numbers of their last 14 practice days), contacts, stack, push subscription, voicemail list and recent call times, in one JSON file. Calls are deleted after 7 days.
 - There are no names or emails. "Delete my account" removes everything for that user.
 - Feedback is stored without the sender's account, and also appears in the server logs.
 - Contacts say they're an AI if asked, and the join screen says so too.

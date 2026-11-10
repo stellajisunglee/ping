@@ -164,6 +164,7 @@ export function createApp({ engine, openai, config }) {
       settings: user.settings,
       hasSubscription: Boolean(user.subscription),
       streak: engine.streak(user),
+      lastCall: engine.lastCall(user),
       voicemail: publicVoicemail(user),
       contacts: engine.contacts(user),
       words: user.words,
