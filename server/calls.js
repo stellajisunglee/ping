@@ -400,10 +400,15 @@ export class CallEngine {
   // Never throws, because the voice model is what's calling this and it only needs to hear whether it worked.
   addWord(user, input) {
     const word = cleanWord(input);
-    if (!word) return { added: false, invalid: true };
+    if (!word) return { added: false, invalid: true, error: 'Give the word in hiragana or katakana as kana, with its romaji and a short English meaning.' };
     const saved = addWord(user, word, { id: randomUUID(), now: this.now(), paid: isPaid(user.plan) });
-    if (saved) this.store.save();
-    return { added: Boolean(saved), word: saved };
+    if (!saved) {
+      // Already in the stack, so the call can say so instead of looking like nothing happened.
+      const existing = user.words.find((other) => other.kana === word.kana && other.kanji === word.kanji);
+      return { added: false, alreadySaved: true, word: existing };
+    }
+    this.store.save();
+    return { added: true, word: saved };
   }
 
   removeWord(user, wordId) {

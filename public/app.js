@@ -476,8 +476,9 @@ function beginCall(callId, contactName = 'Ping') {
       outOfCredit = true;
       activeCall?.hangUp();
     },
-    onWordAdded: (word) => {
-      addTranscriptNode(el('p', { className: 'line note', textContent: `${word.kanji || word.kana} *added to stack*` }));
+    onWordAdded: (word, { alreadySaved = false } = {}) => {
+      const note = alreadySaved ? '*already in your stack*' : '*added to stack*';
+      addTranscriptNode(el('p', { className: 'line note', textContent: `${word.kanji || word.kana} ${note}` }));
     },
     onSpeaking: (speaking) => $('call-avatar').classList.toggle('speaking', speaking),
     onSettings: (settings) => {

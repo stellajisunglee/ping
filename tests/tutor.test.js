@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applySettings, DEFAULT_SETTINGS, MAX_SPEED, MIN_SPEED, SILENCE_MS, silenceMs } from '../server/settings.js';
 import { buildInstructions, buildSession, pickQuestion, QUESTIONS, turnDetection, voiceMessageFor } from '../server/tutor.js';
-import { PING_BIO, PING_DAYS, pingsDay } from '../server/persona.js';
+import { describeDay, PING_BIO, PING_DAYS, pingsDay } from '../server/persona.js';
 
 test('every question is open-ended, with a polite and a casual version', () => {
   for (const question of QUESTIONS) {
@@ -44,6 +44,22 @@ test('a language or culture question in English gets a short answer before the J
   // The rules are checked in order, so an off-topic culture question is answered before the off-topic rule could catch it.
   assert.ok(rule('Japanese language or Japanese culture') < rule('ちょっとわかりません'));
   assert.ok(rule('Japanese language or Japanese culture') < rule('Try saying that in Japanese'));
+});
+
+test('asking what one word means saves it, however the question is put', () => {
+  const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12 });
+  const rule = (text) => instructions.indexOf(text);
+  for (const example of ['what does genki mean?', 'what do you mean by genki?', "what's genki?", '「げんきってどういう意味？」']) assert.ok(instructions.includes(example), example);
+  assert.match(instructions, /may spell the word wrongly/);
+  // Checked before the whole-sentence translation rule, which doesn't save anything.
+  assert.ok(rule('what do you mean by genki?') < rule('can you translate that'));
+  assert.match(instructions, /without naming one word/);
+});
+
+test("Ping never gets stuck asking the same question", () => {
+  const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12 });
+  assert.match(instructions, /Never ask the same question more than twice in a row/);
+  assert.match(instructions, /how would you use 複雑 in a sentence/);
 });
 
 test("asking what Ping said gets an English translation, not the same Japanese again", () => {
@@ -194,31 +210,41 @@ test("Ping has a life of its own, and says what it's doing when asked", () => {
   const localDate = { year: 2026, month: 11, day: 10 };
   const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 19, localDate });
   const rule = (text) => instructions.indexOf(text);
-  const { earlier, now } = pingsDay({ localDate, localHour: 19 });
+  const { today, tomorrow } = pingsDay({ localDate, localHour: 19 });
   assert.match(instructions, /YOUR LIFE/);
   assert.ok(instructions.includes(PING_BIO));
-  assert.ok(instructions.includes(`this evening you ${now.text}. The last one is what you've been doing just now.`));
-  assert.deepEqual(earlier.map((event) => event.slot), ['morning', 'afternoon']);
-  for (const event of earlier) assert.ok(instructions.includes(event.text));
+  assert.deepEqual(today.map((part) => part.status), ['done', 'done', 'now', 'planned']);
+  assert.ok(instructions.includes(`This evening (now, what you've been doing): ${today[2].plan}.`));
+  assert.ok(instructions.includes(`Tonight (planned): ${today[3].plan}.`));
+  for (const plan of tomorrow) assert.ok(instructions.includes(plan));
   assert.match(instructions, /今、何してる？/);
+  assert.match(instructions, /明日の予定は？/);
   assert.match(instructions, /tell them honestly that you are an AI/);
   // Checked before the off-topic rule, so "what are you doing?" isn't treated as steering away.
   assert.ok(rule('They ask about you in Japanese') < rule('ちょっとわかりません'));
 });
 
-test("every call on the same day tells the same story, and the next day is different", () => {
+test("every call on the same day tells the same story, and tomorrow's plans are the next day's", () => {
   const day = (dayOfMonth, localHour) => pingsDay({ localDate: { year: 2026, month: 11, day: dayOfMonth }, localHour });
+  const plans = (result) => result.today.map((part) => part.plan);
   assert.deepEqual(day(10, 9), day(10, 9));
-  assert.deepEqual(day(10, 14).earlier, [day(10, 9).now]);
-  assert.notEqual(day(11, 9).now, day(10, 9).now);
-  for (let offset = 0; offset < PING_DAYS.length; offset += 1) assert.ok(day(1 + offset, 9).now.text);
+  assert.deepEqual(plans(day(10, 9)), plans(day(10, 20)));
+  assert.deepEqual(day(10, 9).tomorrow, plans(day(11, 9)));
+  assert.notDeepEqual(plans(day(11, 9)), plans(day(10, 9)));
+  for (let offset = 0; offset < PING_DAYS.length; offset += 1) assert.ok(day(1 + offset, 9).today.every((part) => part.plan));
+});
+
+test("Ping doesn't say how a planned part of its day went before it happens", () => {
+  const morning = pingsDay({ localDate: { year: 2026, month: 11, day: 10 }, localHour: 8 });
+  for (const part of morning.today.filter((part) => part.status === 'planned')) assert.equal(part.happened, undefined);
+  assert.match(describeDay(morning), /Don't say how planned things turned out/);
 });
 
 test('a call after midnight still belongs to the night before', () => {
   const lateNight = pingsDay({ localDate: { year: 2026, month: 11, day: 11 }, localHour: 1 });
   const eveningBefore = pingsDay({ localDate: { year: 2026, month: 11, day: 10 }, localHour: 23 });
   assert.deepEqual(lateNight, eveningBefore);
-  assert.equal(lateNight.earlier.length, 3);
+  assert.deepEqual(lateNight.today.map((part) => part.status), ['done', 'done', 'done', 'now']);
 });
 
 test("a custom contact makes up small details that fit its topic, not Ping's life", () => {

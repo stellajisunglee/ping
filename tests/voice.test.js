@@ -38,7 +38,7 @@ function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnE
   });
   globalThis.fetch = async () => sdpResponse;
 
-  const events = { lines: [], words: [], ended: [], settings: [], apiCalls: [], audio: [], outOfCredit: 0 };
+  const events = { lines: [], words: [], wordNotes: [], ended: [], settings: [], apiCalls: [], audio: [], outOfCredit: 0 };
   const audio = { play: async () => {}, srcObject: null };
   const call = startCall({
     callId: 'c1',
@@ -51,7 +51,10 @@ function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnE
     },
     onStatus: () => {},
     onLine: (line) => events.lines.push(line),
-    onWordAdded: (word) => events.words.push(word),
+    onWordAdded: (word, note) => {
+      events.words.push(word);
+      events.wordNotes.push(note);
+    },
     onSpeaking: () => {},
     onSettings: (settings) => events.settings.push(settings),
     onEnded: (reason) => events.ended.push(reason),
@@ -110,14 +113,31 @@ test('a word the user asked about is saved and announced, then the contact answe
   assert.deepEqual(context.events.words, [saved]);
   const types = context.sent.map((event) => event.type);
   assert.deepEqual(types.slice(-2), ['conversation.item.create', 'response.create']);
-  assert.deepEqual(JSON.parse(context.sent.at(-2).item.output), { ok: true, added: true });
+  assert.deepEqual(JSON.parse(context.sent.at(-2).item.output), { ok: true, added: true, alreadySaved: false });
 });
 
-test('a duplicate word is not announced', async (t) => {
-  const context = await connected({ apiResponses: { '/api/stack/words': { added: false, word: null } } });
+test('a word already in the stack is announced as already there, and the contact still answers', async (t) => {
+  const existing = { id: 'w1', kana: 'げんき' };
+  const context = await connected({ apiResponses: { '/api/stack/words': { added: false, alreadySaved: true, word: existing } } });
   t.after(() => finishCall(context));
   await context.fire(toolDone('add_to_stack', { kana: 'げんき' }));
+  assert.deepEqual(context.events.words, [existing]);
+  assert.deepEqual(context.events.wordNotes, [{ alreadySaved: true }]);
+  assert.deepEqual(JSON.parse(context.sent.at(-2).item.output), { ok: true, added: false, alreadySaved: true });
+  assert.equal(context.sent.at(-1).type, 'response.create');
+});
+
+test('a word that could not be saved is not announced, and the contact hears why', async (t) => {
+  const warn = console.warn;
+  console.warn = () => {};
+  const context = await connected({ failPaths: ['/api/stack/words'] });
+  t.after(() => {
+    console.warn = warn;
+    finishCall(context);
+  });
+  await context.fire(toolDone('add_to_stack', { kana: 'genki' }));
   assert.deepEqual(context.events.words, []);
+  assert.deepEqual(JSON.parse(context.sent.at(-2).item.output), { ok: false, error: 'offline' });
 });
 
 test('a word saved while already speaking does not make the contact speak twice', async (t) => {
@@ -165,7 +185,9 @@ test('a tool that fails tells the model, and the call carries on', async (t) => 
     finishCall(context);
   });
   await context.fire(toolDone('update_settings', { speedChange: 'slower' }));
-  assert.deepEqual(JSON.parse(context.sent.at(-2).item.output), { ok: false });
+  const output = JSON.parse(context.sent.at(-2).item.output);
+  assert.equal(output.ok, false);
+  assert.equal(typeof output.error, 'string');
   assert.deepEqual(context.events.ended, []);
 });
 

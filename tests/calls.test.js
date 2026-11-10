@@ -406,6 +406,19 @@ test('a free stack keeps the latest 25 words', () => {
   assert.ok(!context.user.words.some((saved) => saved.kana === 'あ0'));
 });
 
+test('saving a word twice says it is already saved, and a badly written word says why', () => {
+  const context = setup();
+  const first = context.engine.addWord(context.user, word(0));
+  const again = context.engine.addWord(context.user, word(0));
+  assert.equal(again.added, false);
+  assert.equal(again.alreadySaved, true);
+  assert.equal(again.word.id, first.word.id);
+  assert.equal(context.user.words.length, 1);
+  const invalid = context.engine.addWord(context.user, { kana: 'genki', romaji: 'genki', english: 'well' });
+  assert.equal(invalid.invalid, true);
+  assert.match(invalid.error, /hiragana or katakana/);
+});
+
 test('free users cannot remove words, and subscribers have no limit', () => {
   const context = setup();
   const { word: saved } = context.engine.addWord(context.user, word(0));

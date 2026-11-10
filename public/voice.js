@@ -242,9 +242,9 @@ export function startCall({
       return { ok: true, settings };
     },
     async add_to_stack(word) {
-      const { added, word: saved } = await api('/api/stack/words', { method: 'POST', body: word });
-      if (added) onWordAdded(saved);
-      return { ok: true, added };
+      const { added, alreadySaved, word: saved } = await api('/api/stack/words', { method: 'POST', body: word });
+      if (added || alreadySaved) onWordAdded(saved, { alreadySaved: Boolean(alreadySaved) });
+      return { ok: true, added, alreadySaved: Boolean(alreadySaved) };
     },
     // Nothing to run: the answer to a language or culture question ends here, and the conversation picks up as a new message.
     async back_to_conversation() {
@@ -257,7 +257,7 @@ export function startCall({
       return await TOOLS[call.name](JSON.parse(call.arguments || '{}'));
     } catch (error) {
       console.warn(`${call.name} failed`, error);
-      return { ok: false };
+      return { ok: false, error: error.message };
     }
   }
 
