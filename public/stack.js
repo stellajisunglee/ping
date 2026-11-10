@@ -72,6 +72,15 @@ async function showExamples() {
   }
 }
 
+// Japanese, romaji, then English, the same order as a word. Sentences saved before romaji was added have none.
+function sentenceLines(sentence) {
+  return [
+    el('p', { lang: 'ja', textContent: sentence.japanese }),
+    ...(sentence.romaji ? [el('p', { className: 'muted', textContent: sentence.romaji })] : []),
+    el('p', { className: 'muted', textContent: sentence.english }),
+  ];
+}
+
 function exampleRow(sentence, word) {
   const save = el('button', { type: 'button', className: 'secondary small', textContent: 'Save' });
   save.addEventListener('click', async () => {
@@ -84,7 +93,7 @@ function exampleRow(sentence, word) {
       setError('word-error', error.message);
     }
   });
-  return el('li', { className: 'card' }, el('p', { lang: 'ja', textContent: sentence.japanese }), el('p', { className: 'muted', textContent: sentence.english }), save);
+  return el('li', { className: 'card' }, ...sentenceLines(sentence), save);
 }
 
 async function removeWord() {
@@ -138,7 +147,7 @@ function renderSentences() {
       const front = el(
         'div',
         { className: 'swipe-front' },
-        el('div', {}, el('p', { lang: 'ja', textContent: sentence.japanese }), el('p', { className: 'muted', textContent: sentence.english })),
+        el('div', {}, ...sentenceLines(sentence)),
         removeButton,
       );
       const row = el('li', { className: 'swipe-row' }, el('div', { className: 'swipe-behind', textContent: 'Remove' }), front);

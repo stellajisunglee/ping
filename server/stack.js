@@ -30,8 +30,8 @@ export function addWord(user, word, { id, now, paid }) {
 }
 
 export function cleanSentence(input = {}) {
-  const sentence = { japanese: text(input.japanese), english: text(input.english), word: text(input.word) };
-  return JAPANESE_TEXT.test(sentence.japanese) && sentence.english ? sentence : null;
+  const sentence = { japanese: text(input.japanese), romaji: text(input.romaji), english: text(input.english), word: text(input.word) };
+  return JAPANESE_TEXT.test(sentence.japanese) && sentence.romaji && sentence.english ? sentence : null;
 }
 
 export function addSentence(user, sentence, { id, now }) {

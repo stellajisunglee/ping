@@ -17,8 +17,8 @@ const EXAMPLES_FORMAT = {
         type: 'array',
         items: {
           type: 'object',
-          properties: { japanese: { type: 'string' }, english: { type: 'string' } },
-          required: ['japanese', 'english'],
+          properties: { japanese: { type: 'string' }, romaji: { type: 'string' }, english: { type: 'string' } },
+          required: ['japanese', 'romaji', 'english'],
           additionalProperties: false,
         },
       },
@@ -65,7 +65,7 @@ export function createOpenAI({ apiKey, baseUrl = 'https://api.openai.com/v1', te
           model: textModel,
           max_output_tokens: 600,
           input: [
-            { role: 'system', content: `Write ${EXAMPLE_COUNT} short, natural Japanese example sentences using the given word, for a ${proficiency} learner, each with an English translation. Use polite speech.` },
+            { role: 'system', content: `Write ${EXAMPLE_COUNT} short, natural Japanese example sentences using the given word, for a ${proficiency} learner, each with its romaji (Hepburn, words separated by spaces) and an English translation. Use polite speech.` },
             { role: 'user', content: JSON.stringify({ word: word.kanji || word.kana, reading: word.kana, meaning: word.english }) },
           ],
           text: { format: EXAMPLES_FORMAT },

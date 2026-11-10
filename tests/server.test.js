@@ -21,7 +21,7 @@ const openai = {
     return 'ek_test';
   },
   speak: async () => Buffer.from('audio'),
-  exampleSentences: async () => [{ japanese: '元気です。', english: "I'm well." }],
+  exampleSentences: async () => [{ japanese: '元気です。', romaji: 'genki desu.', english: "I'm well." }],
 };
 
 async function request(path, { method = 'GET', token, body } = {}) {
@@ -203,8 +203,13 @@ test('example sentences need a subscription, and are only saved on request', asy
   assert.equal(examples.sentences.length, 1);
   assert.deepEqual((await request('/api/me', { token })).data.sentences, []);
 
+  const { romaji, ...withoutRomaji } = examples.sentences[0];
+  assert.equal(romaji, 'genki desu.');
+  assert.equal((await request('/api/stack/sentences', { method: 'POST', token, body: { ...withoutRomaji, word: '元気' } })).status, 400);
+
   const saved = await request('/api/stack/sentences', { method: 'POST', token, body: { ...examples.sentences[0], word: '元気' } });
   assert.equal(saved.data.sentences.length, 1);
+  assert.equal(saved.data.sentences[0].romaji, 'genki desu.');
   const removed = await request(`/api/stack/sentences/${saved.data.sentences[0].id}`, { method: 'DELETE', token });
   assert.equal(removed.status, 200);
 });

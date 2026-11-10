@@ -60,7 +60,7 @@ Home is the first screen after joining:
 
 - **Streak:** days in a row with a connected call, answered or called back. Days off in the user's schedule don't break it. Home also shows the all-time best. The server keeps the last 14 practice days as day numbers, for Home's week. Streaks from before that are filled in from their count.
 - **Words:** words the user didn't understand, saved by the voice model. Free users keep their latest 25, with the oldest replaced, and can't remove any.
-- **Sentences:** example sentences, looked up one word at a time and stored only if the user saves them. Swipe left to remove.
+- **Sentences:** example sentences, looked up one word at a time and stored only if the user saves them. Each shows its Japanese, romaji and English translation, like a word. Sentences saved before romaji was added show without it. Swipe left to remove.
 
 ## Plans
 

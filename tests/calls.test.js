@@ -421,7 +421,7 @@ test('cancelling clears subscription words 30 days later, and keeps earlier ones
   context.engine.addWord(context.user, word(0));
   context.engine.setPlan(context.user, 'premium');
   context.engine.addWord(context.user, word(1));
-  context.engine.saveSentence(context.user, { japanese: '元気です。', english: "I'm well." });
+  context.engine.saveSentence(context.user, { japanese: '元気です。', romaji: 'genki desu.', english: "I'm well." });
   const call = context.engine.callBack(context.user);
   context.engine.saveConversation(context.user, call.id, [{ from: 'you', text: 'はい' }]);
 
