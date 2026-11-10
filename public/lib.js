@@ -5,7 +5,6 @@ const TOKEN_KEY = 'ping-token';
 // The screens with the bottom navigation, and which tab each one belongs to.
 const SCREEN_TABS = {
   home: 'home',
-  stack: 'home',
   words: 'home',
   word: 'home',
   sentences: 'home',
@@ -19,7 +18,7 @@ const SCREEN_TABS = {
   terms: 'settings',
   feedback: 'settings',
 };
-const SCREENS = [...Object.keys(SCREEN_TABS), 'install', 'join', 'enable', 'ringing', 'call'];
+const SCREENS = [...Object.keys(SCREEN_TABS), 'install', 'join', 'enable', 'ringing', 'outgoing', 'call'];
 const renderers = {};
 const TAB_ROOTS = ['home', 'contacts', 'settings'];
 const BACK_SWIPE_DISTANCE = 70;

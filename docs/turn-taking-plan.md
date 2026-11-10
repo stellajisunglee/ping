@@ -354,6 +354,20 @@ The goal changes from "うん doesn't stop Ping" to "うん doesn't derail Ping.
 
 **Done when:** on a test call, I get cut off on purpose and Ping waits noticeably longer afterwards. Over several calls, the metrics show `patienceSteps` above 0, and fewer suspected cut-offs with the switch on than off.
 
+**What happened (2026-11-10)**
+- **Adaptive patience was built, then taken out before committing.** On the first 10 field calls Ping cut the user off only 3 times in 44 Smart Turn turns, and never in silence mode, and barge-in already stops Ping the moment the user keeps talking. So it isn't worth the extra moving parts yet. **Revisit once there are many more test calls,** especially from beta testers who pause differently. The design above still stands. The values it would have used, from the benchmark: steps of ×1.5 for silence and Smart Turn's backup, +0.1 to Smart Turn's score, caps of 5 s and 0.8, at most 2 steps per call.
+- **Kept: Smart Turn now follows "time to answer".** Field calls showed silence on `long` felt better than Smart Turn, because Smart Turn ignored the setting. `long` now needs a score of 0.7 and has a 4-second backup, and `short` a 2-second backup. `normal` is unchanged, so earlier numbers still compare. The server sends these as `smartTurn` with the session and with every settings change (`SMART_TURN_PATIENCE` in `server/tutor.js`).
+- **Why those values,** from the benchmark's saved Smart Turn scores (100 thinking pauses, 40 finished):
+
+  | Score needed | Backup | Thinking pauses cut off | Finished answers caught fast |
+  | --- | --- | --- | --- |
+  | 0.5 | 2.5 s | 14% | 78% |
+  | 0.7 | 4 s | 10% | 68% |
+  | 0.8 | 4 s | 8% | 62% |
+
+  A higher score helps only a little: most remaining cut-offs are pauses Smart Turn is confident are finished.
+- **The demo uses silence mode,** the default for everyone.
+
 ---
 
 ## After all six sessions

@@ -928,3 +928,27 @@ textarea {
 .circle.decline {
   background: var(--decline);
 }
+
+/* A contact that isn't available yet: greyed out, and its call button can't be pressed. */
+.contact.coming-soon {
+  opacity: 0.55;
+}
+
+.contact.coming-soon .avatar {
+  background: var(--neutral);
+}
+
+.contact.coming-soon button:disabled {
+  background: var(--neutral);
+  cursor: not-allowed;
+}
+
+/* My Stack on Home: a heading and the Words and Sentences buttons. */
+.home-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.home-stack h2 {
+  margin: 0;
+}

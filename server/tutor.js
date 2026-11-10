@@ -187,6 +187,17 @@ export function turnDetection({ thinkingTime, speed, turnMode = 'silence' }) {
   return { type: 'server_vad', silence_duration_ms: silenceMs(thinkingTime, speed), ...REPLY_CONTROL };
 }
 
+// Smart Turn's own patience, per thinking time: how sure it must be that the user is done, and how much
+// quiet ends the turn anyway. On the benchmark, 0.7 with a 4-second backup cut off 10% of thinking pauses
+// against 14% for "normal", and still caught 68% of finished answers within a quarter of a second.
+const SMART_TURN_PATIENCE = {
+  short: { doneAt: 0.5, backupMs: 2000 },
+  normal: { doneAt: 0.5, backupMs: 2500 },
+  long: { doneAt: 0.7, backupMs: 4000 },
+};
+
+export const smartTurnRules = (thinkingTime) => ({ ...(SMART_TURN_PATIENCE[thinkingTime] ?? SMART_TURN_PATIENCE.normal) });
+
 export function buildSession({ model, voice, question, settings, localHour, calledBack, contact = PING, memories = [], turnMode = 'silence' }) {
   return {
     type: 'realtime',

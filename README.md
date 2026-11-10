@@ -35,19 +35,23 @@ Pages are served "cross-origin isolated" (`Cross-Origin-Opener-Policy` and `Cros
 
 Tapping after the 10 seconds opens the voicemail, with the call-back button.
 
+Calling a contact from Contacts or the voicemail rings for 3 seconds first ("Calling…", with Japan's ringback tone), then the call connects. Ending it while it rings cancels it before anything starts.
+
 On a call, the contact can explain a word in one short English sentence and save it to the user's stack, translate what it just said into English when the user didn't understand it (then ask again in simpler Japanese, never repeating the same sentence), and answer a question asked in English about Japanese language or culture in one or two short sentences. That includes "how do you say...?", which also saves the word, and it works even when the question is off the contact's topic. The answer comes as its own message, and the contact then picks the conversation back up in Japanese as a second message. The contact can also nudge the user back to Japanese when they say anything else in English, say 「ちょっとわかりません」 if they steer off topic, and change settings when asked in plain English. The screen shows a live transcript with `*added to stack*` for each new word, and buttons for speaker, mute, speed and end call. The contact's words fade in as they're said, not when the text arrives. OpenAI writes a reply in about a second but takes several seconds to say it, and over WebRTC it sends no timing for single words, so the app paces the text from the speed setting and from how long earlier replies took to say. When the user cuts the contact off, OpenAI reports how much audio was heard, and the line is cut to about that point and ends with "…". A paid plan saves only what was heard.
 
 OpenAI stops the contact's audio as soon as the user makes a sound, and the app, not OpenAI, decides when the contact replies. If the user talked over the contact with only aizuchi, like うん or はい, the app waits for the transcript (usually under half a second), then has the contact carry on from where it was cut off instead of answering. Anything else, or a transcript that doesn't arrive within 1.5 seconds, gets a normal reply.
 
 **Smart Turn mode (admins only, for testing).** The phone, not OpenAI, decides when the user has finished talking:
 - A call starts in silence mode while the phone loads Smart Turn, about 12 MB the first time and from the phone's cache after that. Once Smart Turn is loaded and hearing the microphone, the app switches OpenAI's own turn detection off.
-- Silero, a small voice detector, hears when the user starts and stops talking. After 0.2 seconds of quiet, Smart Turn v3.2 listens to the last 8 seconds and decides whether they've finished. If it says yes, the app ends the turn straight away. If it keeps saying "still thinking", the turn ends after 2.5 seconds of quiet anyway.
+- Silero, a small voice detector, hears when the user starts and stops talking. After 0.2 seconds of quiet, Smart Turn v3.2 listens to the last 8 seconds and decides whether they've finished. If it says yes, the app ends the turn straight away. If it keeps saying "still thinking", the turn ends after 2.5 seconds of quiet anyway. On a `long` time to answer, Smart Turn has to be surer (a score of 0.7 instead of 0.5) and the backup waits 4 seconds.
 - When the user talks over the contact, the app stops the contact's audio itself, and OpenAI trims the reply to what was heard. The aizuchi rule above works the same way.
 - If the phone pauses the microphone audio Smart Turn hears, which iOS can do when the audio output changes, the app restarts it. If the models can't load, the audio stays stopped for 3 seconds, or Smart Turn decides too slowly (twice over 0.6 seconds, or once over 1.5), the call switches back to silence mode. The call's numbers record why (`smartTurnFallback`: 1 couldn't load, 2 too slow, 3 audio stopped) and how many restarts there were (`audioRestarts`).
 
 On a benchmark of the developer's own speech, Smart Turn with the 2.5-second backup cut off thinking pauses about 14% of the time, against 33% for the 1.3-second silence rule, and usually noticed a finished answer within a quarter of a second. On an iPhone, each decision took about 230 ms. See `bench/` and `docs/turn-taking-plan.md`.
 
 ## Progress and My Stack
+
+Home shows the streak and My Stack's Words and Sentences buttons, with how many of each the user has.
 
 - **Streak:** days in a row with a connected call, answered or called back. Days off in the user's schedule don't break it. Home also shows the all-time best.
 - **Words:** words the user didn't understand, saved by the voice model. Free users keep their latest 25, with the oldest replaced, and can't remove any.
@@ -64,9 +68,9 @@ Plans are a test switch under Settings for now, with no payment. Only admins can
 | Example sentences | No | Yes | Yes |
 | Calls remember past conversations | No | Yes | Yes |
 
-Cancelling starts a 30-day window, shown on Home, My Stack and the plan page. After it, words saved during the subscription, sentences and conversations are removed. Words saved on the free plan stay, and resubscribing in time keeps everything.
+Cancelling starts a 30-day window, shown on Home and the plan page. After it, words saved during the subscription, sentences and conversations are removed. Words saved on the free plan stay, and resubscribing in time keeps everything.
 
-Mero is hidden for now. To bring it back, give it a topic and remove `hidden` in `server/contacts.js`.
+Mero is hidden for now, and Contacts shows it greyed out as "Coming soon". To bring it back, give it a topic and remove `hidden` in `server/contacts.js`.
 
 ## Admins and beta testers
 
@@ -120,11 +124,12 @@ Other rules:
 | Extra pause time at slow speeds | | `SLOW_SPEED_PATIENCE` in `server/settings.js` |
 | `turnMode`: how Ping decides the user has finished talking | `silence` (OpenAI's `server_vad`) for everyone. Admins can switch their own to `semantic` (`semantic_vad`) or `smartTurn` (Smart Turn on the phone) | `TURN_MODES` and `SEMANTIC_EAGERNESS` in `server/tutor.js` |
 | Smart Turn's timings: quiet before asking, the backup, and what counts as too slow | 0.2 s, 2.5 s, 0.6 s | `TURN` and `SLOW_DECISION_MS` in `public/turn-machine.js` |
+| Smart Turn's score and backup per time to answer | short 0.5 and 2 s, normal 0.5 and 2.5 s, long 0.7 and 4 s | `SMART_TURN_PATIENCE` in `server/tutor.js` |
 | Default speed and allowed range | 0.9, from 0.6 to 1.5 | `server/settings.js` |
 | Questions and how contacts behave | | `server/tutor.js` |
 | Contacts and voices | | `server/contacts.js` |
 
-In semantic mode, "Time to answer" sets how eager OpenAI is to reply instead of a silence length. `normal` and `long` currently behave the same there, because `low` is the lowest eagerness level. In Smart Turn mode it only matters if the call falls back to silence mode.
+In semantic mode, "Time to answer" sets how eager OpenAI is to reply instead of a silence length. `normal` and `long` currently behave the same there, because `low` is the lowest eagerness level. In Smart Turn mode it sets how sure Smart Turn must be and how long its backup waits, as well as the silence it falls back to.
 
 The call length limit and the hang-up run in the browser, so someone who modifies the page could stay on longer. OpenAI's own session limit is the backstop. Set a monthly budget in your OpenAI account too.
 

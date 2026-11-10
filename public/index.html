@@ -66,21 +66,17 @@
         <h2 id="voicemail-title">Voicemail</h2>
         <div id="voicemail"></div>
       </section>
-      <button class="secondary wide" type="button" data-go="stack">My Stack</button>
-    </main>
-
-    <main id="screen-stack" class="screen tabbed" hidden>
-      <button class="back" type="button" data-back>‹ Home</button>
-      <h1>My Stack</h1>
-      <p id="stack-clear" class="notice warning" hidden></p>
-      <div class="tile-row">
-        <button class="tile" type="button" data-go="words"><strong>Words</strong><span id="stack-words-count" class="muted"></span></button>
-        <button class="tile" type="button" data-go="sentences"><strong>Sentences</strong><span id="stack-sentences-count" class="muted"></span></button>
-      </div>
+      <section class="home-stack" aria-labelledby="home-stack-title">
+        <h2 id="home-stack-title">My Stack</h2>
+        <div class="tile-row">
+          <button class="tile" type="button" data-go="words"><strong>Words</strong><span id="stack-words-count" class="muted"></span></button>
+          <button class="tile" type="button" data-go="sentences"><strong>Sentences</strong><span id="stack-sentences-count" class="muted"></span></button>
+        </div>
+      </section>
     </main>
 
     <main id="screen-words" class="screen tabbed" hidden>
-      <button class="back" type="button" data-back>‹ My Stack</button>
+      <button class="back" type="button" data-back>‹ Home</button>
       <h1>Words</h1>
       <p id="words-empty" class="muted">Words you don't understand on a call will show up here. Just ask what a word means.</p>
       <ul id="words-list" class="plain-list"></ul>
@@ -105,7 +101,7 @@
     </main>
 
     <main id="screen-sentences" class="screen tabbed" hidden>
-      <button class="back" type="button" data-back>‹ My Stack</button>
+      <button class="back" type="button" data-back>‹ Home</button>
       <h1>Sentences</h1>
       <p id="sentences-hint" class="muted">Swipe left to remove a sentence.</p>
       <p id="sentences-empty" class="muted">Open a word, show its example sentences, and save the ones you like.</p>
@@ -291,6 +287,15 @@
       <div class="call-actions">
         <button id="decline-button" class="round decline" type="button">Decline</button>
         <button id="answer-button" class="round answer" type="button">Answer</button>
+      </div>
+    </main>
+
+    <main id="screen-outgoing" class="screen centered phone" hidden>
+      <p class="muted" role="status">Calling…</p>
+      <div id="outgoing-avatar" class="avatar large ringing" aria-hidden="true">ピ</div>
+      <h1 id="outgoing-name">Ping</h1>
+      <div class="call-actions">
+        <button id="outgoing-cancel" class="round decline" type="button">End</button>
       </div>
     </main>
 

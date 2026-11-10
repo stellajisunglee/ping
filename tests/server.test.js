@@ -412,6 +412,8 @@ test('a Smart Turn call starts in silence mode, and the phone is told to take ov
   const { data: session } = await request(`/api/calls/${call.id}/session`, { method: 'POST', token });
   assert.equal(session.turnMode, 'smartTurn');
   assert.equal(minted.at(-1).session.audio.input.turn_detection.type, 'server_vad');
+  assert.deepEqual(session.smartTurn, { doneAt: 0.5, backupMs: 2500 }, 'normal time to answer, as Smart Turn was benchmarked');
   const { data: changed } = await request('/api/settings', { method: 'PATCH', token, body: { thinkingTime: 'long' } });
   assert.equal(changed.turnDetection.type, 'server_vad', 'the silence settings to switch back to');
+  assert.deepEqual(changed.smartTurn, { doneAt: 0.7, backupMs: 4000 }, 'a long time to answer makes Smart Turn more patient too');
 });

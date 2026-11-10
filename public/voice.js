@@ -67,6 +67,7 @@ export function startCall({
     openAiHearsSpeech: false, // OpenAI's detection is mid-turn, so switching now would cut it short
     switchWhenQuiet: false,
     talkedOver: false, // the turn in progress started while the contact was speaking
+    rules: null, // how sure Smart Turn must be and how long its backup waits, from the "time to answer" setting
   };
 
   const send = (event) => {
@@ -167,7 +168,11 @@ export function startCall({
   }
 
   // The speed can only change between turns, so a change made mid-sentence waits for the turn to end.
-  function updateVoice({ settings, turnDetection }) {
+  function updateVoice({ settings, turnDetection, smartTurn }) {
+    if (smartTurn) {
+      smart.rules = smartTurn;
+      smart.engine?.setRules(smartTurn);
+    }
     // While the phone is deciding turns, OpenAI's detection stays off. The new silence settings are
     // kept for switching back.
     if (turnDetection?.type === 'server_vad') smart.silenceDetection = turnDetection;
@@ -184,7 +189,7 @@ export function startCall({
   async function startSmartTurnMode(models) {
     if (ended) return;
     turnLog.push({ type: 'smart-turn-loaded', at: performance.now(), loadMs: models.loadMs });
-    smart.engine = await smartTurnEngine.start({ stream: microphone, models, onEvent: onSmartTurnEvent });
+    smart.engine = await smartTurnEngine.start({ stream: microphone, models, onEvent: onSmartTurnEvent, rules: smart.rules ?? undefined });
     if (ended) return smart.engine.stop();
     // Switching while OpenAI is in the middle of the user's turn would lose that turn's end.
     if (smart.openAiHearsSpeech) smart.switchWhenQuiet = true;
@@ -231,8 +236,8 @@ export function startCall({
 
   const TOOLS = {
     async update_settings(change) {
-      const { settings, turnDetection } = await api('/api/settings', { method: 'PATCH', body: change });
-      updateVoice({ settings, turnDetection });
+      const { settings, turnDetection, smartTurn } = await api('/api/settings', { method: 'PATCH', body: change });
+      updateVoice({ settings, turnDetection, smartTurn });
       onSettings(settings);
       return { ok: true, settings };
     },
@@ -370,7 +375,8 @@ export function startCall({
 
   async function connect() {
     onStatus('connecting');
-    const { clientSecret, sdpUrl, maxSeconds, turnMode } = await api(`/api/calls/${callId}/session`, { method: 'POST' });
+    const { clientSecret, sdpUrl, maxSeconds, turnMode, smartTurn } = await api(`/api/calls/${callId}/session`, { method: 'POST' });
+    smart.rules = smartTurn ?? null;
     // Start loading Smart Turn straight away, so it's usually ready by the time the greeting ends.
     if (turnMode === 'smartTurn') {
       smart.loading = smartTurnEngine.load();

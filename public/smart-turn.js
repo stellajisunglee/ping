@@ -84,9 +84,10 @@ function makeResampler(fromRate) {
  *   should go back to silence mode
  * Resolves once audio is actually flowing, or rejects if it doesn't start.
  */
-export async function startSmartTurn({ stream, models, onEvent }) {
+export async function startSmartTurn({ stream, models, onEvent, rules: startRules = {} }) {
   const { ort, vad, turn } = models;
   let stopped = false;
+  let rules = { ...TURN, ...startRules }; // the call's own patience, from its settings
   let context;
   let source;
   try {
@@ -171,14 +172,14 @@ export async function startSmartTurn({ stream, models, onEvent }) {
       stop();
       return [];
     }
-    const result = onVerdict(state, { pause, probability: output.logits.data[0], at });
+    const result = onVerdict(state, { pause, probability: output.logits.data[0], at }, rules);
     state = result.state;
     return result.actions;
   }
 
   async function handle(block, at) {
     const wasInTurn = state.inTurn;
-    const result = onBlock(state, { speech: await speechProbability(block), at });
+    const result = onBlock(state, { speech: await speechProbability(block), at }, rules);
     state = result.state;
     if (!wasInTurn && !state.inTurn) {
       preRoll.push(block);
@@ -261,6 +262,12 @@ export async function startSmartTurn({ stream, models, onEvent }) {
     get inTurn() {
       return state.inTurn;
     },
-    rules: TURN,
+    get rules() {
+      return rules;
+    },
+    // A settings change or a step of adaptive patience. It applies from the next block of audio.
+    setRules(change) {
+      rules = { ...rules, ...change };
+    },
   };
 }

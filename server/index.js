@@ -14,7 +14,7 @@ import { createOpenAI } from './openai.js';
 import { isValidTimeZone } from './schedule.js';
 import { cleanMetrics, metricsProblems } from '../public/turn-metrics.js';
 import { FREE_WORD_LIMIT } from './stack.js';
-import { buildSession, turnDetection, voiceMessageFor } from './tutor.js';
+import { buildSession, smartTurnRules, turnDetection, voiceMessageFor } from './tutor.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = join(ROOT, 'public');
@@ -227,7 +227,11 @@ export function createApp({ engine, openai, config }) {
     if (method === 'PATCH' && pathname === '/api/settings') {
       const body = await readJson(req);
       const settings = engine.updateSettings(user, body);
-      return json(res, 200, { settings, turnDetection: turnDetection({ thinkingTime: settings.thinkingTime, speed: settings.speed, turnMode: user.turnMode }) });
+      return json(res, 200, {
+        settings,
+        turnDetection: turnDetection({ thinkingTime: settings.thinkingTime, speed: settings.speed, turnMode: user.turnMode }),
+        smartTurn: smartTurnRules(settings.thinkingTime),
+      });
     }
 
     if (method === 'POST' && pathname === '/api/test-ring') {
@@ -363,6 +367,7 @@ export function createApp({ engine, openai, config }) {
         maxSeconds: MAX_CALL_SECONDS,
         question: details.question,
         turnMode: details.turnMode,
+        smartTurn: smartTurnRules(details.settings.thinkingTime),
       });
     }
 

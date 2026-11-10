@@ -1,16 +1,16 @@
 // My Stack: the words the user didn't understand, and the example sentences they saved.
 
-import { $, api, clearWarning, el, go, isPaid, onShow, setError, state } from './lib.js';
+import { $, api, el, go, isPaid, onShow, setError, state } from './lib.js';
 
 const SWIPE_REMOVE_SHARE = 0.35; // how far across the row a swipe has to travel
 
 let currentWordId = null;
 
-function renderStack() {
+// The Words and Sentences buttons on Home, with how many of each the user has.
+export function renderStackTiles() {
   const { words, sentences, freeWordLimit } = state.me;
   $('stack-words-count').textContent = isPaid() ? `${words.length}` : `${words.length} of ${freeWordLimit}`;
   $('stack-sentences-count').textContent = isPaid() || sentences.length ? `${sentences.length}` : 'Premium';
-  setError('stack-clear', clearWarning());
 }
 
 function renderWords() {
@@ -140,7 +140,6 @@ function renderSentences() {
 }
 
 export function initStack() {
-  onShow('stack', renderStack);
   onShow('words', renderWords);
   onShow('word', renderWord);
   onShow('sentences', renderSentences);

@@ -6,6 +6,20 @@ const VOICE_LABELS = { marin: 'Marin', cedar: 'Cedar', coral: 'Coral', sage: 'Sa
 
 let callContact = () => {};
 
+// Contacts on the way, shown greyed out so users know more are coming. Mero is hidden on the server
+// until it has a topic (see server/contacts.js).
+const COMING_SOON = [{ id: 'mero', name: 'Mero' }];
+
+function comingSoonRow(contact) {
+  return el(
+    'li',
+    { className: 'card contact coming-soon' },
+    el('div', { className: 'avatar small', ariaHidden: 'true', textContent: initialOf(contact.name) }),
+    el('div', { className: 'contact-text' }, el('p', { className: 'contact-name', textContent: contact.name }), el('p', { className: 'muted', textContent: 'Coming soon' })),
+    el('button', { type: 'button', className: 'primary small', textContent: 'Call', disabled: true, ariaLabel: `Call ${contact.name}, coming soon` }),
+  );
+}
+
 async function update(request) {
   setError('contacts-error', null);
   try {
@@ -55,7 +69,8 @@ function renderContacts() {
   const canCreate = me.plan === 'platinum';
   // Contacts made on a higher plan stay saved in case the user resubscribes, but out of sight until then.
   const contacts = me.contacts.filter((contact) => contact.available);
-  $('contacts-list').replaceChildren(...contacts.map((contact) => contactRow(contact, contacts.length > 1)));
+  const comingSoon = COMING_SOON.filter((soon) => !me.contacts.some((contact) => contact.id === soon.id));
+  $('contacts-list').replaceChildren(...contacts.map((contact) => contactRow(contact, contacts.length > 1)), ...comingSoon.map(comingSoonRow));
   $('contact-new-button').hidden = !canCreate;
   $('contacts-upgrade').hidden = canCreate;
 }

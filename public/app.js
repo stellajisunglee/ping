@@ -2,12 +2,14 @@ import { initContacts } from './contacts.js';
 import { charsSaid, createPace } from './reveal.js';
 import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdmin, isPaid, onShow, readToken, refresh, setError, show, state, writeToken } from './lib.js';
 import { initSettings } from './settings.js';
-import { initStack } from './stack.js';
+import { initStack, renderStackTiles } from './stack.js';
 import { startCall } from './voice.js';
 
 const RING_FALLBACK_MS = 12_000; // the server decides a call was missed. This only covers its message getting lost.
 const RING_TONE_EVERY_MS = 3_000;
 const VIBRATION = [400, 200, 400, 200, 400];
+// Calling a contact rings this long first, like a real phone call, before Ping picks up.
+const OUTGOING_RING_MS = 3_000;
 
 let ringingCallId = null;
 let ringFallback = null;
@@ -136,6 +138,7 @@ function renderHome() {
   $('streak-best').textContent = streak.best;
   $('home-status').textContent = describeSchedule();
   setError('home-clear', clearWarning());
+  renderStackTiles();
   renderVoicemail();
 }
 
@@ -272,9 +275,9 @@ function showSpeedPopup(open) {
 
 async function changeCallSpeed(speed) {
   try {
-    const { settings, turnDetection } = await api('/api/settings', { method: 'PATCH', body: { speed } });
+    const { settings, turnDetection, smartTurn } = await api('/api/settings', { method: 'PATCH', body: { speed } });
     state.me.settings = settings;
-    activeCall?.updateVoice({ settings, turnDetection });
+    activeCall?.updateVoice({ settings, turnDetection, smartTurn });
   } catch (error) {
     callHint(error.message);
   }
@@ -444,14 +447,52 @@ function beginCall(callId, contactName = 'Ping') {
   });
 }
 
-async function callContact(contactId) {
-  try {
-    const { id, contactName } = await api('/api/calls', { method: 'POST', body: { contactId } });
-    beginCall(id, contactName);
-  } catch (error) {
-    goHome();
-    notice(error.message);
-  }
+// What the caller hears while the phone rings: Japan's ringback, a low tone for 1 second in every 3.
+// Started straight from the tap, because browsers only allow sound that a tap started.
+function playRingback() {
+  const AudioContextClass = window.AudioContext ?? window.webkitAudioContext;
+  if (!AudioContextClass) return () => {};
+  const context = new AudioContextClass();
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.frequency.value = 400;
+  gain.gain.value = 0.06;
+  gain.gain.setValueAtTime(0, context.currentTime + 1);
+  oscillator.connect(gain).connect(context.destination);
+  oscillator.start();
+  return () => context.close().catch(() => {});
+}
+
+let outgoing = null; // the call the user is making, while it rings
+
+function callContact(contactId) {
+  if (activeCall || outgoing) return;
+  const contactName = state.me.contacts.find((contact) => contact.id === contactId)?.name ?? 'Ping';
+  $('outgoing-name').textContent = contactName;
+  $('outgoing-avatar').textContent = initialOf(contactName);
+  show('outgoing');
+  const stopTone = playRingback();
+  const timer = setTimeout(async () => {
+    stopTone();
+    outgoing = null;
+    try {
+      const { id, contactName: name } = await api('/api/calls', { method: 'POST', body: { contactId } });
+      beginCall(id, name);
+    } catch (error) {
+      goHome();
+      notice(error.message);
+    }
+  }, OUTGOING_RING_MS);
+  outgoing = { timer, stopTone };
+}
+
+// Hanging up while it rings: nothing has started yet, so there's nothing to end on the server.
+function cancelOutgoing() {
+  if (!outgoing) return;
+  clearTimeout(outgoing.timer);
+  outgoing.stopTone();
+  outgoing = null;
+  goHome();
 }
 
 // Getting going
@@ -465,6 +506,7 @@ function bindEvents() {
   $('join-form').addEventListener('submit', join);
   $('enable-button').addEventListener('click', enable);
   $('answer-button').addEventListener('click', () => answer(ringingCallId));
+  $('outgoing-cancel').addEventListener('click', cancelOutgoing);
   $('decline-button').addEventListener('click', decline);
   $('hangup-button').addEventListener('click', () => activeCall?.hangUp());
   $('mute-button').addEventListener('click', () => setMuted($('mute-button').getAttribute('aria-pressed') !== 'true'));

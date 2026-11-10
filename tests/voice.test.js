@@ -329,16 +329,18 @@ const SILENCE = { type: 'server_vad', silence_duration_ms: 1300, create_response
 
 // A stand-in for the models and microphone: the test plays Smart Turn's part by calling `hear`.
 function fakeSmartTurn({ loadFails = false } = {}) {
-  const fake = { stopped: false, inTurn: false, hear: null };
+  const fake = { stopped: false, inTurn: false, hear: null, startRules: null, ruleChanges: [] };
   fake.engine = {
     load: async () => {
       if (loadFails) throw new Error('offline');
       return { loadMs: 2500 };
     },
-    start: async ({ onEvent }) => {
+    start: async ({ onEvent, rules }) => {
       fake.hear = onEvent;
+      fake.startRules = rules;
       return {
         stop: () => (fake.stopped = true),
+        setRules: (change) => fake.ruleChanges.push(change),
         get inTurn() {
           return fake.inTurn;
         },
@@ -518,4 +520,15 @@ test('a call OpenAI refuses for lack of credit is reported, then ends as a faile
   const context = await connected({ sdpResponse: { ok: false, status: 429, json: async () => ({ error: NO_CREDIT }) } });
   assert.equal(context.events.outOfCredit, 1);
   assert.deepEqual(context.events.ended, ['failed']);
+});
+
+test('Smart Turn starts from the "time to answer" setting, and follows a change to it mid-call', async (t) => {
+  const fake = fakeSmartTurn();
+  const context = await connected({ session: { turnMode: 'smartTurn', smartTurn: { doneAt: 0.7, backupMs: 4000 } }, smartTurnEngine: fake.engine });
+  t.after(() => finishCall(context));
+  await context.fire({ type: 'session.created', session: { audio: { input: { turn_detection: SILENCE } } } });
+  await context.answer();
+  assert.deepEqual(fake.startRules, { doneAt: 0.7, backupMs: 4000 });
+  context.call.updateVoice({ settings: { speed: 1 }, turnDetection: SILENCE, smartTurn: { doneAt: 0.5, backupMs: 2000 } });
+  assert.deepEqual(fake.ruleChanges, [{ doneAt: 0.5, backupMs: 2000 }]);
 });
