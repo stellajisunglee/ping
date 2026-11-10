@@ -1,6 +1,6 @@
 import { initContacts } from './contacts.js';
 import { charsSaid, createPace } from './reveal.js';
-import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isPaid, onShow, readToken, refresh, setError, show, state, writeToken } from './lib.js';
+import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdmin, isPaid, onShow, readToken, refresh, setError, show, state, writeToken } from './lib.js';
 import { initSettings } from './settings.js';
 import { initStack } from './stack.js';
 import { startCall } from './voice.js';
@@ -232,6 +232,8 @@ const ENDED_NOTICE = {
   failed: "The call couldn't connect. Please try calling back.",
   'time-limit': 'That was a good chat! Calls end after 3 minutes.',
 };
+// Only admins are told and the call hangs up. For everyone else the call behaves as it did before.
+const OUT_OF_CREDIT_NOTICE = "Admin: OpenAI is out of credit, so Ping can't talk. Add credit at platform.openai.com/settings/organization/billing, then call again.";
 
 function setPressed(id, pressed) {
   $(id).setAttribute('aria-pressed', String(pressed));
@@ -399,6 +401,7 @@ function beginCall(callId, contactName = 'Ping') {
   setPressed('speaker-button', false);
   setMuted(false);
   show('call');
+  let outOfCredit = false;
   activeCall = startCall({
     callId,
     api,
@@ -411,6 +414,11 @@ function beginCall(callId, contactName = 'Ping') {
     },
     onLine: showLine,
     onContactAudio,
+    onOutOfCredit: () => {
+      if (!isAdmin()) return;
+      outOfCredit = true;
+      activeCall?.hangUp();
+    },
     onWordAdded: (word) => {
       addTranscriptNode(el('p', { className: 'line note', textContent: `${word.kanji || word.kana} *added to stack*` }));
     },
@@ -431,7 +439,7 @@ function beginCall(callId, contactName = 'Ping') {
       await saveTranscript(callId);
       await refresh().catch(() => {});
       goHome();
-      notice(ENDED_NOTICE[reason] ?? null);
+      notice(outOfCredit ? OUT_OF_CREDIT_NOTICE : ENDED_NOTICE[reason] ?? null);
     },
   });
 }

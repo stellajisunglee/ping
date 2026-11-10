@@ -45,6 +45,17 @@ test('a language or culture question in English gets a short answer before the J
   assert.ok(rule('Japanese language or Japanese culture') < rule('Try saying that in Japanese'));
 });
 
+test("asking what Ping said gets an English translation, not the same Japanese again", () => {
+  const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12 });
+  const rule = (text) => instructions.indexOf(text);
+  assert.match(instructions, /can you translate that/);
+  assert.match(instructions, /say what you just said in English/);
+  assert.match(instructions, /Never answer this by repeating the same Japanese sentence/);
+  // Checked before the culture-question and "try saying it in Japanese" rules, which repeat the question word for word.
+  assert.ok(rule('can you translate that') < rule('Japanese language or Japanese culture'));
+  assert.ok(rule('can you translate that') < rule('Try saying that in Japanese'));
+});
+
 test('Ping is formal by default, says it\'s not sure when off topic, and sticks to two languages', () => {
   const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12 });
   assert.match(instructions, /You are Ping/);

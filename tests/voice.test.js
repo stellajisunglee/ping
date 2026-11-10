@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startCall } from '../public/voice.js';
+import { isOutOfCredit, startCall } from '../public/voice.js';
 import { cleanMetrics } from '../public/turn-metrics.js';
 
 // A stand-in for the browser's WebRTC, so the call's event handling runs without a real connection.
-function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnEngine } = {}) {
+function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnEngine, sdpResponse = { ok: true, text: async () => 'answer' } } = {}) {
   const sent = [];
   const peers = [];
   const channel = {
@@ -36,9 +36,9 @@ function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnE
       },
     },
   });
-  globalThis.fetch = async () => ({ ok: true, text: async () => 'answer' });
+  globalThis.fetch = async () => sdpResponse;
 
-  const events = { lines: [], words: [], ended: [], settings: [], apiCalls: [], audio: [] };
+  const events = { lines: [], words: [], ended: [], settings: [], apiCalls: [], audio: [], outOfCredit: 0 };
   const audio = { play: async () => {}, srcObject: null };
   const call = startCall({
     callId: 'c1',
@@ -56,6 +56,7 @@ function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnE
     onSettings: (settings) => events.settings.push(settings),
     onEnded: (reason) => events.ended.push(reason),
     onNeedsTap: () => {},
+    onOutOfCredit: () => events.outOfCredit++,
     onContactAudio: ({ type, itemId, audioEndMs }) => events.audio.push(audioEndMs === undefined ? `${type} ${itemId}` : `${type} ${itemId} ${audioEndMs}`),
     ...(smartTurnEngine && { smartTurnEngine }),
   });
@@ -490,4 +491,31 @@ test('when the user cuts the contact off, the screen hears it, then exactly how 
   await talkOverPing(context, 'u1');
   await context.fire({ type: 'conversation.item.truncated', item_id: 'ai1', audio_end_ms: 1980 });
   assert.deepEqual(context.events.audio.slice(-2), ['cut ai1', 'heard ai1 1980']);
+});
+
+const NO_CREDIT = { type: 'insufficient_quota', code: 'credit_balance_exhausted', message: 'You have no credits remaining.' };
+
+test('running out of OpenAI credit is recognized, and other errors are not', () => {
+  assert.equal(isOutOfCredit(NO_CREDIT), true);
+  assert.equal(isOutOfCredit({ type: 'invalid_request_error', code: 'insufficient_quota' }), true);
+  assert.equal(isOutOfCredit({ type: 'invalid_request_error', code: 'invalid_value' }), false);
+  assert.equal(isOutOfCredit({ type: 'server_error', code: null }), false);
+  assert.equal(isOutOfCredit(undefined), false);
+});
+
+test('a reply that fails for lack of credit is reported once, whether as an error or a failed reply', async (t) => {
+  const context = await connected();
+  t.after(() => finishCall(context));
+  await context.fire({ type: 'error', error: { type: 'invalid_request_error', code: 'invalid_value', message: 'bad' } });
+  assert.equal(context.events.outOfCredit, 0);
+  await context.fire({ type: 'response.done', response: { id: 'r1', status: 'failed', status_details: { type: 'failed', error: NO_CREDIT }, output: [] } });
+  await context.fire({ type: 'error', error: NO_CREDIT });
+  assert.equal(context.events.outOfCredit, 1);
+  assert.deepEqual(context.events.ended, [], 'the screen decides whether to hang up');
+});
+
+test('a call OpenAI refuses for lack of credit is reported, then ends as a failed call', async () => {
+  const context = await connected({ sdpResponse: { ok: false, status: 429, json: async () => ({ error: NO_CREDIT }) } });
+  assert.equal(context.events.outOfCredit, 1);
+  assert.deepEqual(context.events.ended, ['failed']);
 });

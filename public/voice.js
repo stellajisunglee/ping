@@ -12,6 +12,10 @@ const GOODBYE_TIMEOUT_MS = 10_000;
 const TRANSCRIPT_WAIT_MS = 1500;
 const WRAP_UP_NOTE = 'Time is nearly up. Say a short warm goodbye in Japanese, then call end_call.';
 
+// OpenAI's docs don't say how running out of credit shows up during a call. Its text API reports it as
+// type "insufficient_quota", code "credit_balance_exhausted", so any error mentioning quota or credit counts.
+export const isOutOfCredit = (error) => Boolean(error) && /quota|credit/i.test(`${error.type ?? ''} ${error.code ?? ''}`);
+
 export function startCall({
   callId,
   api,
@@ -24,12 +28,14 @@ export function startCall({
   onEnded,
   onNeedsTap,
   onContactAudio = () => {}, // when the contact's voice starts, finishes or is cut off, per line
+  onOutOfCredit = () => {}, // OpenAI refused the call because the account has no credit left
   smartTurnEngine = { load: loadSmartTurn, start: startSmartTurn }, // swapped for a stand-in in tests
 }) {
   let pc = null;
   let channel = null;
   let microphone = null;
   let ended = false;
+  let creditOut = false;
   let greeted = false;
   let channelOpen = false;
   let audioPlaying = false;
@@ -73,6 +79,12 @@ export function startCall({
     Promise.resolve()
       .then(() => api(`/api/calls/${callId}/metrics`, { method: 'POST', body: summarizeTurns(turnLog, { connectedAt, endedAt }) }))
       .catch((error) => console.warn('Could not send turn metrics', error));
+  }
+
+  function outOfCredit(error) {
+    if (!isOutOfCredit(error) || creditOut) return;
+    creditOut = true;
+    onOutOfCredit();
   }
 
   function end(reason) {
@@ -345,10 +357,12 @@ export function startCall({
           queuedReply = null;
           requestReply(note);
         }
+        if (event.response?.status === 'failed') outOfCredit(event.response.status_details?.error);
         handleToolCalls(event.response?.output ?? []);
         break;
       case 'error':
         console.warn('Voice engine error', event.error);
+        outOfCredit(event.error);
         break;
       default:
     }
@@ -394,7 +408,11 @@ export function startCall({
       body: offer.sdp,
       headers: { Authorization: `Bearer ${clientSecret}`, 'Content-Type': 'application/sdp' },
     });
-    if (!response.ok) throw new Error(`Call could not connect (${response.status})`);
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      outOfCredit(body?.error);
+      throw new Error(`Call could not connect (${response.status})`);
+    }
     await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() });
 
     timers.push(
