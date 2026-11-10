@@ -1,6 +1,6 @@
 import { initContacts } from './contacts.js';
 import { charsSaid, createPace } from './reveal.js';
-import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdmin, isPaid, onShow, readToken, refresh, setError, show, showCallingNote, state, writeToken } from './lib.js';
+import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdmin, isPaid, onShow, readToken, refresh, setError, show, showCallingNote, showPlanBadge, state, writeToken } from './lib.js';
 import { initSettings } from './settings.js';
 import { initStack, renderStackTiles } from './stack.js';
 import { startCall } from './voice.js';
@@ -187,6 +187,8 @@ function renderHome() {
   $('home-avatar').textContent = initialOf(contact?.name ?? 'Ping');
   $('home-call-button').textContent = `Call ${contact?.name ?? 'Ping'} now`;
   $('home-call-button').disabled = !state.me.calling.canCall;
+  showPlanBadge('home-plan');
+  $('home-plan').ariaLabel = `Your plan: ${$('home-plan').textContent}`;
   showCallingNote('home-minutes');
   $('streak-current').textContent = streak.current;
   $('streak-best').textContent = streak.best ? `Best: ${streak.best} ${streak.best === 1 ? 'day' : 'days'}` : '';

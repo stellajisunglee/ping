@@ -54,6 +54,10 @@ test('asking what one word means saves it, however the question is put', () => {
   // Checked before the whole-sentence translation rule, which doesn't save anything.
   assert.ok(rule('what do you mean by genki?') < rule('can you translate that'));
   assert.match(instructions, /without naming one word/);
+  // Repeating Ping's word back as a question asks what it means, not about Ping's day.
+  assert.ok(instructions.includes('「忙しい？」'));
+  assert.match(instructions, /this rule, not rule 6/);
+  assert.match(instructions, /aren't just repeating a word you just said/);
 });
 
 test("Ping never gets stuck asking the same question", () => {

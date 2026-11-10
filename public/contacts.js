@@ -1,6 +1,6 @@
 // The Contacts tab: who calls the user, and who they can call.
 
-import { $, api, el, goBack, initialOf, onShow, setError, showCallingNote, state } from './lib.js';
+import { $, api, el, goBack, initialOf, onShow, setError, showCallingNote, showPlanBadge, state } from './lib.js';
 
 const VOICE_LABELS = { marin: 'Marin', cedar: 'Cedar', coral: 'Coral', sage: 'Sage', verse: 'Verse', ash: 'Ash' };
 
@@ -73,6 +73,7 @@ function renderContacts() {
   $('contacts-list').replaceChildren(...contacts.map((contact) => contactRow(contact, contacts.length > 1)), ...comingSoon.map(comingSoonRow));
   $('contact-new-button').hidden = !canCreate;
   $('contacts-upgrade').hidden = canCreate;
+  showPlanBadge('contacts-plan');
   showCallingNote('contacts-minutes');
 }
 

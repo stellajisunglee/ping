@@ -54,6 +54,7 @@
           <h1 id="home-greeting-ja" lang="ja">こんにちは！</h1>
           <p id="home-greeting-en" class="muted">Hello</p>
         </div>
+        <button id="home-plan" class="badge plan-badge" type="button" data-go="plan"></button>
       </header>
       <p id="home-notice" class="notice" role="status" hidden></p>
       <section class="card call-card" aria-label="Call">
@@ -127,7 +128,7 @@
         <button id="contact-new-button" class="primary small" type="button" data-go="contact-new">Create New Contact</button>
       </header>
       <div id="contacts-upgrade" class="notice upgrade">
-        <p>Upgrade your plan to create a new contact.</p>
+        <p>You're on <strong id="contacts-plan" class="badge plan-badge"></strong>. Creating your own contacts is part of Platinum.</p>
         <button class="secondary" type="button" data-go="plan">Upgrade Plan</button>
       </div>
       <p id="contacts-error" class="error" role="alert" hidden></p>

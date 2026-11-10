@@ -39,6 +39,15 @@ export function el(tag, props = {}, ...children) {
 export const isPaid = () => state.me?.plan === 'premium' || state.me?.plan === 'platinum';
 export const isAdmin = () => state.me?.role === 'admin';
 
+const PLAN_LABELS = { free: 'Free', premium: 'Premium', platinum: 'Platinum' };
+
+// Fills in a badge with the user's plan.
+export function showPlanBadge(id) {
+  const plan = state.me?.plan ?? 'free';
+  $(id).textContent = PLAN_LABELS[plan] ?? plan;
+  $(id).classList.toggle('free', plan === 'free');
+}
+
 // One line on whether the user can call now, and their minutes. Null when there's nothing to say.
 export function callingNote() {
   const calling = state.me?.calling;
