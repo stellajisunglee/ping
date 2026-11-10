@@ -8,6 +8,7 @@ import { Store } from '../server/store.js';
 const SUBSCRIPTION = { endpoint: 'https://push.example/1', keys: { p256dh: 'a', auth: 'b' } };
 const INVITE_CODE = 'test-invite';
 const BETA_CODE = 'test-beta';
+const YC_CODE = 'YC-Demo';
 
 let baseUrl;
 let server;
@@ -37,7 +38,7 @@ const join = async () => (await request('/api/register', { method: 'POST', body:
 
 before(async () => {
   engine = new CallEngine({ store: new Store(), sendPush: async () => ({ gone: false }) });
-  ({ server } = createApp({ engine, openai, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null } }));
+  ({ server } = createApp({ engine, openai, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE, yc: YC_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null } }));
   await new Promise((resolve) => server.listen(0, resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
@@ -90,7 +91,7 @@ test('the OpenAI key route never returns the server key, only a short-lived one'
   assert.equal(status, 200);
   assert.equal(data.clientSecret, 'ek_test');
   assert.equal(data.sdpUrl, openai.sdpUrl);
-  assert.equal(minted.at(-1).session.audio.output.speed, 0.9);
+  assert.equal(minted.at(-1).session.audio.output.speed, 1);
 });
 
 test('the invite codes never reach the browser', async () => {
@@ -111,8 +112,8 @@ test('someone else cannot start a voice session on your call', async () => {
 test('settings changes return what the live call needs', async () => {
   const token = await join();
   const { data } = await request('/api/settings', { method: 'PATCH', token, body: { speedChange: 'slower', thinkingTime: 'long' } });
-  assert.equal(data.settings.speed, 0.75);
-  assert.equal(data.turnDetection.silence_duration_ms, silenceMs('long', 0.75));
+  assert.equal(data.settings.speed, 0.85);
+  assert.equal(data.turnDetection.silence_duration_ms, silenceMs('long', 0.85));
 });
 
 test('push subscriptions are validated', async () => {
@@ -250,6 +251,7 @@ test('the invite code decides the role, and beta testers cannot switch plans or 
   assert.equal(admin.role, 'admin');
   assert.equal(beta.role, 'beta');
   assert.equal(beta.plan, 'free');
+  assert.equal(admin.plan, 'free');
 
   assert.equal((await request('/api/plan', { method: 'PUT', token: beta.token, body: { plan: 'platinum' } })).status, 403);
   assert.equal((await request('/api/me', { token: beta.token })).data.plan, 'free');
@@ -258,6 +260,50 @@ test('the invite code decides the role, and beta testers cannot switch plans or 
   assert.equal((await request('/api/plan', { method: 'PUT', token: admin.token, body: { plan: 'platinum' } })).status, 200);
   await request('/api/push', { method: 'PUT', token: admin.token, body: { subscription: SUBSCRIPTION, timeZone: 'Asia/Tokyo' } });
   assert.equal((await request('/api/test-ring', { method: 'POST', token: admin.token })).status, 202);
+});
+
+test('YC reviewers join as beta testers, and admins can see who joined with each code and whether they called', async () => {
+  const signUp = (inviteCode) => request('/api/register', { method: 'POST', body: { inviteCode, timeZone: 'America/Los_Angeles' } });
+  const { data: reviewer } = await signUp('yc-demo'); // any capitalization works
+  assert.equal(reviewer.role, 'beta');
+  assert.equal(reviewer.plan, 'premium');
+  assert.equal(reviewer.calling.monthlyMinutes, 120);
+  // Still not an admin: no plan switching, test rings or turn-detection switch.
+  assert.equal((await request('/api/plan', { method: 'PUT', token: reviewer.token, body: { plan: 'platinum' } })).status, 403);
+  assert.equal((await request('/api/test-ring', { method: 'POST', token: reviewer.token })).status, 403);
+  assert.equal((await request('/api/turn-mode', { method: 'PUT', token: reviewer.token, body: { turnMode: 'semantic' } })).status, 403);
+  await signUp(YC_CODE);
+  assert.equal((await request('/api/admin/invites', { token: reviewer.token })).status, 403);
+
+  const { data: call } = await request('/api/calls', { method: 'POST', token: reviewer.token });
+  await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: reviewer.token });
+  await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: reviewer.token }); // the same call only counts once
+
+  const { data } = await request('/api/admin/invites', { token: await join() });
+  const yc = data.invites.find((invite) => invite.code === 'yc');
+  assert.equal(yc.accounts, 2);
+  assert.equal(yc.accountsThatCalled, 1);
+  assert.equal(yc.calls, 1);
+  assert.ok(yc.lastCallAt);
+  assert.equal(yc.newest.length, 2);
+  assert.ok(yc.newest.every((account) => account.joinedAt && !('token' in account) && !('id' in account)));
+  assert.deepEqual(data.invites.map((invite) => invite.code), ['admin', 'beta', 'yc']);
+  assert.ok(!JSON.stringify(data).includes(YC_CODE), 'the codes themselves are never sent');
+});
+
+test("a call's session stops at the plan's limit, and ending it gives back unused minutes", async () => {
+  const token = await join();
+  await request('/api/plan', { method: 'PUT', token, body: { plan: 'platinum' } });
+  const { data: me } = await request('/api/me', { token });
+  assert.deepEqual([me.calling.canCall, me.calling.perCallMinutes, me.calling.minutesLeft], [true, 10, 250]);
+  assert.equal(me.planMinutes.premium.perCall, 5);
+
+  const { data: call } = await request('/api/calls', { method: 'POST', token });
+  const { data: session } = await request(`/api/calls/${call.id}/session`, { method: 'POST', token });
+  assert.equal(session.maxSeconds, 600);
+  assert.equal((await request('/api/me', { token })).data.calling.minutesLeft, 240);
+  const { data: ended } = await request(`/api/calls/${call.id}/ended`, { method: 'POST', token });
+  assert.equal(ended.calling.minutesLeft, 249);
 });
 
 test('a connected call counts toward the streak', async () => {
@@ -360,7 +406,7 @@ test('turn metrics are stored on the call with their settings, and logged once',
     console.log = log;
   }
   const stored = engine.store.calls[call.id].turnMetrics;
-  assert.deepEqual(stored, { callId: call.id, ...METRICS, turnMode: 'silence', thinkingTime: 'normal', speed: 0.9, proficiency: 'beginner' });
+  assert.deepEqual(stored, { callId: call.id, ...METRICS, turnMode: 'silence', thinkingTime: 'normal', speed: 1, proficiency: 'beginner' });
   assert.equal(lines.length, 1);
   assert.match(lines[0], /^turn-metrics \{/);
   assert.deepEqual(JSON.parse(lines[0].slice('turn-metrics '.length)), stored);

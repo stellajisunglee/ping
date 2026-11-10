@@ -29,7 +29,7 @@ Pages are served "cross-origin isolated" (`Cross-Origin-Opener-Policy` and `Cros
 
 1. Each user gets a call at a random time inside the hours they set, on the days their call frequency allows. The default is daily, between 10:00 and 20:00 in their time zone.
 2. The server sends a push and the phone shows "Ping is calling". The phone confirms the push arrived, and that starts the 10 seconds. The notification re-alerts every 2.5 seconds until then.
-3. Tapping the notification answers. The browser gets a one-minute key from the server and connects straight to OpenAI over WebRTC. The contact greets the user and asks the question. Calls last up to 3 minutes.
+3. Tapping the notification answers. The browser gets a one-minute key from the server and connects straight to OpenAI over WebRTC. The contact greets the user and asks the question. Calls stop at the plan's longest call (see "Plans").
 4. If nobody taps in 10 seconds, the call is missed. The notification changes to "Missed call", and a voicemail with a call-back button appears on Home.
 5. If the phone never confirms the push, for example because it's offline, the call counts as missed after 30 seconds.
 
@@ -74,6 +74,14 @@ Plans are a test switch under Settings for now, with no payment. Only admins can
 | Words | Latest 25 | No limit, and can remove | Same |
 | Example sentences | No | Yes | Yes |
 | Calls remember past conversations | No | Yes | Yes |
+| Longest call | 3 minutes | 5 minutes | 10 minutes |
+| Calling a contact yourself | Your first call, then only to call back after missing a call | From 120 minutes a month | From 250 minutes a month |
+
+Calls on the paid plans use minutes from the month, counted in the user's time zone, and Ping's own calls count too. Once the minutes run out, Ping still calls, up to the plan's longest call, but the user can't call until the next month. A call the user makes also stops early if the month's minutes run out during it. Home and Contacts show the minutes left, and the plan page shows each plan's limits, which come from the server.
+
+On Free, the user can call Ping themselves once on a new account, and after that only to call back when they've missed or declined a call since they last talked. That keeps Free at about one call a day.
+
+How minutes are counted: when a call first connects, its whole limit comes off the month's minutes. When the phone reports the call ended, the part it didn't use goes back. A call whose end never arrives, for example because the app was closed, keeps its whole limit, so a phone can't use more than it's charged for. The limit runs from the call's first connection, so reconnecting doesn't restart it.
 
 Cancelling starts a 30-day window, shown on Home and the plan page. After it, words saved during the subscription, sentences and conversations are removed. Words saved on the free plan stay, and resubscribing in time keeps everything.
 
@@ -93,6 +101,10 @@ The invite code someone joins with decides which version they get. It can't be c
 
 The server enforces both limits. Accounts created before there were two codes are admins.
 
+A third code, `YC_INVITE_CODE` (`YC-Demo` by default), is for YC reviewers. It gives the beta tester's version, so no admin settings, but on Premium instead of Free, and its accounts are counted separately. Like other beta testers, reviewers can't change their plan. Which plan each code starts on is `PLAN_FOR_CODE` in `server/index.js`. Codes aren't case-sensitive.
+
+Admins see "Invite codes" at the bottom of the plan page (Settings, then Upgrade Plan or Manage Plan). For each code it shows how many accounts joined, how many made a call, how many calls connected in all, and the 20 newest accounts with when they joined, their calls and their words. Joining is what creates an account, so each account is one phone or browser, and someone who deletes their account and rejoins counts twice. Codes and call counts are only recorded from this version on, so older accounts show "before this was tracked".
+
 OpenAI's docs don't say how a Realtime call reports running out of credit, so the app treats any call error, failed reply or refused connection whose type or code mentions "quota" or "credit" as out of credit. The app has no documented way to read the remaining balance, so it can only tell once credit has run out, not when it's running low. For that, set a usage alert or auto-recharge in OpenAI's billing settings.
 
 ## Limits of web push
@@ -109,14 +121,13 @@ Set these as environment variables, in `.env` locally or under the service's **E
 | Setting | What it does | If it's not set |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | Powers calls and the voice message | Calls and voice messages don't work. The message still shows as text |
-| `ADMIN_INVITE_CODE`, `BETA_INVITE_CODE` | The codes people need to join | The defaults in `server/index.js` |
+| `ADMIN_INVITE_CODE`, `BETA_INVITE_CODE`, `YC_INVITE_CODE` | The codes people need to join | The defaults in `server/index.js` |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Sign the push notifications. Changing them breaks every existing subscription until the user reopens the app | The server won't start |
 | `VAPID_SUBJECT` | A `mailto:` or `https:` contact for push services | Uses the Render URL |
 | `DATA_DIR` | Where user data and the voice message are stored | `./data` |
 | `REALTIME_MODEL` | The voice model | `gpt-realtime` |
 | `REALTIME_VOICE` | Ping's voice | `marin` |
 | `TEXT_MODEL` | Writes example sentences | `gpt-6-luna` |
-| `MAX_CALL_SECONDS` | Where a call ends | 180 |
 | `DAILY_CALL_LIMIT` | How many calls a user can start per day, including test rings | No limit |
 
 Other rules:
@@ -126,19 +137,20 @@ Other rules:
 | Ring time | 10 seconds | `RING_MS` in `server/calls.js` |
 | Default call hours and frequency | 10:00 to 20:00, daily | `DEFAULT_SETTINGS` in `server/settings.js` |
 | Free word limit | 25 | `FREE_WORD_LIMIT` in `server/stack.js` |
+| Longest call and monthly minutes per plan | Free 3 min; Premium 5 min, 120 a month; Platinum 10 min, 250 a month | `PLAN_MINUTES` in `server/contacts.js` |
 | Cancellation window | 30 days | `CANCEL_WINDOW_MS` in `server/calls.js` |
 | Example lookups per user per day | 50 | `MAX_LOOKUPS_PER_DAY` in `server/calls.js` |
 | Extra pause time at slow speeds | | `SLOW_SPEED_PATIENCE` in `server/settings.js` |
 | `turnMode`: how Ping decides the user has finished talking | `silence` (OpenAI's `server_vad`) for everyone. Admins can switch their own to `semantic` (`semantic_vad`) or `smartTurn` (Smart Turn on the phone) | `TURN_MODES` and `SEMANTIC_EAGERNESS` in `server/tutor.js` |
 | Smart Turn's timings: quiet before asking, the backup, and what counts as too slow | 0.2 s, 2.5 s, 0.6 s | `TURN` and `SLOW_DECISION_MS` in `public/turn-machine.js` |
 | Smart Turn's score and backup per time to answer | short 0.5 and 2 s, normal 0.5 and 2.5 s, long 0.7 and 4 s | `SMART_TURN_PATIENCE` in `server/tutor.js` |
-| Default speed and allowed range | 0.9, from 0.6 to 1.5 | `server/settings.js` |
+| Default speed and allowed range | 1.0, from 0.6 to 1.5 | `server/settings.js` |
 | Questions and how contacts behave | | `server/tutor.js` |
 | Contacts and voices | | `server/contacts.js` |
 
 In semantic mode, "Time to answer" sets how eager OpenAI is to reply instead of a silence length. `normal` and `long` currently behave the same there, because `low` is the lowest eagerness level. In Smart Turn mode it sets how sure Smart Turn must be and how long its backup waits, as well as the silence it falls back to.
 
-The call length limit and the hang-up run in the browser, so someone who modifies the page could stay on longer. OpenAI's own session limit is the backstop. Set a monthly budget in your OpenAI account too.
+The hang-up at the time limit runs in the browser, so someone who modifies the page could stay on longer in a call that's already connected. The server still charges the call's whole limit up front and won't reconnect it past the limit. OpenAI's own session limit is the backstop. Set a monthly budget in your OpenAI account too.
 
 ## Before beta launch
 
@@ -148,7 +160,7 @@ Ping is still a prototype, so do these before inviting testers:
 - Replace the 7-day OpenAI key with a longer-lasting one limited to the Realtime and text-to-speech APIs. Calls stop working when a key expires.
 - Set a monthly budget in your OpenAI account, and check that auto-recharge is set the way you want.
 - Before sharing the beta code, finish the first three items above, because every tester's calls spend your OpenAI credits.
-- Set your own `ADMIN_INVITE_CODE` and `BETA_INVITE_CODE` on Render if this repo will ever be shared, since the defaults are in the code.
+- Set your own `ADMIN_INVITE_CODE`, `BETA_INVITE_CODE` and `YC_INVITE_CODE` on Render if this repo will ever be shared, since the defaults are in the code.
 - Replace the plan test switch with real payments, and remove the `PUT /api/plan` route.
 - Have the draft Privacy Policy and Terms of Service in `public/index.html` reviewed by a lawyer.
 - Add real accounts in onboarding. An account currently lives on one phone, so losing the app's storage loses access to it.

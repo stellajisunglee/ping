@@ -1024,7 +1024,9 @@ textarea {
   background: var(--neutral);
 }
 
-.contact.coming-soon button:disabled {
+.contact.coming-soon button:disabled,
+.primary:disabled,
+.secondary:disabled {
   background: var(--neutral);
   cursor: not-allowed;
 }

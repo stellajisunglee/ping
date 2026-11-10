@@ -59,6 +59,7 @@
       <section class="card call-card" aria-label="Call">
         <p id="home-status" class="muted"></p>
         <button id="home-call-button" class="primary wide call-now" type="button">Call Ping now</button>
+        <p id="home-minutes" class="muted" hidden></p>
       </section>
       <section class="card streak-card" aria-labelledby="streak-title">
         <div class="streak-head">
@@ -130,6 +131,7 @@
         <button class="secondary" type="button" data-go="plan">Upgrade Plan</button>
       </div>
       <p id="contacts-error" class="error" role="alert" hidden></p>
+      <p id="contacts-minutes" class="muted" hidden></p>
       <ul id="contacts-list" class="plain-list contacts"></ul>
     </main>
 
@@ -243,6 +245,11 @@
         <p class="muted">How Ping decides you've finished talking: after a set silence, from what you said, or with Smart Turn listening on this phone (downloads about 12 MB once). Applies from your next call.</p>
         <div id="turn-mode-choices" class="choices"></div>
       </section>
+      <section id="invites-section" class="stack full" aria-labelledby="invites-title" hidden>
+        <h2 id="invites-title">Invite codes (admins only)</h2>
+        <p class="muted">Who joined with each code. Each account is one phone or browser. A call counts once it connects.</p>
+        <div id="invites-list" class="stack"></div>
+      </section>
     </main>
 
     <main id="screen-privacy" class="screen tabbed prose" hidden>
@@ -252,7 +259,7 @@
       <h2>Your voice</h2>
       <p>During a call, your voice goes directly from your phone to OpenAI so the AI can reply. Ping doesn't record audio.</p>
       <h2>What Ping stores</h2>
-      <p>Your time zone, settings, plan, streak, notification details, voicemails, recent call times, your word and sentence stacks, and your contacts.</p>
+      <p>Which invite code you joined with and when, how many calls you've made and the minutes they used, your time zone, settings, plan, streak, notification details, voicemails, recent call times, your word and sentence stacks, and your contacts.</p>
       <h2>Conversations</h2>
       <p>On a paid plan, the text of your recent calls is stored to personalize future calls. On the free plan, conversation text isn't stored.</p>
       <h2>Cancelling and deleting</h2>

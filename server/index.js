@@ -8,7 +8,7 @@ import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
 import { CallEngine, LimitError, PlanError } from './calls.js';
-import { PING } from './contacts.js';
+import { PING, PLAN_MINUTES } from './contacts.js';
 import { createPushSender } from './push.js';
 import { createOpenAI } from './openai.js';
 import { isValidTimeZone } from './schedule.js';
@@ -23,9 +23,10 @@ const MAX_BODY_BYTES = 64_000; // room for a full call's transcript
 const MAX_FEEDBACK_LENGTH = 2_000;
 const MAX_WRONG_CODES_PER_MINUTE = 10;
 const MAX_TRACKED_IPS = 10_000;
-const MAX_CALL_SECONDS = Number(process.env.MAX_CALL_SECONDS ?? 180);
 const DEFAULT_ADMIN_CODE = 'minabystella_admin_only';
 const DEFAULT_BETA_CODE = 'beta-01';
+const DEFAULT_YC_CODE = 'YC-Demo'; // for YC reviewers: the beta tester's version on Premium, counted separately
+const PLAN_FOR_CODE = { yc: 'premium' }; // codes not listed start on Free
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -145,7 +146,8 @@ export function createApp({ engine, openai, config }) {
     }
   }
 
-  const roleForCode = (given) => Object.entries(inviteCodes).find(([, code]) => code && codesMatch(given, code))?.[0] ?? null;
+  // Codes aren't case-sensitive, so "yc-demo" works as well as "YC-Demo".
+  const codeNameFor = (given) => Object.entries(inviteCodes).find(([, code]) => code && codesMatch(given.toLowerCase(), code.toLowerCase()))?.[0] ?? null;
 
   const recentWrongCodes = (ip) => (registerAttempts.get(ip) ?? []).filter((at) => Date.now() - at < 60_000);
 
@@ -170,6 +172,8 @@ export function createApp({ engine, openai, config }) {
       words: user.words,
       sentences: user.sentences,
       freeWordLimit: FREE_WORD_LIMIT,
+      calling: engine.calling(user),
+      planMinutes: PLAN_MINUTES,
     };
   }
 
@@ -187,13 +191,13 @@ export function createApp({ engine, openai, config }) {
       if (recentWrongCodes(ip).length >= MAX_WRONG_CODES_PER_MINUTE) return json(res, 429, { error: 'Too many tries. Wait a minute and try again.' });
       if (!Object.values(inviteCodes).some(Boolean)) return json(res, 503, { error: 'Sign-ups are closed.' });
       const body = await readJson(req);
-      const role = roleForCode(body.inviteCode ?? '');
-      if (!role) {
+      const codeName = codeNameFor(String(body.inviteCode ?? ''));
+      if (!codeName) {
         recordWrongCode(ip);
         return json(res, 403, { error: "That invite code isn't right." });
       }
       if (!isValidTimeZone(body.timeZone)) return json(res, 400, { error: 'Your time zone was not recognized.' });
-      const { user, token } = engine.register(body.timeZone, role);
+      const { user, token } = engine.register(body.timeZone, codeName === 'admin' ? 'admin' : 'beta', codeName, PLAN_FOR_CODE[codeName]);
       return json(res, 201, { token, ...publicUser(user) });
     }
 
@@ -239,6 +243,11 @@ export function createApp({ engine, openai, config }) {
       if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
       engine.requestTestRing(user);
       return json(res, 202, {});
+    }
+
+    if (method === 'GET' && pathname === '/api/admin/invites') {
+      if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
+      return json(res, 200, { invites: engine.inviteReport(Object.keys(inviteCodes).filter((name) => inviteCodes[name])) });
     }
 
     if (method === 'POST' && pathname === '/api/calls') {
@@ -321,6 +330,12 @@ export function createApp({ engine, openai, config }) {
       return json(res, 201, {});
     }
 
+    const ended = pathname.match(/^\/api\/calls\/([\w-]+)\/ended$/);
+    if (method === 'POST' && ended) {
+      if (!engine.endCall(user, ended[1])) return json(res, 404, { error: 'Call not found.' });
+      return json(res, 200, { calling: engine.calling(user) });
+    }
+
     const connected = pathname.match(/^\/api\/calls\/([\w-]+)\/connected$/);
     if (method === 'POST' && connected) {
       if (!engine.markConnected(user, connected[1])) return json(res, 409, { error: 'This call has ended.' });
@@ -365,7 +380,7 @@ export function createApp({ engine, openai, config }) {
       return json(res, 200, {
         clientSecret,
         sdpUrl: openai.sdpUrl,
-        maxSeconds: MAX_CALL_SECONDS,
+        maxSeconds: details.maxSeconds,
         question: details.question,
         turnMode: details.turnMode,
         smartTurn: smartTurnRules(details.settings.thinkingTime),
@@ -461,7 +476,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     engine,
     openai,
     config: {
-      inviteCodes: { admin: process.env.ADMIN_INVITE_CODE ?? DEFAULT_ADMIN_CODE, beta: process.env.BETA_INVITE_CODE ?? DEFAULT_BETA_CODE },
+      inviteCodes: {
+        admin: process.env.ADMIN_INVITE_CODE ?? DEFAULT_ADMIN_CODE,
+        beta: process.env.BETA_INVITE_CODE ?? DEFAULT_BETA_CODE,
+        yc: process.env.YC_INVITE_CODE ?? DEFAULT_YC_CODE,
+      },
       vapidPublicKey: VAPID_PUBLIC_KEY,
       model: process.env.REALTIME_MODEL ?? 'gpt-realtime',
       voice,

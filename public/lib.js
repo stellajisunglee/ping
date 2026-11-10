@@ -39,6 +39,21 @@ export function el(tag, props = {}, ...children) {
 export const isPaid = () => state.me?.plan === 'premium' || state.me?.plan === 'platinum';
 export const isAdmin = () => state.me?.role === 'admin';
 
+// One line on whether the user can call now, and their minutes. Null when there's nothing to say.
+export function callingNote() {
+  const calling = state.me?.calling;
+  if (!calling) return null;
+  if (calling.monthlyMinutes === null) return calling.canCall ? null : calling.reason;
+  if (!calling.canCall) return calling.reason;
+  return `${calling.minutesLeft} of ${calling.monthlyMinutes} minutes left this month. Calls last up to ${calling.perCallMinutes} minutes.`;
+}
+
+export function showCallingNote(id) {
+  const note = callingNote();
+  $(id).textContent = note ?? '';
+  $(id).hidden = !note;
+}
+
 export function readToken() {
   try {
     return localStorage.getItem(TOKEN_KEY);

@@ -130,8 +130,8 @@ test('the session carries the user speed and thinking time', () => {
 });
 
 test('speed steps stay inside the allowed range', () => {
-  assert.equal(applySettings(DEFAULT_SETTINGS, { speedChange: 'slower' }).speed, 0.75);
-  assert.equal(applySettings(DEFAULT_SETTINGS, { speedChange: 'faster' }).speed, 1.05);
+  assert.equal(applySettings(DEFAULT_SETTINGS, { speedChange: 'slower' }).speed, 0.85);
+  assert.equal(applySettings(DEFAULT_SETTINGS, { speedChange: 'faster' }).speed, 1.15);
   assert.equal(applySettings(DEFAULT_SETTINGS, { speedChange: 'normal' }).speed, 1);
   assert.equal(applySettings({ ...DEFAULT_SETTINGS, speed: 0.65 }, { speedChange: 'much_slower' }).speed, MIN_SPEED);
   assert.equal(applySettings({ ...DEFAULT_SETTINGS, speed: 1.4 }, { speedChange: 'much_faster' }).speed, MAX_SPEED);

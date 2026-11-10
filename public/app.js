@@ -1,6 +1,6 @@
 import { initContacts } from './contacts.js';
 import { charsSaid, createPace } from './reveal.js';
-import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdmin, isPaid, onShow, readToken, refresh, setError, show, state, writeToken } from './lib.js';
+import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdmin, isPaid, onShow, readToken, refresh, setError, show, showCallingNote, state, writeToken } from './lib.js';
 import { initSettings } from './settings.js';
 import { initStack, renderStackTiles } from './stack.js';
 import { startCall } from './voice.js';
@@ -126,7 +126,7 @@ function renderVoicemail() {
   // Without a recording the words above still deliver the message.
   player.addEventListener('error', () => player.remove());
 
-  const callBack = el('button', { className: 'secondary', type: 'button', textContent: 'Call back' });
+  const callBack = el('button', { className: 'secondary', type: 'button', textContent: 'Call back', disabled: !state.me.calling.canCall });
   callBack.addEventListener('click', () => callContact(voicemail.contactId));
   card.append(callBack);
   $('voicemail').replaceChildren(card);
@@ -186,6 +186,8 @@ function renderHome() {
   const contact = homeContact();
   $('home-avatar').textContent = initialOf(contact?.name ?? 'Ping');
   $('home-call-button').textContent = `Call ${contact?.name ?? 'Ping'} now`;
+  $('home-call-button').disabled = !state.me.calling.canCall;
+  showCallingNote('home-minutes');
   $('streak-current').textContent = streak.current;
   $('streak-best').textContent = streak.best ? `Best: ${streak.best} ${streak.best === 1 ? 'day' : 'days'}` : '';
   renderWeek(streak.week);
@@ -287,8 +289,21 @@ const ENDED_NOTICE = {
   'no-microphone': "They can't hear you because the microphone is off. Allow it in your browser or phone settings, then call back.",
   dropped: 'The call dropped. You can call back from Contacts.',
   failed: "The call couldn't connect. Please try calling back.",
-  'time-limit': 'That was a good chat! Calls end after 3 minutes.',
 };
+
+function endedNotice(reason) {
+  if (reason === 'time-limit') return timeLimitNotice();
+  // Only suggest calling back when the user can.
+  if (!state.me.calling.canCall && (reason === 'dropped' || reason === 'failed')) return reason === 'dropped' ? 'The call dropped.' : "The call couldn't connect.";
+  return ENDED_NOTICE[reason] ?? null;
+}
+
+// Calls stop at the plan's longest call, or sooner when a call the user made runs out of the month's minutes.
+function timeLimitNotice() {
+  const { calling } = state.me;
+  if (calling.monthlyMinutes !== null && !calling.canCall) return calling.reason;
+  return `That was a good chat! Calls on your plan last up to ${calling.perCallMinutes} minutes.`;
+}
 // Only admins are told and the call hangs up. For everyone else the call behaves as it did before.
 const OUT_OF_CREDIT_NOTICE = "Admin: OpenAI is out of credit, so Ping can't talk. Add credit at platform.openai.com/settings/organization/billing, then call again.";
 
@@ -494,10 +509,12 @@ function beginCall(callId, contactName = 'Ping') {
       clearInterval(revealTimer);
       revealTimer = null;
       $('call-avatar').classList.remove('speaking');
+      // Gives back the minutes the call didn't use.
+      await api(`/api/calls/${callId}/ended`, { method: 'POST' }).catch((error) => console.warn('Could not end the call', error));
       await saveTranscript(callId);
       await refresh().catch(() => {});
       goHome();
-      notice(outOfCredit ? OUT_OF_CREDIT_NOTICE : ENDED_NOTICE[reason] ?? null);
+      notice(outOfCredit ? OUT_OF_CREDIT_NOTICE : endedNotice(reason));
     },
   });
 }

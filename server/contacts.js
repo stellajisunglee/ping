@@ -6,6 +6,15 @@ export const MAX_CUSTOM_CONTACTS = 5;
 const MAX_NAME_LENGTH = 30;
 const MAX_TOPIC_LENGTH = 200;
 
+// The longest one call can last, and the minutes a month every call uses, Ping's calls included.
+// Once the month's minutes run out, Ping still calls, but the user can't call until the next month.
+// Free has no monthly minutes: Ping calls once a day, and the user can call back once after missing it.
+export const PLAN_MINUTES = {
+  free: { perCall: 3, perMonth: null },
+  premium: { perCall: 5, perMonth: 120 },
+  platinum: { perCall: 10, perMonth: 250 },
+};
+
 export const isPaid = (plan) => plan === 'premium' || plan === 'platinum';
 
 export const PING = { id: 'ping', name: 'Ping', spokenName: 'ピン', topic: 'daily life, such as what they did today, food and plans', plan: 'free' };

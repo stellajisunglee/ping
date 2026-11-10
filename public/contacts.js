@@ -1,6 +1,6 @@
 // The Contacts tab: who calls the user, and who they can call.
 
-import { $, api, el, goBack, initialOf, onShow, setError, state } from './lib.js';
+import { $, api, el, goBack, initialOf, onShow, setError, showCallingNote, state } from './lib.js';
 
 const VOICE_LABELS = { marin: 'Marin', cedar: 'Cedar', coral: 'Coral', sage: 'Sage', verse: 'Verse', ash: 'Ash' };
 
@@ -32,7 +32,7 @@ async function update(request) {
 
 function contactRow(contact, canChoose) {
   const detail = contact.id === 'ping' ? 'Daily life' : contact.topic;
-  const call = el('button', { type: 'button', className: 'primary small', textContent: 'Call' });
+  const call = el('button', { type: 'button', className: 'primary small', textContent: 'Call', disabled: !state.me.calling.canCall });
   call.addEventListener('click', () => callContact(contact.id));
   const row = el(
     'li',
@@ -73,6 +73,7 @@ function renderContacts() {
   $('contacts-list').replaceChildren(...contacts.map((contact) => contactRow(contact, contacts.length > 1)), ...comingSoon.map(comingSoonRow));
   $('contact-new-button').hidden = !canCreate;
   $('contacts-upgrade').hidden = canCreate;
+  showCallingNote('contacts-minutes');
 }
 
 async function createContact(event) {

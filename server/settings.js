@@ -7,7 +7,7 @@ export const PROFICIENCY_LEVELS = ['beginner', 'intermediate', 'advanced'];
 export const FORMALITY_LEVELS = ['formal', 'casual'];
 export const FREQUENCIES = ['daily', 'every-other-day', 'weekdays', 'weekends', 'custom'];
 export const DEFAULT_SETTINGS = {
-  speed: 0.9,
+  speed: 1.0,
   thinkingTime: 'normal',
   callsEnabled: true,
   language: 'ja',

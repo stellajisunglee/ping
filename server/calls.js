@@ -3,7 +3,7 @@
 // Also owns each user's record: plan, contacts, streak, stack and saved conversations.
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { canCall, cleanContact, contactList, findContact, isPaid, MAX_CUSTOM_CONTACTS, PING, PLANS, selectedContact } from './contacts.js';
+import { canCall, cleanContact, contactList, findContact, isPaid, MAX_CUSTOM_CONTACTS, PING, PLAN_MINUTES, PLANS, selectedContact } from './contacts.js';
 import { recordCallDay, streakToShow } from './progress.js';
 import { localDay, localDayNumber, localParts, nextCallTime } from './schedule.js';
 import { applySettings, DEFAULT_SETTINGS } from './settings.js';
@@ -25,6 +25,9 @@ const MAX_MEMORY_LENGTH = 800;
 const MAX_TRANSCRIPT_LINES = 80;
 const MAX_LINE_LENGTH = 500;
 const KEEP_FEEDBACK = 1000;
+const MAX_ACCOUNTS_IN_REPORT = 20;
+const MIN_SECONDS_TO_CALL = 60; // below this, the month's minutes count as used up
+const MIN_SECONDS_TO_CONNECT = 10;
 const SCHEDULE_FIELDS = ['frequency', 'customDays', 'callStartHour', 'callEndHour'];
 const RENAMED_PLANS = { plus: 'premium', pro: 'platinum' };
 
@@ -46,6 +49,12 @@ const newUserFields = () => ({
   lastRingDay: null,
   lookups: { day: null, count: 0 },
   turnMode: 'silence', // only an admin can change it, to compare turn detectors
+  joinedWith: null, // which invite code: admin, beta or yc
+  joinedAt: null,
+  connectedCalls: 0, // kept on the account, since calls themselves are removed after 7 days
+  lastCallAt: null,
+  lastMissedAt: null, // the latest call from a contact the user missed or declined
+  minutes: { month: null, usedSeconds: 0 }, // this month's call time, in the user's time zone
 });
 
 export class CallEngine {
@@ -62,6 +71,7 @@ export class CallEngine {
         ...newUserFields(),
         ...user,
         role: user.role ?? 'admin', // accounts from before there were two invite codes
+        joinedWith: user.joinedWith ?? user.role ?? 'admin',
         plan: RENAMED_PLANS[user.plan] ?? user.plan ?? 'free',
         settings: { ...DEFAULT_SETTINGS, ...user.settings },
       });
@@ -69,7 +79,9 @@ export class CallEngine {
     }
   }
 
-  register(timeZone, role = 'beta') {
+  // joinedWith is the invite code's name, which can differ from the role: YC reviewers are beta testers.
+  // plan is the plan an invite code starts on: Free unless the code says otherwise.
+  register(timeZone, role = 'beta', joinedWith = role, plan = 'free') {
     const token = randomBytes(32).toString('base64url');
     const user = {
       id: randomUUID(),
@@ -84,6 +96,9 @@ export class CallEngine {
       messages: [],
       usage: { day: null, calls: 0 },
       ...newUserFields(),
+      plan: PLANS.includes(plan) ? plan : 'free',
+      joinedWith,
+      joinedAt: this.now(),
     };
     this.store.users[user.id] = user;
     this.store.save();
@@ -172,6 +187,8 @@ export class CallEngine {
       ringDeadline: now + DELIVERY_GRACE_MS,
       deliveredAt: null,
       sessions: 0,
+      // Ping's calls always come, even once the month's minutes are used up, and stop at the plan's longest call.
+      maxSeconds: this.#limits(user).perCall * 60,
     };
     this.store.calls[call.id] = call;
     this.store.save();
@@ -212,6 +229,8 @@ export class CallEngine {
     if (call.state === 'ringing') {
       call.state = 'declined';
       this.#recordOutcome(call, 'declined');
+      const user = this.store.users[call.userId];
+      if (user) user.lastMissedAt = this.now();
       this.store.save();
     }
     return call;
@@ -225,6 +244,7 @@ export class CallEngine {
     const message = { id: randomUUID(), callId: call.id, contactId: contact.id, at: this.now(), heard: false };
     user.messages = [message, ...user.messages].slice(0, KEEP_MESSAGES);
     user.lastCallOutcome = 'missed';
+    user.lastMissedAt = this.now();
     this.store.save();
     if (!user.subscription) return;
     const { gone } = await this.sendPush(user.subscription, { type: 'missed', callId: call.id, contactName: contact.name }, { ttl: 86_400 });
@@ -239,6 +259,8 @@ export class CallEngine {
     const contact = contactId ? findContact(user, contactId) : selectedContact(user);
     if (!contact) throw new PlanError('That contact is no longer available.');
     if (!canCall(user, contact)) throw new PlanError(`Upgrade your plan to call ${contact.name}.`);
+    const calling = this.calling(user);
+    if (!calling.canCall) throw new LimitError(calling.reason);
     this.#countCall(user);
     const question = pickQuestion(user.lastQuestionId, this.random);
     user.lastQuestionId = question.id;
@@ -255,6 +277,8 @@ export class CallEngine {
       ringDeadline: now,
       deliveredAt: now,
       sessions: 0,
+      // A call the user makes also stops when the month's minutes run out.
+      maxSeconds: Math.min(this.#limits(user).perCall * 60, this.#secondsLeft(user) ?? Infinity),
     };
     this.store.calls[call.id] = call;
     this.store.save();
@@ -265,7 +289,12 @@ export class CallEngine {
   sessionDetails(user, callId) {
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id || call.state !== 'answered') return null;
-    if (call.sessions >= MAX_SESSIONS_PER_CALL) throw new LimitError('This call has ended. Please call back.');
+    if (call.endedAt || call.sessions >= MAX_SESSIONS_PER_CALL) throw new LimitError('This call has ended.');
+    // The time limit runs from the call's first connection, so reconnecting doesn't restart it.
+    call.maxSeconds ??= this.#limits(user).perCall * 60; // calls from before there were plan limits
+    const secondsLeft = call.maxSeconds - (call.startedAt ? Math.floor((this.now() - call.startedAt) / 1000) : 0);
+    if (secondsLeft < MIN_SECONDS_TO_CONNECT) throw new LimitError('This call has reached its time limit.');
+    if (!call.startedAt) this.#startMetering(user, call);
     call.sessions += 1;
     call.turnMode = user.turnMode; // kept with the call, so its metrics report the mode it really used
     this.store.save();
@@ -280,7 +309,71 @@ export class CallEngine {
       contact,
       memories: this.#memories(user, contact),
       turnMode: user.turnMode,
+      maxSeconds: secondsLeft,
     };
+  }
+
+  // The phone reports the call ended. The call was charged its whole limit when it started, so the
+  // unused part goes back to the month's minutes. A call that never reports keeps its whole charge.
+  endCall(user, callId) {
+    const call = this.store.calls[callId];
+    if (!call || call.userId !== user.id) return false;
+    if (!call.startedAt || call.endedAt) return true;
+    call.endedAt = this.now();
+    const usedSeconds = Math.min(call.maxSeconds, Math.ceil((call.endedAt - call.startedAt) / 1000));
+    if (call.chargedSeconds && user.minutes.month === call.chargedMonth) user.minutes.usedSeconds -= call.chargedSeconds - usedSeconds;
+    call.chargedSeconds = usedSeconds;
+    this.store.save();
+    return true;
+  }
+
+  // Whether the user can call a contact right now, and the minutes behind it.
+  calling(user) {
+    const { perCall, perMonth } = this.#limits(user);
+    const base = { perCallMinutes: perCall, monthlyMinutes: perMonth };
+    if (perMonth === null) {
+      // Free: a new account's first call, or calling back after missing a call since they last talked.
+      const canCall = !user.lastCallAt || (user.lastMissedAt ?? 0) > user.lastCallAt;
+      return { ...base, minutesLeft: null, canCall, reason: canCall ? null : 'On the Free plan, Ping calls you once a day. If you miss the call, you can call back.' };
+    }
+    const secondsLeft = this.#secondsLeft(user);
+    const canCall = secondsLeft >= MIN_SECONDS_TO_CALL;
+    const { year, month } = localParts(this.now(), user.timeZone);
+    const resetsOn = new Date(Date.UTC(year, month, 1)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    return {
+      ...base,
+      minutesLeft: Math.floor(secondsLeft / 60),
+      resetsOn,
+      canCall,
+      reason: canCall ? null : `You've used this month's ${perMonth} minutes. Ping will still call you, and you can call again from ${resetsOn}.`,
+    };
+  }
+
+  #limits(user) {
+    return PLAN_MINUTES[user.plan] ?? PLAN_MINUTES.free;
+  }
+
+  #thisMonth(user) {
+    const month = localDay(this.now(), user.timeZone).slice(0, 7);
+    if (user.minutes.month !== month) user.minutes = { month, usedSeconds: 0 };
+    return user.minutes;
+  }
+
+  // null on Free, which has no monthly minutes
+  #secondsLeft(user) {
+    const { perMonth } = this.#limits(user);
+    if (perMonth === null) return null;
+    return Math.max(0, perMonth * 60 - this.#thisMonth(user).usedSeconds);
+  }
+
+  // Charges the call's whole limit up front, so a phone that never reports the end can't use more.
+  #startMetering(user, call) {
+    call.startedAt = this.now();
+    if (this.#limits(user).perMonth === null) return;
+    const minutes = this.#thisMonth(user);
+    minutes.usedSeconds += call.maxSeconds;
+    call.chargedSeconds = call.maxSeconds;
+    call.chargedMonth = minutes.month;
   }
 
   setTurnMode(user, turnMode) {
@@ -294,6 +387,10 @@ export class CallEngine {
   markConnected(user, callId) {
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id || call.state !== 'answered') return false;
+    if (!call.connectedAt) {
+      user.connectedCalls += 1;
+      user.lastCallAt = this.now();
+    }
     call.connectedAt = this.now();
     user.streak = recordCallDay(user.streak, localDayNumber(this.now(), user.timeZone), user.settings);
     this.store.save();
@@ -464,6 +561,26 @@ export class CallEngine {
     user.conversations = [conversation, ...user.conversations.filter((saved) => saved.callId !== callId)].slice(0, KEEP_CONVERSATIONS);
     this.store.save();
     return true;
+  }
+
+  // For admins: how many accounts joined with each invite code, and whether they've used the app.
+  // Each account is one phone or browser, since joining is what creates the account.
+  inviteReport(codes) {
+    return codes.map((code) => {
+      const users = Object.values(this.store.users).filter((user) => user.joinedWith === code);
+      const accounts = users
+        .map((user) => ({ joinedAt: user.joinedAt, calls: user.connectedCalls, lastCallAt: user.lastCallAt, words: user.words.length }))
+        .sort((a, b) => (b.joinedAt ?? 0) - (a.joinedAt ?? 0));
+      return {
+        code,
+        accounts: accounts.length,
+        accountsThatCalled: accounts.filter((account) => account.calls > 0).length,
+        calls: accounts.reduce((total, account) => total + account.calls, 0),
+        lastJoinedAt: accounts[0]?.joinedAt ?? null,
+        lastCallAt: Math.max(0, ...accounts.map((account) => account.lastCallAt ?? 0)) || null,
+        newest: accounts.slice(0, MAX_ACCOUNTS_IN_REPORT),
+      };
+    });
   }
 
   addFeedback(text) {

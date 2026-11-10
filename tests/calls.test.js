@@ -256,6 +256,7 @@ const DAY_MS = 86_400_000;
 const word = (index) => ({ kanji: '', kana: `あ${index}`, romaji: `a${index}`, english: `word ${index}` });
 
 function connectToday(context) {
+  context.user.lastMissedAt = context.clock.now + 1; // as if Ping's call was just missed, so a Free user can call back
   const call = context.engine.callBack(context.user);
   assert.equal(context.engine.markConnected(context.user, call.id), true);
 }
@@ -494,6 +495,8 @@ test('an account from before these features still works', () => {
   assert.equal(user.settings.formality, 'formal');
   assert.equal(user.plan, 'free');
   assert.equal(user.role, 'admin');
+  assert.equal(user.joinedWith, 'admin');
+  assert.equal(user.connectedCalls, 0);
   assert.equal(user.turnMode, 'silence');
   assert.deepEqual(user.words, []);
   assert.equal(engine.streak(user).current, 0);
@@ -517,7 +520,101 @@ test('a new account keeps the role it signed up with, and an old one stays as it
   const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }) });
   const { user: admin } = engine.register('Asia/Tokyo', 'admin');
   const { user: beta } = engine.register('Asia/Tokyo', 'beta');
+  const { user: reviewer } = engine.register('Asia/Tokyo', 'beta', 'yc');
   new CallEngine({ store, sendPush: async () => ({ gone: false }) });
   assert.equal(admin.role, 'admin');
   assert.equal(beta.role, 'beta');
+  assert.deepEqual([reviewer.role, reviewer.joinedWith], ['beta', 'yc']);
+  assert.ok(reviewer.joinedAt);
+});
+
+// A call that connects and runs for the given number of seconds, then ends.
+function talk(context, call, seconds) {
+  context.engine.sessionDetails(context.user, call.id);
+  context.engine.markConnected(context.user, call.id);
+  context.clock.now += seconds * 1000;
+  assert.equal(context.engine.endCall(context.user, call.id), true);
+}
+
+test('on Free, the user can make a first call, then only call back after missing a call', async () => {
+  const context = setup();
+  assert.equal(context.engine.calling(context.user).canCall, true);
+  talk(context, context.engine.callBack(context.user), 60);
+  assert.equal(context.engine.calling(context.user).canCall, false);
+  assert.throws(() => context.engine.callBack(context.user), LimitError);
+
+  // Ping calls and the user misses it: one call back.
+  await ringNow(context);
+  context.clock.now += DELIVERY_GRACE_MS;
+  await context.engine.tick();
+  assert.equal(context.engine.calling(context.user).canCall, true);
+  const callBack = context.engine.callBack(context.user);
+  assert.equal(context.engine.sessionDetails(context.user, callBack.id).maxSeconds, 180);
+  talk(context, callBack, 30);
+  assert.throws(() => context.engine.callBack(context.user), LimitError);
+});
+
+test('every call stops at the plan\'s longest call', async () => {
+  const context = setup();
+  for (const [plan, seconds] of [['free', 180], ['premium', 300], ['platinum', 600]]) {
+    context.engine.setPlan(context.user, plan);
+    context.user.lastMissedAt = context.clock.now;
+    const call = context.engine.callBack(context.user);
+    assert.equal(context.engine.sessionDetails(context.user, call.id).maxSeconds, seconds);
+    context.engine.endCall(context.user, call.id);
+  }
+  context.engine.setPlan(context.user, 'premium');
+  await ringNow(context);
+  assert.equal(callOf(context.store).maxSeconds, 300);
+});
+
+test('the time limit runs from the first connection, so reconnecting does not restart it', () => {
+  const context = setup();
+  context.engine.setPlan(context.user, 'premium');
+  const call = context.engine.callBack(context.user);
+  assert.equal(context.engine.sessionDetails(context.user, call.id).maxSeconds, 300);
+  context.clock.now += 200_000;
+  assert.equal(context.engine.sessionDetails(context.user, call.id).maxSeconds, 100);
+  context.clock.now += 95_000;
+  assert.throws(() => context.engine.sessionDetails(context.user, call.id), LimitError);
+});
+
+test('a call uses the minutes it lasted, and a call that never reports its end keeps its whole limit', () => {
+  const context = setup();
+  context.engine.setPlan(context.user, 'premium');
+  talk(context, context.engine.callBack(context.user), 90);
+  assert.equal(context.engine.calling(context.user).minutesLeft, 118); // 120 minutes less 1.5
+  const unreported = context.engine.callBack(context.user);
+  context.engine.sessionDetails(context.user, unreported.id);
+  assert.equal(context.engine.calling(context.user).minutesLeft, 113);
+  context.clock.now += 10_000;
+  context.engine.endCall(context.user, unreported.id);
+  assert.equal(context.engine.calling(context.user).minutesLeft, 118);
+  // An ended call can't be reopened.
+  assert.throws(() => context.engine.sessionDetails(context.user, unreported.id), LimitError);
+});
+
+test('once the month\'s minutes run out, Ping still calls but the user cannot, until the next month', async () => {
+  const context = setup();
+  context.engine.setPlan(context.user, 'premium');
+  context.engine.calling(context.user); // starts this month's count
+  context.user.minutes.usedSeconds = 120 * 60 - 150;
+  const short = context.engine.callBack(context.user);
+  assert.equal(context.engine.sessionDetails(context.user, short.id).maxSeconds, 150);
+  context.clock.now += 150_000;
+  context.engine.endCall(context.user, short.id);
+
+  const calling = context.engine.calling(context.user);
+  assert.deepEqual([calling.canCall, calling.minutesLeft], [false, 0]);
+  assert.match(calling.reason, /Ping will still call you/);
+  assert.throws(() => context.engine.callBack(context.user), LimitError);
+
+  await ringNow(context);
+  const ring = callOf(context.store);
+  assert.equal(ring.direction, 'incoming');
+  context.engine.answer(ring.id);
+  assert.equal(context.engine.sessionDetails(context.user, ring.id).maxSeconds, 300);
+
+  context.clock.now += 32 * DAY_MS;
+  assert.equal(context.engine.calling(context.user).minutesLeft, 120);
 });

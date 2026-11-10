@@ -12,6 +12,16 @@ const PLAN_DETAILS = {
   platinum: 'Everything in Premium, plus creating your own contacts.',
 };
 
+// The call limits come from the server, so the page always matches what's enforced.
+function callDetails(plan) {
+  const { perCall, perMonth } = state.me.planMinutes[plan];
+  if (perMonth === null) return `Ping calls once a day, for up to ${perCall} minutes. Miss it and you can call back.`;
+  return `${perMonth} minutes of calls a month, up to ${perCall} minutes each.`;
+}
+
+const INVITE_NAMES = { yc: 'YC reviewers', beta: 'Beta testers', admin: 'Admins' };
+const INVITE_ORDER = ['yc', 'beta', 'admin'];
+
 const hourLabel = (hour) => `${String(hour).padStart(2, '0')}:00`;
 
 function choiceButton(textContent, pressed, onClick) {
@@ -75,12 +85,16 @@ function renderSettings() {
 
 function renderPlan() {
   $('plan-title').textContent = state.me.plan === 'free' ? 'Upgrade Plan' : 'Manage Plan';
-  $('plan-mode').textContent = isAdmin() ? "Test mode: real payments aren't connected, so you can switch freely and nothing is charged." : "Upgrades aren't available during the beta, so everyone is on the Free plan for now.";
+  $('plan-mode').textContent = isAdmin()
+    ? "Test mode: real payments aren't connected, so you can switch freely and nothing is charged."
+    : state.me.plan === 'free'
+      ? "Upgrades aren't available during the beta, so everyone is on the Free plan for now."
+      : `You're on ${PLAN_NAMES[state.me.plan]} for the beta, free of charge. Plans can't be changed yet.`;
   $('plan-cancel-note').hidden = !isAdmin();
   setError('plan-clear', clearWarning());
   $('plan-choices').replaceChildren(
     ...Object.entries(PLAN_NAMES).map(([plan, name]) => {
-      const button = el('button', { type: 'button', className: 'plan-choice' }, el('strong', { textContent: name }), el('span', { className: 'muted', textContent: PLAN_DETAILS[plan] }));
+      const button = el('button', { type: 'button', className: 'plan-choice' }, el('strong', { textContent: name }), el('span', { className: 'muted', textContent: `${callDetails(plan)} ${PLAN_DETAILS[plan]}` }));
       button.setAttribute('aria-pressed', String(state.me.plan === plan));
       button.disabled = !isAdmin();
       button.addEventListener('click', async () => {
@@ -95,6 +109,41 @@ function renderPlan() {
     }),
   );
   renderTurnMode();
+  renderInvites();
+}
+
+const when = (at) => (at ? new Date(at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'before this was tracked');
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+// Admins only: how many people joined with each invite code, and whether they've made a call.
+async function renderInvites() {
+  $('invites-section').hidden = !isAdmin();
+  if (!isAdmin()) return;
+  try {
+    const { invites } = await api('/api/admin/invites');
+    invites.sort((a, b) => INVITE_ORDER.indexOf(a.code) - INVITE_ORDER.indexOf(b.code));
+    $('invites-list').replaceChildren(
+      ...invites.map((invite) => {
+        const summary = invite.accounts
+          ? `${plural(invite.accounts, 'account')} · ${invite.accountsThatCalled} made a call · ${plural(invite.calls, 'call')} in all`
+          : 'Nobody has joined yet.';
+        const accounts = invite.newest.map((account) =>
+          el('li', {
+            textContent: `Joined ${when(account.joinedAt)} · ${account.calls ? `${plural(account.calls, 'call')}, last ${when(account.lastCallAt)}` : 'no calls yet'} · ${plural(account.words, 'word')}`,
+          }),
+        );
+        return el(
+          'div',
+          { className: 'invite' },
+          el('strong', { textContent: INVITE_NAMES[invite.code] ?? invite.code }),
+          el('p', { className: 'muted', textContent: summary }),
+          ...(accounts.length ? [el('ul', { className: 'muted' }, ...accounts)] : []),
+        );
+      }),
+    );
+  } catch (error) {
+    $('invites-list').replaceChildren(el('p', { className: 'muted', textContent: error.message }));
+  }
 }
 
 // Admins only: which turn detector their own calls use, to compare the two.
