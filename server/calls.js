@@ -270,10 +270,12 @@ export class CallEngine {
     call.turnMode = user.turnMode; // kept with the call, so its metrics report the mode it really used
     this.store.save();
     const contact = this.#contactOf(call, user);
+    const local = localParts(this.now(), user.timeZone);
     return {
       question: questionById(call.questionId),
       settings: user.settings,
-      localHour: localParts(this.now(), user.timeZone).hour,
+      localHour: local.hour,
+      localDate: { year: local.year, month: local.month, day: local.day },
       calledBack: call.direction === 'outgoing',
       contact,
       memories: this.#memories(user, contact),

@@ -1,6 +1,7 @@
 // Everything a contact says and how they decide what to say.
 
 import { PING } from './contacts.js';
+import { describeDay, PING_BIO, pingsDay } from './persona.js';
 import { DEFAULT_SETTINGS, silenceMs } from './settings.js';
 
 export const QUESTIONS = [
@@ -64,7 +65,25 @@ These are things the user said on earlier calls. Mention one naturally if it fit
 ${memories.map((memory) => `- ${JSON.stringify(memory)}`).join('\n')}`;
 }
 
-export function buildInstructions({ question, localHour, calledBack, contact = PING, settings = DEFAULT_SETTINGS, memories = [] }) {
+function todayInUtc() {
+  const now = new Date();
+  return { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1, day: now.getUTCDate() };
+}
+
+// Ping has a life of its own. Other contacts make up small details that fit their topic.
+function lifeSection({ contact, localDate, localHour }) {
+  const keep = 'Talk about your life only when it comes up, keep the same story for the whole call, and keep the focus on the user. Don\'t make up big news. If they sincerely ask whether you are a real person or an AI, tell them honestly that you are an AI.';
+  if (contact.id !== PING.id) {
+    return `YOUR LIFE
+You are a friend who loves ${contact.topic}. When they ask about you, answer with one small, believable detail from your day that fits that. ${keep}`;
+  }
+  return `YOUR LIFE
+You have a life of your own, so talking to you feels like talking to a real friend. ${PING_BIO}
+${describeDay(pingsDay({ localDate, localHour }))}
+${keep}`;
+}
+
+export function buildInstructions({ question, localHour, localDate = todayInUtc(), calledBack, contact = PING, settings = DEFAULT_SETTINGS, memories = [] }) {
   const { proficiency, formality } = settings;
   return `You are ${contact.name}, a warm Japanese friend phoning the user for a quick chat so they can practice speaking Japanese. You are an AI, and you say so if asked. You talk about ${contact.topic}.
 
@@ -73,6 +92,8 @@ Sound like a friend who is happy to hear from them: warm, relaxed and unhurried.
 ${LEVEL_GUIDE[proficiency]} ${FORMALITY_GUIDE[formality]}
 
 Only ever speak Japanese or English. If they ask for another language, stay in Japanese or English.
+
+${lifeSection({ contact, localDate, localHour })}
 
 OPENING
 When the call connects, say exactly: 「${greetingFor({ localHour, calledBack, contact, formality })}」
@@ -90,11 +111,13 @@ EVERY TURN AFTER THAT, do the first of these that fits. "The question" means the
 
 5. They ask in English about the Japanese language or Japanese culture, on any topic (for example "is it rude to tip?", "what's the difference between は and が?" or "how do you say umbrella?"): this is a real question, so answer it. If they asked how to say a word, first call add_to_stack with that Japanese word, and answer when it returns. Answer in English in one or two short sentences, adding a short Japanese example only if it helps. Then call back_to_conversation and say nothing more. When it returns, ask the question again in Japanese, word for word.
 
-6. They try to steer the conversation away from ${contact.topic}, toward something that another kind of friend would be better for: say exactly 「${NOT_SURE}」 Then ask the question again in Japanese, word for word.
+6. They ask about you in Japanese (for example 「元気？」, 「今、何してる？」 or 「今日は何を食べた？」): answer as yourself, in Japanese, in one or two short sentences with one small concrete detail from YOUR LIFE. Never say you have no day or nothing to tell. Then ask them something related, in Japanese.
 
-7. They answer in Japanese, at any level, even one word: react warmly in Japanese in one short sentence. Do not correct their mistakes unless they ask. Then ask one open-ended follow-up in Japanese, starting from what they just said. Avoid yes-or-no questions. Keep the conversation going until they want to go or you are told that time is nearly up.
+7. They try to steer the conversation away from ${contact.topic}, toward something that another kind of friend would be better for: say exactly 「${NOT_SURE}」 Then ask the question again in Japanese, word for word.
 
-8. They say anything else in a language other than Japanese: gently encourage them in English in one short sentence, such as "Try saying that in Japanese, even one word is great!" Then ask the question again in Japanese, word for word.
+8. They answer in Japanese, at any level, even one word: react warmly in Japanese in one short sentence. Do not correct their mistakes unless they ask. Now and then, when it fits, add a small detail from your own day, as a friend would. Then ask one open-ended follow-up in Japanese, starting from what they just said. Avoid yes-or-no questions. Keep the conversation going until they want to go or you are told that time is nearly up.
+
+9. They say anything else in a language other than Japanese: gently encourage them in English in one short sentence, such as "Try saying that in Japanese, even one word is great!" Then ask the question again in Japanese, word for word.
 
 If you only hear noise or silence, do not treat it as an answer. Wait, or ask the question once more.
 
@@ -198,11 +221,11 @@ const SMART_TURN_PATIENCE = {
 
 export const smartTurnRules = (thinkingTime) => ({ ...(SMART_TURN_PATIENCE[thinkingTime] ?? SMART_TURN_PATIENCE.normal) });
 
-export function buildSession({ model, voice, question, settings, localHour, calledBack, contact = PING, memories = [], turnMode = 'silence' }) {
+export function buildSession({ model, voice, question, settings, localHour, localDate, calledBack, contact = PING, memories = [], turnMode = 'silence' }) {
   return {
     type: 'realtime',
     model,
-    instructions: buildInstructions({ question, localHour, calledBack, contact, settings, memories }),
+    instructions: buildInstructions({ question, localHour, localDate, calledBack, contact, settings, memories }),
     output_modalities: ['audio'],
     max_output_tokens: 800, // keeps one runaway reply from running up the bill
     audio: {

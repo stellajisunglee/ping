@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applySettings, DEFAULT_SETTINGS, MAX_SPEED, MIN_SPEED, SILENCE_MS, silenceMs } from '../server/settings.js';
 import { buildInstructions, buildSession, pickQuestion, QUESTIONS, turnDetection, voiceMessageFor } from '../server/tutor.js';
+import { PING_BIO, PING_DAYS, pingsDay } from '../server/persona.js';
 
 test('every question is open-ended, with a polite and a casual version', () => {
   for (const question of QUESTIONS) {
@@ -187,4 +188,42 @@ test('in every mode OpenAI stops the contact when the user speaks, but leaves re
     assert.equal(detection.create_response, false, turnMode);
     assert.equal(detection.interrupt_response, true, turnMode);
   }
+});
+
+test("Ping has a life of its own, and says what it's doing when asked", () => {
+  const localDate = { year: 2026, month: 11, day: 10 };
+  const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 19, localDate });
+  const rule = (text) => instructions.indexOf(text);
+  const { earlier, now } = pingsDay({ localDate, localHour: 19 });
+  assert.match(instructions, /YOUR LIFE/);
+  assert.ok(instructions.includes(PING_BIO));
+  assert.ok(instructions.includes(`this evening you ${now.text}. The last one is what you've been doing just now.`));
+  assert.deepEqual(earlier.map((event) => event.slot), ['morning', 'afternoon']);
+  for (const event of earlier) assert.ok(instructions.includes(event.text));
+  assert.match(instructions, /今、何してる？/);
+  assert.match(instructions, /tell them honestly that you are an AI/);
+  // Checked before the off-topic rule, so "what are you doing?" isn't treated as steering away.
+  assert.ok(rule('They ask about you in Japanese') < rule('ちょっとわかりません'));
+});
+
+test("every call on the same day tells the same story, and the next day is different", () => {
+  const day = (dayOfMonth, localHour) => pingsDay({ localDate: { year: 2026, month: 11, day: dayOfMonth }, localHour });
+  assert.deepEqual(day(10, 9), day(10, 9));
+  assert.deepEqual(day(10, 14).earlier, [day(10, 9).now]);
+  assert.notEqual(day(11, 9).now, day(10, 9).now);
+  for (let offset = 0; offset < PING_DAYS.length; offset += 1) assert.ok(day(1 + offset, 9).now.text);
+});
+
+test('a call after midnight still belongs to the night before', () => {
+  const lateNight = pingsDay({ localDate: { year: 2026, month: 11, day: 11 }, localHour: 1 });
+  const eveningBefore = pingsDay({ localDate: { year: 2026, month: 11, day: 10 }, localHour: 23 });
+  assert.deepEqual(lateNight, eveningBefore);
+  assert.equal(lateNight.earlier.length, 3);
+});
+
+test("a custom contact makes up small details that fit its topic, not Ping's life", () => {
+  const contact = { id: 'c1', name: 'Yuki', spokenName: 'Yuki', topic: 'cooking', voice: 'cedar', plan: 'platinum' };
+  const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12, contact });
+  assert.match(instructions, /You are a friend who loves cooking/);
+  assert.ok(!instructions.includes(PING_BIO));
 });
