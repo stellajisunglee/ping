@@ -62,7 +62,7 @@ Home is the first screen after joining:
 
 - **Streak:** days in a row with a connected call, answered or called back. Days off in the user's schedule don't break it. Home also shows the all-time best. The server keeps the last 14 practice days as day numbers, for Home's week. Streaks from before that are filled in from their count.
 - **Words:** words the user didn't understand, saved by the voice model. Each plan keeps the latest ones up to its limit (25 on Free, 100 on Premium, no limit on Platinum), replacing the oldest. Anyone can remove a word.
-- **Sentences:** example sentences, looked up one word at a time and stored only if the user saves them, on any plan. They have their own limit, the same number as words. Each shows its Japanese, romaji and English translation, like a word. Sentences saved before romaji was added show without it. Swipe left to remove.
+- **Sentences:** example sentences, looked up one word at a time and stored only if the user saves them, on any plan. They have their own limit, the same number as words. Each shows its Japanese, romaji and English translation, like a word. Sentences saved before romaji was added show without it. Swipe left to remove. Tapping a sentence lists the words in it that have kanji, each with its reading, romaji and meaning, as written in the sentence and in dictionary form (食べに → 食べる). Any of them can be added to Words, which follows the same plan limit, so a full list drops its oldest word. The list is looked up the first time a sentence is opened and kept with the sentence after that.
 
 ## Plans
 
@@ -133,7 +133,7 @@ Set these as environment variables, in `.env` locally or under the service's **E
 | `DATA_DIR` | Where user data and the voice message are stored | `./data` |
 | `REALTIME_MODEL` | The voice model | `gpt-realtime` |
 | `REALTIME_VOICE` | Ping's voice | `marin` |
-| `TEXT_MODEL` | Writes example sentences | `gpt-6-luna` |
+| `TEXT_MODEL` | Writes example sentences and lists a sentence's kanji words | `gpt-6-luna` |
 | `DAILY_CALL_LIMIT` | How many calls a user can start per day, including test rings. Admins and YC reviewers aren't limited | No limit |
 
 Other rules:
@@ -145,7 +145,7 @@ Other rules:
 | Free word limit | 25 | `FREE_WORD_LIMIT` in `server/stack.js` |
 | Calls a day, longest call and saved items per plan | Free 1, 3 min, 25; Premium 3, 5 min, 100; Platinum 5, 10 min, no limit | `PLAN_LIMITS` in `server/contacts.js` |
 | Cancellation window | 30 days | `CANCEL_WINDOW_MS` in `server/calls.js` |
-| Example lookups per user per day | 50 | `MAX_LOOKUPS_PER_DAY` in `server/calls.js` |
+| Lookups per user per day (example sentences and a sentence's kanji words together) | 50 | `MAX_LOOKUPS_PER_DAY` in `server/calls.js` |
 | Extra pause time at slow speeds | | `SLOW_SPEED_PATIENCE` in `server/settings.js` |
 | `turnMode`: how Ping decides the user has finished talking | `silence` (OpenAI's `server_vad`) for everyone. Admins can switch their own to `semantic` (`semantic_vad`) or `smartTurn` (Smart Turn on the phone) | `TURN_MODES` and `SEMANTIC_EAGERNESS` in `server/tutor.js` |
 | Smart Turn's timings: quiet before asking, the backup, and what counts as too slow | 0.2 s, 2.5 s, 0.6 s | `TURN` and `SLOW_DECISION_MS` in `public/turn-machine.js` |

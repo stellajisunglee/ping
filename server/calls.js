@@ -7,7 +7,7 @@ import { canCall, cleanContact, contactList, findContact, isPaid, MAX_CUSTOM_CON
 import { recordCallDay, streakToShow } from './progress.js';
 import { localDay, localDayNumber, localParts, nextCallTime } from './schedule.js';
 import { applySettings, DEFAULT_SETTINGS } from './settings.js';
-import { addSentence, addStarterStack, addWord, applyDowngrade, cleanSentence, cleanWord } from './stack.js';
+import { addSentence, addStarterStack, addWord, applyDowngrade, cleanSentence, cleanSentenceWords, cleanWord } from './stack.js';
 import { pickQuestion, questionById, TURN_MODES } from './tutor.js';
 
 export const RING_MS = 10_000;
@@ -516,12 +516,34 @@ export class CallEngine {
   startLookup(user, wordId) {
     const word = user.words.find((candidate) => candidate.id === wordId);
     if (!word) return null;
+    this.countLookup(user, "That's all the example sentences for today. Try again tomorrow.");
+    return word;
+  }
+
+  // Example sentences and a sentence's words share the day's lookups.
+  countLookup(user, message = "That's all the lookups for today. Try again tomorrow.") {
     const day = localDay(this.now(), user.timeZone);
     if (user.lookups.day !== day) user.lookups = { day, count: 0 };
-    if (user.lookups.count >= MAX_LOOKUPS_PER_DAY) throw new LimitError("That's all the example sentences for today. Try again tomorrow.");
+    if (user.lookups.count >= MAX_LOOKUPS_PER_DAY) throw new LimitError(message);
     user.lookups.count += 1;
     this.store.save();
-    return word;
+  }
+
+  // A saved sentence and its words with kanji, if they've been worked out already (they're kept with the sentence).
+  sentenceWords(user, sentenceId) {
+    const sentence = user.sentences.find((candidate) => candidate.id === sentenceId);
+    if (!sentence) return null;
+    return { sentence, words: sentence.kanjiWords ?? null };
+  }
+
+  keepSentenceWords(user, sentenceId, list) {
+    const sentence = user.sentences.find((candidate) => candidate.id === sentenceId);
+    const words = cleanSentenceWords(list);
+    if (sentence) {
+      sentence.kanjiWords = words;
+      this.store.save();
+    }
+    return words;
   }
 
   saveSentence(user, input) {

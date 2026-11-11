@@ -23,6 +23,15 @@ const openai = {
   },
   speak: async () => Buffer.from('audio'),
   exampleSentences: async () => [{ japanese: '元気です。', romaji: 'genki desu.', english: "I'm well." }],
+  sentenceWordLookups: 0,
+  async sentenceWords() {
+    this.sentenceWordLookups += 1;
+    return [
+      { asWritten: '会議', kanji: '会議', kana: 'かいぎ', romaji: 'kaigi', english: 'meeting' },
+      { asWritten: '始まります', kanji: '始まる', kana: 'はじまる', romaji: 'hajimaru', english: 'to start' },
+      { asWritten: 'から', kanji: 'から', kana: 'から', romaji: 'kara', english: 'from' },
+    ];
+  },
 };
 
 async function request(path, { method = 'GET', token, body } = {}) {
@@ -207,6 +216,27 @@ test('example sentences work on any plan, and are only saved on request', async 
   assert.equal(saved.data.sentences[0].romaji, 'genki desu.');
   const removed = await request(`/api/stack/sentences/${saved.data.sentences[0].id}`, { method: 'DELETE', token });
   assert.equal(removed.status, 200);
+});
+
+test("a saved sentence's kanji words are looked up once, and each can be added to Words", async () => {
+  const token = await join();
+  const saved = await request('/api/stack/sentences', { method: 'POST', token, body: { japanese: '会議は三時から始まります。', romaji: 'kaigi wa sanji kara hajimarimasu.', english: 'The meeting starts at three.', word: '会議' } });
+  const path = `/api/stack/sentences/${saved.data.sentences[0].id}/words`;
+  const before = openai.sentenceWordLookups;
+  const { status, data } = await request(path, { method: 'POST', token });
+  assert.equal(status, 200);
+  // The word with no kanji is left out, and each keeps how it's written in the sentence.
+  assert.deepEqual(data.words.map(({ asWritten, kanji }) => [asWritten, kanji]), [['会議', '会議'], ['始まります', '始まる']]);
+  // Kept with the sentence, so opening it again costs nothing.
+  assert.deepEqual((await request(path, { method: 'POST', token })).data.words, data.words);
+  assert.equal(openai.sentenceWordLookups, before + 1);
+  assert.equal((await request('/api/me', { token })).data.sentences[0].kanjiWords.length, 2);
+
+  const { asWritten, ...word } = data.words[1];
+  const added = await request('/api/stack/words', { method: 'POST', token, body: word });
+  assert.equal(added.data.added, true);
+  assert.equal((await request('/api/me', { token })).data.words[0].kanji, '始まる');
+  assert.equal((await request('/api/stack/sentences/missing/words', { method: 'POST', token })).status, 404);
 });
 
 test('Ping is the only built-in contact while Mero is hidden, and only Platinum can create more', async () => {

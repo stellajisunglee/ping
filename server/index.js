@@ -313,6 +313,18 @@ export function createApp({ engine, openai, config }) {
       return json(res, 201, publicUser(user));
     }
 
+    // The words with kanji in a saved sentence. Worked out once, then kept with the sentence.
+    const sentenceWordsRoute = pathname.match(/^\/api\/stack\/sentences\/([\w-]+)\/words$/);
+    if (method === 'POST' && sentenceWordsRoute) {
+      const found = engine.sentenceWords(user, sentenceWordsRoute[1]);
+      if (!found) return json(res, 404, { error: 'Sentence not found.' });
+      if (found.words) return json(res, 200, { words: found.words });
+      if (!openai.hasKey) return json(res, 503, { error: 'Looking up words is not set up yet.' });
+      engine.countLookup(user, "That's all the lookups for today. Try again tomorrow.");
+      const words = engine.keepSentenceWords(user, sentenceWordsRoute[1], await openai.sentenceWords(found.sentence.japanese));
+      return json(res, 200, { words });
+    }
+
     const sentenceRoute = pathname.match(/^\/api\/stack\/sentences\/([\w-]+)$/);
     if (method === 'DELETE' && sentenceRoute) {
       if (!engine.removeSentence(user, sentenceRoute[1])) return json(res, 404, { error: 'Sentence not found.' });

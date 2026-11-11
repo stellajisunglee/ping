@@ -28,6 +28,34 @@ const EXAMPLES_FORMAT = {
   },
 };
 
+const SENTENCE_WORDS_FORMAT = {
+  type: 'json_schema',
+  name: 'sentence_words',
+  strict: true,
+  schema: {
+    type: 'object',
+    properties: {
+      words: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { asWritten: { type: 'string' }, kanji: { type: 'string' }, kana: { type: 'string' }, romaji: { type: 'string' }, english: { type: 'string' } },
+          required: ['asWritten', 'kanji', 'kana', 'romaji', 'english'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['words'],
+    additionalProperties: false,
+  },
+};
+
+const SENTENCE_WORDS_INSTRUCTIONS =
+  'List every word in the Japanese sentence that is written with at least one kanji, in the order they appear, each once. For each give: ' +
+  'asWritten, exactly as it appears in the sentence; kanji, its dictionary form as usually written (for example 始まります becomes 始まる, 美味しかった becomes 美味しい); ' +
+  'kana, that dictionary form in hiragana; romaji, that dictionary form in Hepburn romaji; english, a short English meaning that fits this sentence. ' +
+  'A number or counter written with kanji, like 三時, is one word. Leave out words with no kanji. If there are none, return an empty list.';
+
 export function createOpenAI({ apiKey, baseUrl = 'https://api.openai.com/v1', textModel = 'gpt-6-luna', fetchImpl = fetch }) {
   const headers = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
   const hasKey = Boolean(apiKey);
@@ -76,6 +104,28 @@ export function createOpenAI({ apiKey, baseUrl = 'https://api.openai.com/v1', te
       const text = output.find((item) => item.type === 'message')?.content?.find((part) => part.type === 'output_text')?.text;
       if (!text) throw new Error('Example sentences came back empty');
       return JSON.parse(text).sentences.slice(0, EXAMPLE_COUNT);
+    },
+
+    // The words with kanji in a saved sentence, so each can be studied and added to the stack.
+    async sentenceWords(japanese) {
+      const response = await fetchImpl(`${baseUrl}/responses`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: textModel,
+          max_output_tokens: 1200,
+          input: [
+            { role: 'system', content: SENTENCE_WORDS_INSTRUCTIONS },
+            { role: 'user', content: japanese },
+          ],
+          text: { format: SENTENCE_WORDS_FORMAT },
+        }),
+      });
+      if (!response.ok) throw new Error(`Sentence words request failed (${response.status}): ${await response.text()}`);
+      const { output = [] } = await response.json();
+      const text = output.find((item) => item.type === 'message')?.content?.find((part) => part.type === 'output_text')?.text;
+      if (!text) throw new Error('Sentence words came back empty');
+      return JSON.parse(text).words;
     },
   };
 }

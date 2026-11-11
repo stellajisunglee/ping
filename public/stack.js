@@ -1,10 +1,12 @@
 // My Stack: the words the user didn't understand, and the example sentences they saved.
 
-import { $, api, el, go, onShow, planLabel, savedText, setError, state } from './lib.js';
+import { $, api, el, go, onShow, planLabel, refresh, savedText, setError, state } from './lib.js';
 
 const SWIPE_REMOVE_SHARE = 0.35; // how far across the row a swipe has to travel
+const SWIPE_NOT_TAP_PX = 10; // a row dragged further than this was swiped, not tapped
 
 let currentWordId = null;
+let currentSentenceId = null;
 
 // The Words and Sentences buttons on Home, with how many of each the user has.
 export function renderStackTiles() {
@@ -56,6 +58,8 @@ function renderWord() {
   $('word-english').textContent = word.english;
   $('word-examples').replaceChildren();
   setError('word-error', null);
+  // Hidden once its sentences are showing, so it has to come back for the next word.
+  $('word-examples-button').hidden = false;
   $('word-examples-button').disabled = false;
   $('word-examples-button').textContent = 'Show example sentences';
   showLimitNote('word-upgrade', 'word');
@@ -111,9 +115,11 @@ async function removeWord() {
   }
 }
 
+// Returns whether the row's last touch was a swipe, so a swipe that's let go isn't taken as a tap.
 function swipeToRemove(row, front, remove) {
   let startX = null;
   let moved = 0;
+  let swiped = false;
   const reset = () => {
     startX = null;
     moved = 0;
@@ -122,10 +128,12 @@ function swipeToRemove(row, front, remove) {
   row.addEventListener('pointerdown', (event) => {
     startX = event.clientX;
     moved = 0;
+    swiped = false;
   });
   row.addEventListener('pointermove', (event) => {
     if (startX === null) return;
     moved = Math.min(0, event.clientX - startX);
+    if (-moved > SWIPE_NOT_TAP_PX) swiped = true;
     front.style.transform = `translateX(${moved}px)`;
   });
   row.addEventListener('pointerup', () => {
@@ -133,6 +141,7 @@ function swipeToRemove(row, front, remove) {
     else reset();
   });
   row.addEventListener('pointercancel', reset);
+  return () => swiped;
 }
 
 function renderSentences() {
@@ -150,23 +159,81 @@ function renderSentences() {
       };
       const removeButton = el('button', { type: 'button', className: 'icon-remove', textContent: '×', ariaLabel: `Remove ${sentence.japanese}` });
       removeButton.addEventListener('click', remove);
-      const front = el(
-        'div',
-        { className: 'swipe-front' },
-        el('div', {}, ...sentenceLines(sentence)),
-        removeButton,
-      );
+      const open = el('button', { type: 'button', className: 'sentence-open', ariaLabel: `Study the kanji in ${sentence.japanese}` }, ...sentenceLines(sentence));
+      const front = el('div', { className: 'swipe-front' }, open, removeButton);
       const row = el('li', { className: 'swipe-row' }, el('div', { className: 'swipe-behind', textContent: 'Remove' }), front);
-      swipeToRemove(row, front, remove);
+      const wasSwiped = swipeToRemove(row, front, remove);
+      open.addEventListener('click', () => {
+        if (wasSwiped()) return;
+        currentSentenceId = sentence.id;
+        go('sentence');
+      });
       return row;
     }),
   );
+}
+
+// ---------- One sentence: its words with kanji, each of which can be added to Words ----------
+
+const inWords = (word) => state.me.words.some((other) => other.kanji === word.kanji && other.kana === word.kana);
+
+function sentenceWordRow(word) {
+  const add = el('button', { type: 'button', className: 'secondary small' });
+  const showSaved = () => {
+    add.textContent = inWords(word) ? 'In your Words' : 'Add to Words';
+    add.disabled = inWords(word);
+  };
+  showSaved();
+  add.addEventListener('click', async () => {
+    add.disabled = true;
+    setError('sentence-error', null);
+    try {
+      await api('/api/stack/words', { method: 'POST', body: { kanji: word.kanji, kana: word.kana, romaji: word.romaji, english: word.english } });
+      await refresh(); // the stack may have dropped its oldest word to make room
+      showSaved();
+    } catch (error) {
+      setError('sentence-error', error.message);
+      showSaved();
+    }
+  });
+  // Shown as written in the sentence, with the dictionary form underneath when it's different.
+  const lines = [el('p', { className: 'sentence-word-kanji', lang: 'ja', textContent: word.asWritten })];
+  if (word.asWritten !== word.kanji) lines.push(el('p', { className: 'muted', lang: 'ja', textContent: `Dictionary form: ${word.kanji}` }));
+  lines.push(el('p', { lang: 'ja', textContent: word.kana }), el('p', { className: 'muted', textContent: word.romaji }), el('p', { textContent: word.english }));
+  return el('li', { className: 'card' }, ...lines, add);
+}
+
+function showSentenceWords(words) {
+  $('sentence-words').replaceChildren(...words.map(sentenceWordRow));
+  $('sentence-words-status').textContent = words.length ? '' : 'There are no kanji in this sentence.';
+  $('sentence-words-status').hidden = words.length > 0;
+}
+
+async function renderSentence() {
+  const sentence = state.me.sentences.find((candidate) => candidate.id === currentSentenceId);
+  if (!sentence) return go('sentences');
+  $('sentence-card').replaceChildren(...sentenceLines(sentence));
+  setError('sentence-error', null);
+  showLimitNote('sentence-upgrade', 'word');
+  $('sentence-words').replaceChildren();
+  if (sentence.kanjiWords) return showSentenceWords(sentence.kanjiWords);
+  $('sentence-words-status').hidden = false;
+  $('sentence-words-status').textContent = 'Finding the kanji...';
+  try {
+    const { words } = await api(`/api/stack/sentences/${sentence.id}/words`, { method: 'POST' });
+    sentence.kanjiWords = words;
+    if (currentSentenceId === sentence.id) showSentenceWords(words);
+  } catch (error) {
+    $('sentence-words-status').hidden = true;
+    setError('sentence-error', error.message);
+  }
 }
 
 export function initStack() {
   onShow('words', renderWords);
   onShow('word', renderWord);
   onShow('sentences', renderSentences);
+  onShow('sentence', renderSentence);
   $('word-examples-button').addEventListener('click', showExamples);
   $('word-remove-button').addEventListener('click', removeWord);
 }

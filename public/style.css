@@ -770,6 +770,39 @@ svg .stroke {
   background: var(--surface);
 }
 
+/* A saved sentence opens its kanji page, but still reads as plain text in the list. */
+.sentence-open {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-weight: 400;
+  text-align: left;
+}
+
+.sentence-card {
+  padding: 22px 16px;
+}
+
+.sentence-card p:first-child {
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+#screen-sentence h2 {
+  margin: 8px 0 0;
+}
+
+.sentence-word-kanji {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 .icon-remove {
   flex: none;
   width: 40px;

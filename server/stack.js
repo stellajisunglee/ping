@@ -14,6 +14,25 @@ export function cleanWord(input = {}) {
   return word;
 }
 
+const HAS_KANJI = /\p{Script=Han}/u;
+const MAX_SENTENCE_WORDS = 20;
+
+// The words with kanji in a sentence, as studied on the sentence page. Each is a word that can be
+// saved to the stack, plus how it's written in the sentence. Anything without kanji is left out.
+export function cleanSentenceWords(list) {
+  if (!Array.isArray(list)) return [];
+  const words = [];
+  for (const input of list) {
+    const word = cleanWord(input);
+    if (!word || !HAS_KANJI.test(word.kanji)) continue;
+    if (words.some((other) => other.kanji === word.kanji && other.kana === word.kana)) continue;
+    const asWritten = text(input.asWritten);
+    words.push({ ...word, asWritten: HAS_KANJI.test(asWritten) ? asWritten : word.kanji });
+    if (words.length === MAX_SENTENCE_WORDS) break;
+  }
+  return words;
+}
+
 // Lists are newest first, so keeping the first `limit` drops the oldest. A null limit means no limit.
 const newest = (list, limit) => list.slice(0, limit ?? MAX_SAVED);
 

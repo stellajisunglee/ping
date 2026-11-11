@@ -109,10 +109,23 @@
       </div>
     </main>
 
+    <main id="screen-sentence" class="screen tabbed" hidden>
+      <button class="back" type="button" data-back>‹ Sentences</button>
+      <div id="sentence-card" class="word-card sentence-card" lang="ja"></div>
+      <h2>Kanji in this sentence</h2>
+      <p id="sentence-words-status" class="muted" role="status"></p>
+      <p id="sentence-error" class="error" role="alert" hidden></p>
+      <ul id="sentence-words" class="plain-list"></ul>
+      <div id="sentence-upgrade" class="notice upgrade">
+        <p></p>
+        <button class="secondary" type="button" data-go="plan">Upgrade Plan</button>
+      </div>
+    </main>
+
     <main id="screen-sentences" class="screen tabbed" hidden>
       <button class="back" type="button" data-back>‹ Home</button>
       <h1>Sentences</h1>
-      <p id="sentences-hint" class="muted">Swipe left to remove a sentence.</p>
+      <p id="sentences-hint" class="muted">Tap a sentence to study its kanji. Swipe left to remove it.</p>
       <p id="sentences-empty" class="muted">Open a word, show its example sentences, and save the ones you like.</p>
       <p id="sentences-error" class="error" role="alert" hidden></p>
       <ul id="sentences-list" class="plain-list"></ul>

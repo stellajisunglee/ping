@@ -30,6 +30,25 @@ test('example sentences use a structured response and are read from the output',
   assert.equal(result[0].romaji, 'reibun 1 desu.');
 });
 
+test("a sentence's words come back as structured output, in dictionary form with how they're written", async () => {
+  let sent;
+  const words = [{ asWritten: '始まります', kanji: '始まる', kana: 'はじまる', romaji: 'hajimaru', english: 'to start' }];
+  const openai = createOpenAI({
+    apiKey: 'key',
+    textModel: 'test-model',
+    fetchImpl: async (url, options) => {
+      sent = { url, body: JSON.parse(options.body) };
+      return { ok: true, json: async () => ({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ words }) }] }] }) };
+    },
+  });
+  assert.deepEqual(await openai.sentenceWords('会議は三時から始まります。'), words);
+  assert.equal(sent.body.input[1].content, '会議は三時から始まります。');
+  assert.match(sent.body.input[0].content, /dictionary form/);
+  assert.deepEqual(sent.body.text.format.schema.properties.words.items.required, ['asWritten', 'kanji', 'kana', 'romaji', 'english']);
+  const failing = createOpenAI({ apiKey: 'key', fetchImpl: async () => ({ ok: false, status: 500, text: async () => 'nope' }) });
+  await assert.rejects(failing.sentenceWords('会議'), /500/);
+});
+
 test('a failed or empty lookup raises an error', async () => {
   const failing = createOpenAI({ apiKey: 'key', fetchImpl: async () => ({ ok: false, status: 500, text: async () => 'nope' }) });
   await assert.rejects(failing.exampleSentences(WORD, 'beginner'), /500/);

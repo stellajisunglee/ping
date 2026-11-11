@@ -225,6 +225,43 @@ test('beta testers keep their plan limits', () => {
   assert.throws(() => context.engine.callBack(tester), LimitError);
 });
 
+test("a sentence's words keep only real words with kanji, once each", async () => {
+  const context = setup();
+  const sentence = context.engine.saveSentence(context.user, { japanese: '会議は三時から始まります。', romaji: 'kaigi wa sanji kara hajimarimasu.', english: 'The meeting starts at three.' });
+  assert.deepEqual(context.engine.sentenceWords(context.user, sentence.id).words, null);
+  const words = context.engine.keepSentenceWords(context.user, sentence.id, [
+    { asWritten: '会議', kanji: '会議', kana: 'かいぎ', romaji: 'kaigi', english: 'meeting' },
+    { asWritten: '会議', kanji: '会議', kana: 'かいぎ', romaji: 'kaigi', english: 'meeting' }, // a repeat
+    { asWritten: 'から', kanji: 'から', kana: 'から', romaji: 'kara', english: 'from' }, // no kanji
+    { asWritten: '三時', kanji: '三時', kana: 'さんじ', romaji: 'sanji', english: '' }, // no meaning
+    { asWritten: '', kanji: '始まる', kana: 'はじまる', romaji: 'hajimaru', english: 'to start' }, // no written form
+    'not a word',
+  ]);
+  assert.deepEqual(words.map(({ asWritten, kanji }) => [asWritten, kanji]), [['会議', '会議'], ['始まる', '始まる']]);
+  assert.deepEqual(context.engine.sentenceWords(context.user, sentence.id).words, words);
+  assert.equal(context.engine.sentenceWords(context.user, 'missing'), null);
+});
+
+test('example sentences and sentence words share the daily lookups', () => {
+  const context = setup();
+  const { word } = context.engine.addWord(context.user, { kanji: '会議', kana: 'かいぎ', romaji: 'kaigi', english: 'meeting' });
+  for (let index = 0; index < 49; index += 1) context.engine.startLookup(context.user, word.id);
+  context.engine.countLookup(context.user);
+  assert.throws(() => context.engine.countLookup(context.user), LimitError);
+  assert.throws(() => context.engine.startLookup(context.user, word.id), /example sentences/);
+});
+
+test('adding a word from a sentence to a full Free stack drops the oldest word', () => {
+  const context = setup();
+  const limit = PLAN_LIMITS.free.savedItems;
+  for (let index = 0; index < limit; index += 1) context.engine.addWord(context.user, { kanji: '', kana: `か${'あ'.repeat(index)}`, romaji: `ka${index}`, english: `word ${index}` });
+  const oldest = context.user.words.at(-1);
+  assert.equal(context.engine.addWord(context.user, { kanji: '始まる', kana: 'はじまる', romaji: 'hajimaru', english: 'to start' }).added, true);
+  assert.equal(context.user.words.length, limit);
+  assert.equal(context.user.words[0].kanji, '始まる');
+  assert.ok(!context.user.words.includes(oldest));
+});
+
 test('a test ring comes 10 seconds after it is asked for', async () => {
   const context = setup();
   context.engine.requestTestRing(context.user);
