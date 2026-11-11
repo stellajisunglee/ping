@@ -56,7 +56,9 @@ test('asking what one word means saves it, however the question is put', () => {
   assert.match(instructions, /without naming one word/);
   // Repeating Ping's word back as a question asks what it means, not about Ping's day.
   assert.ok(instructions.includes('「忙しい？」'));
-  assert.match(instructions, /this rule, not rule 6/);
+  assert.match(instructions, /this rule, not rule 7/);
+  // The rule it points to is the one about Ping.
+  assert.match(instructions, /\n7\. They ask about you in Japanese/);
   assert.match(instructions, /aren't just repeating a word you just said/);
 });
 
@@ -72,9 +74,34 @@ test("asking what Ping said gets an English translation, not the same Japanese a
   assert.match(instructions, /can you translate that/);
   assert.match(instructions, /say what you just said in English/);
   assert.match(instructions, /Never answer this by repeating the same Japanese sentence/);
-  // Checked before the culture-question and "try saying it in Japanese" rules, which repeat the question word for word.
+  // Checked before the culture-question and "try saying it in Japanese" rules, which only ask the question again.
   assert.ok(rule('can you translate that') < rule('Japanese language or Japanese culture'));
   assert.ok(rule('can you translate that') < rule('Try saying that in Japanese'));
+});
+
+test('a clarifying question gets an answer and a narrower version of the same question, never the opening one', () => {
+  const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12 });
+  const rule = (text) => instructions.indexOf(text);
+  for (const example of ['do you mean today or in general?', 'you mean right now?', '「今日のこと？」']) assert.ok(instructions.includes(example), example);
+  assert.match(instructions, /this is a clarifying question, so answer it/);
+  assert.match(instructions, /made more specific to what they asked about/);
+  assert.match(instructions, /Never answer a clarifying question by going back to an earlier question/);
+  // After "didn't understand", which asks for a translation, and before the rules that would only ask the question again
+  // or treat a Japanese clarifying question as a question about Ping.
+  assert.ok(rule('can you translate that') < rule('do you mean today or in general?'));
+  for (const later of ['Japanese language or Japanese culture', 'They ask about you in Japanese', 'They answer in Japanese', 'Try saying that in Japanese']) {
+    assert.ok(rule('do you mean today or in general?') < rule(later), later);
+  }
+});
+
+test('"the question" is the latest one, and the opening question is never brought back', () => {
+  const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12 });
+  assert.match(instructions, /"The question" means the question you asked most recently, which is usually not the one from the opening/);
+  assert.match(instructions, /once the conversation has moved on, never go back to it/);
+  // Repeating "word for word" made the model reach for the one question written out in full: the opening one.
+  assert.ok(!/word for word/.test(instructions));
+  // The opening question still appears exactly once, in the opening.
+  assert.equal(instructions.split(QUESTIONS[0].japanese).length - 1, 1);
 });
 
 test('Ping is formal by default, says it\'s not sure when off topic, and sticks to two languages', () => {
