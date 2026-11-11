@@ -191,6 +191,40 @@ test('with a daily limit set, calls stop at the limit and reset the next day', (
   assert.equal(context.engine.callBack(context.user).state, 'answered');
 });
 
+// A second account on the same engine, joined with another invite code.
+function joinAs(context, role, joinedWith, plan) {
+  const { user } = context.engine.register('Asia/Tokyo', role, joinedWith, plan);
+  context.engine.setSubscription(user, SUBSCRIPTION);
+  return user;
+}
+
+test('admins and YC reviewers can call as often as they like, past the plan and the safety net', () => {
+  const context = setup({ dailyCallLimit: 6 });
+  const admin = joinAs(context, 'admin', 'admin', 'free');
+  const reviewer = joinAs(context, 'beta', 'yc', 'premium');
+  for (const user of [admin, reviewer]) {
+    for (let index = 0; index < 20; index += 1) assert.equal(context.engine.callBack(user).state, 'answered');
+    context.engine.requestTestRing(user);
+  }
+  assert.equal(context.engine.calling(admin).unlimited, 'admin');
+  assert.equal(context.engine.calling(reviewer).unlimited, 'yc');
+  assert.equal(context.engine.calling(admin).canCall, true);
+  // Each call is still as long as the plan allows.
+  assert.equal(context.engine.callBack(admin).maxSeconds, PLAN_LIMITS.free.perCall * 60);
+  assert.equal(context.engine.callBack(reviewer).maxSeconds, PLAN_LIMITS.premium.perCall * 60);
+});
+
+test('beta testers keep their plan limits', () => {
+  const context = setup({ dailyCallLimit: 6 });
+  const tester = joinAs(context, 'beta', 'beta', 'premium');
+  tester.lastCallAt = context.clock.now - 86_400_000; // past the free first call
+  const { unlimited, callsLeft } = context.engine.calling(tester);
+  assert.equal(unlimited, null);
+  assert.ok(callsLeft <= PLAN_LIMITS.premium.callsPerDay);
+  for (let index = 0; index < callsLeft; index += 1) context.engine.callBack(tester);
+  assert.throws(() => context.engine.callBack(tester), LimitError);
+});
+
 test('a test ring comes 10 seconds after it is asked for', async () => {
   const context = setup();
   context.engine.requestTestRing(context.user);

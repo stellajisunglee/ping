@@ -53,7 +53,13 @@ export const planLabel = (plan = state.me?.plan) => PLAN_LABELS[plan] ?? plan;
 const callsText = (count) => `${count} more call${count === 1 ? '' : 's'}`;
 
 // How many calls the user can still make today, then on its own line how long calls last on their plan.
+const UNLIMITED_TEXT = {
+  admin: 'Admin: you can call as often as you like.',
+  yc: 'As a YC reviewer, you can call as often as you like.',
+};
+
 function callingStatus(calling) {
+  if (UNLIMITED_TEXT[calling.unlimited]) return UNLIMITED_TEXT[calling.unlimited];
   if (!calling.canCall) return calling.reason;
   const ping = calling.keptForPing ? ", plus Ping's call" : '';
   if (calling.callsLeft && calling.callBackMissed) return `You can make ${callsText(calling.callsLeft)} today${ping}, and call back for the call you missed.`;

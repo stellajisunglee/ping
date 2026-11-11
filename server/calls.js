@@ -15,6 +15,11 @@ export const DELIVERY_GRACE_MS = 30_000; // how long a ring waits for the phone 
 export const MAX_SESSIONS_PER_CALL = 3;
 export const CANCEL_WINDOW_MS = 30 * 86_400_000;
 export const MAX_LOOKUPS_PER_DAY = 50;
+
+// Who can call as often as they like: admins testing the app, and YC reviewers trying it.
+// 'admin' or 'yc', so the app can say why, or null.
+export const unlimitedCalls = (user) => (user.role === 'admin' ? 'admin' : user.joinedWith === 'yc' ? 'yc' : null);
+
 const LATE_CALL_LIMIT_MS = 5 * 60_000; // past this a due call is rescheduled, so downtime can't ring someone at 3am
 const TEST_RING_DELAY_MS = 10_000; // time to start a screen recording or lock the phone
 const KEEP_CALLS_MS = 7 * 86_400_000;
@@ -330,14 +335,16 @@ export class CallEngine {
   }
 
   // Whether the user can call a contact right now, and the plan's limits behind it.
+  // Admins and YC reviewers can call as often as they like; each call still has the plan's length.
   calling(user) {
     const { callsPerDay, perCall } = planLimits(user.plan);
     const keptForPing = this.#pingCallsToday(user);
     const callsLeft = Math.max(0, callsPerDay - (keptForPing ? 1 : 0) - this.#usageToday(user).ownCalls);
     const callBackMissed = user.missedCallToReturn;
     const firstCall = !user.lastCallAt; // a new account can try a call before Ping's first one
-    const canCall = firstCall || callBackMissed || callsLeft > 0;
-    return { perCallMinutes: perCall, callsPerDay, callsLeft, keptForPing, callBackMissed, firstCall, canCall, reason: canCall ? null : this.#limitReason(user, keptForPing) };
+    const unlimited = unlimitedCalls(user);
+    const canCall = Boolean(unlimited) || firstCall || callBackMissed || callsLeft > 0;
+    return { perCallMinutes: perCall, callsPerDay, callsLeft, keptForPing, callBackMissed, firstCall, unlimited, canCall, reason: canCall ? null : this.#limitReason(user, keptForPing) };
   }
 
   #limitReason(user, keptForPing) {
@@ -614,9 +621,10 @@ export class CallEngine {
   }
 
   // DAILY_CALL_LIMIT is a safety net on top of the plan's calls, counting every call the user makes.
+  // Admins and YC reviewers aren't held to it.
   #countCall(user) {
     this.#usageToday(user);
-    if (this.dailyCallLimit && user.usage.calls >= this.dailyCallLimit) throw new LimitError("That's all the calls for today. Ping will call you again soon!");
+    if (this.dailyCallLimit && !unlimitedCalls(user) && user.usage.calls >= this.dailyCallLimit) throw new LimitError("That's all the calls for today. Ping will call you again soon!");
     user.usage.calls += 1;
   }
 }
