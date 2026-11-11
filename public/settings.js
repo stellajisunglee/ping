@@ -6,6 +6,12 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FREQUENCY_BUTTONS = { daily: 'Daily', 'every-other-day': 'Every other day', weekdays: 'Weekdays only', weekends: 'Weekends only', custom: 'Custom' };
 const PLAN_NAMES = { free: 'Free', premium: 'Premium', platinum: 'Platinum' };
 const TURN_MODE_NAMES = { silence: 'Silence', semantic: 'Semantic', smartTurn: 'Smart Turn' };
+const RECORD_KEY = 'ping-record-calls';
+
+// The last recorded call, kept in memory until the next recorded call or until the app closes.
+// waiting: a recorded call is in progress or finishing. problem: why nothing was recorded.
+let lastRecording = { recording: null, waiting: false, problem: null };
+
 const PLAN_EXTRAS = {
   free: 'Ping as your contact.',
   premium: 'More contacts, and calls that remember past conversations.',
@@ -69,7 +75,6 @@ function renderManageCalls() {
     ),
   );
   $('custom-days-hint').hidden = settings.frequency !== 'custom' || settings.customDays.length > 0;
-  $('test-ring').hidden = !isAdmin();
 }
 
 function changeHours() {
@@ -84,6 +89,68 @@ function changeHours() {
 
 function renderSettings() {
   $('plan-button').textContent = state.me.plan === 'free' ? 'Upgrade Plan' : 'Manage Plan';
+  renderAdminTools();
+}
+
+// Recording is a setting of this phone, not the account, since the file never leaves the phone.
+function recordSwitch() {
+  try {
+    return localStorage.getItem(RECORD_KEY) === 'on';
+  } catch {
+    return false;
+  }
+}
+
+function setRecordSwitch(on) {
+  try {
+    if (on) localStorage.setItem(RECORD_KEY, 'on');
+    else localStorage.removeItem(RECORD_KEY);
+  } catch {
+    setError('admin-tools-error', "This browser won't keep the setting. Check that it isn't in private browsing.");
+  }
+}
+
+export const recordCallsOn = () => isAdmin() && recordSwitch();
+
+export function keepRecording({ recording = null, waiting = false, problem = null }) {
+  lastRecording = { recording, waiting, problem };
+  if (!$('screen-settings').hidden) renderAdminTools();
+}
+
+function recordingStatus(text) {
+  $('recording-status').textContent = text ?? '';
+  $('recording-status').hidden = !text;
+}
+
+function renderAdminTools() {
+  $('admin-tools').hidden = !isAdmin();
+  if (!isAdmin()) return;
+  $('record-input').checked = recordSwitch();
+  const { recording, waiting, problem } = lastRecording;
+  $('save-recording-button').hidden = !recording;
+  if (recording) recordingStatus(`${recording.fileName}, ${(recording.blob.size / 1_000_000).toFixed(1)} MB`);
+  else if (waiting) recordingStatus('Recording the call. It will be ready here once the call ends.');
+  else if (problem) recordingStatus(`The last call wasn't recorded: ${problem}`);
+  else recordingStatus(null);
+}
+
+// The share sheet lets the phone save the file to Files. Browsers without it download the file instead.
+async function saveRecording() {
+  const { recording } = lastRecording;
+  if (!recording) return;
+  setError('admin-tools-error', null);
+  const file = new File([recording.blob], recording.fileName, { type: recording.blob.type });
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file] });
+    } catch (error) {
+      if (error.name !== 'AbortError') setError('admin-tools-error', `Couldn't save the recording: ${error.message}`);
+    }
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  el('a', { href: url, download: recording.fileName }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function renderPlan() {
@@ -183,12 +250,13 @@ async function deleteAccount() {
 }
 
 async function testRing() {
-  setError('calls-error', null);
+  setError('admin-tools-error', null);
   try {
     await api('/api/test-ring', { method: 'POST' });
-    $('test-ring-status').textContent = 'Ringing in 5 seconds. Lock your phone or close the app if you want to see the notification.';
+    $('test-ring-status').textContent = 'Ringing in 10 seconds. Start your screen recording now, or lock your phone to see the notification.';
+    $('test-ring-status').hidden = false;
   } catch (error) {
-    setError('calls-error', error.message);
+    setError('admin-tools-error', error.message);
   }
 }
 
@@ -229,6 +297,8 @@ export function initSettings() {
   $('start-hour-input').addEventListener('change', changeHours);
   $('end-hour-input').addEventListener('change', changeHours);
   $('test-ring-button').addEventListener('click', testRing);
+  $('record-input').addEventListener('change', (event) => setRecordSwitch(event.target.checked));
+  $('save-recording-button').addEventListener('click', saveRecording);
   $('delete-button').addEventListener('click', deleteAccount);
   $('feedback-form').addEventListener('submit', sendFeedback);
   $('plan-button').addEventListener('click', () => go('plan'));

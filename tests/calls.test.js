@@ -191,6 +191,17 @@ test('with a daily limit set, calls stop at the limit and reset the next day', (
   assert.equal(context.engine.callBack(context.user).state, 'answered');
 });
 
+test('a test ring comes 10 seconds after it is asked for', async () => {
+  const context = setup();
+  context.engine.requestTestRing(context.user);
+  context.clock.now += 9_999;
+  await context.engine.tick();
+  assert.equal(context.pushes.length, 0);
+  context.clock.now += 1;
+  await context.engine.tick();
+  assert.equal(context.pushes.length, 1);
+});
+
 test('with no daily limit set, calls and test rings keep working', () => {
   const context = setup();
   for (let index = 0; index < 50; index += 1) {

@@ -96,7 +96,8 @@ The invite code someone joins with decides which version they get. It can't be c
 | --- | --- | --- |
 | Invite code | `ADMIN_INVITE_CODE` | `BETA_INVITE_CODE` |
 | Plan | Can switch freely | Stays on Free |
-| "Ring my phone in 5 seconds" | Yes | No |
+| "Ring my phone in 10 seconds" (Settings, Admin tools) | Yes | No |
+| Record calls on this phone (Settings, Admin tools) | Yes | No |
 | Turn detection | Can switch between silence, semantic and Smart Turn, on the plan page | Silence, the default |
 | OpenAI out of credit | The call hangs up and says so, with where to add credit | The call behaves as before: it connects but the contact stays silent |
 
@@ -105,6 +106,8 @@ The server enforces both limits. Accounts created before there were two codes ar
 A third code, `YC_INVITE_CODE`, is for YC reviewers. It gives the beta tester's version, so no admin settings, but on Premium instead of Free, and its accounts are counted separately. Reviewers start with 4 example words and 3 example sentences in their stack (`STARTER_STACK` in `server/stack.js`), so the stack isn't empty when they first look. Like other beta testers, reviewers can't change their plan. Which plan each code starts on is `PLAN_FOR_CODE` in `server/index.js`. Codes aren't case-sensitive.
 
 Admins see "Invite codes" at the bottom of the plan page (Settings, then Upgrade Plan or Manage Plan). For each code it shows how many accounts joined, how many made a call, how many calls connected in all, and the 20 newest accounts with when they joined, their calls and their words. Joining is what creates an account, so each account is one phone or browser, and someone who deletes their account and rejoins counts twice. Codes and call counts are only recorded from this version on, so older accounts show "before this was tracked".
+
+**Recording calls (admins only).** iPhone screen recordings go silent once a call opens the microphone: the phone switches to its voice-call audio mode, and screen recording leaves that out, as it does for FaceTime. So with "Record calls on this phone" on, the app mixes the microphone and the contact's voice in the browser and records them with `MediaRecorder` (`public/recorder.js`): .m4a on an iPhone, .webm elsewhere. After the call, "Save last call's recording" in Settings opens the share sheet, or downloads the file where there isn't one. The recording is only in the phone's memory: nothing is uploaded, the next recorded call replaces it, and closing the app loses it. For a demo video, screen record the call too and line the two up; the ring in the screen recording marks where the call starts. The switch is kept per phone, in `localStorage`.
 
 OpenAI's docs don't say how a Realtime call reports running out of credit, so the app treats any call error, failed reply or refused connection whose type or code mentions "quota" or "credit" as out of credit. The app has no documented way to read the remaining balance, so it can only tell once credit has run out, not when it's running low. For that, set a usage alert or auto-recharge in OpenAI's billing settings.
 

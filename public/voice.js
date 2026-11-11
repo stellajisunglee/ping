@@ -1,6 +1,7 @@
 // One phone call with a contact: a WebRTC connection straight from this browser to the voice model.
 
 import { classifyTurn, resumeNote } from './aizuchi.js';
+import { startRecording } from './recorder.js';
 import { loadSmartTurn, startSmartTurn } from './smart-turn.js';
 import { summarizeTurns, TIMED_EVENTS } from './turn-metrics.js';
 
@@ -31,11 +32,22 @@ export function startCall({
   onNeedsTap,
   onContactAudio = () => {}, // when the contact's voice starts, finishes or is cut off, per line
   onOutOfCredit = () => {}, // OpenAI refused the call because the account has no credit left
+  record = false, // admins only: record both voices on this phone
+  onRecording = () => {}, // once the call ends: { blob, fileName }, or null with the reason it couldn't record
+  recorderEngine = { start: startRecording }, // swapped for a stand-in in tests
   smartTurnEngine = { load: loadSmartTurn, start: startSmartTurn }, // swapped for a stand-in in tests
 }) {
   let pc = null;
   let channel = null;
   let microphone = null;
+  let recorder = null;
+  let recordingReported = false;
+  // Every recorded call reports exactly once, so the app never waits for a recording that isn't coming.
+  const reportRecording = (recording, problem = null) => {
+    if (recordingReported) return;
+    recordingReported = true;
+    onRecording(recording, recording ? null : problem ?? 'Nothing was recorded.');
+  };
   let ended = false;
   let creditOut = false;
   let greeted = false;
@@ -95,6 +107,10 @@ export function startCall({
   function end(reason) {
     if (ended) return;
     ended = true;
+    // Stopped before the microphone is, so the recording keeps the last words.
+    if (recorder) recorder.stop().then((recording) => reportRecording(recording), (error) => reportRecording(null, error.message));
+    else if (record) reportRecording(null, 'The call ended before it connected.');
+    recorder = null;
     smart.engine?.stop();
     sendTurnMetrics();
     timers.forEach(clearTimeout);
@@ -402,10 +418,19 @@ export function startCall({
       microphone.getTracks().forEach((track) => track.stop());
       return;
     }
+    if (record) {
+      try {
+        recorder = recorderEngine.start({ streams: [microphone] });
+      } catch (error) {
+        console.warn('Could not record the call', error);
+        reportRecording(null, error.message);
+      }
+    }
 
     pc = new RTCPeerConnection();
     pc.ontrack = (event) => {
       audio.srcObject = event.streams[0];
+      recorder?.add(event.streams[0]);
       playAudio();
     };
     pc.onconnectionstatechange = () => {

@@ -1,7 +1,7 @@
 // Makes the phone "ring" while the app is closed, and keeps the app shell available offline.
 
-const CACHE = 'ping-v5';
-const SHELL = ['/', '/index.html', '/app.js', '/lib.js', '/stack.js', '/contacts.js', '/settings.js', '/aizuchi.js', '/turn-metrics.js', '/turn-machine.js', '/reveal.js', '/smart-turn.js', '/features.js', '/capture-worklet.js', '/voice.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
+const CACHE = 'ping-v6';
+const SHELL = ['/', '/index.html', '/app.js', '/lib.js', '/stack.js', '/contacts.js', '/settings.js', '/aizuchi.js', '/turn-metrics.js', '/turn-machine.js', '/reveal.js', '/smart-turn.js', '/features.js', '/capture-worklet.js', '/voice.js', '/recorder.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
 // Smart Turn's runtime and models: about 25 MB, versioned by path, and only fetched by Smart Turn calls.
 // They live in their own cache, kept across app updates, so a phone downloads them once.
 const MODEL_CACHE = 'ping-smart-turn-1';

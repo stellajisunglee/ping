@@ -829,6 +829,15 @@ svg .stroke {
   margin: 0;
 }
 
+/* Admin tools sit under the Settings menu, with the stack's own spacing between controls. */
+#admin-tools {
+  margin-top: 16px;
+}
+
+#admin-tools .secondary {
+  margin-top: 0;
+}
+
 textarea {
   width: 100%;
   padding: 10px 12px;

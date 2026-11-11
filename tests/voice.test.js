@@ -4,7 +4,7 @@ import { isOutOfCredit, startCall } from '../public/voice.js';
 import { cleanMetrics } from '../public/turn-metrics.js';
 
 // A stand-in for the browser's WebRTC, so the call's event handling runs without a real connection.
-function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnEngine, sdpResponse = { ok: true, text: async () => 'answer' } } = {}) {
+function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnEngine, sdpResponse = { ok: true, text: async () => 'answer' }, options = {} } = {}) {
   const sent = [];
   const peers = [];
   const channel = {
@@ -31,7 +31,7 @@ function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnE
     configurable: true,
     value: {
       mediaDevices: {
-        getUserMedia: async () => ({ getAudioTracks: () => [{}], getTracks: () => [] }),
+        getUserMedia: async () => ({ id: 'microphone', getAudioTracks: () => [{}], getTracks: () => [] }),
         enumerateDevices: async () => [{ kind: 'audiooutput', label: 'Speakerphone', deviceId: 'loud' }, { kind: 'audiooutput', label: 'Default', deviceId: 'default' }],
       },
     },
@@ -62,6 +62,7 @@ function setupCall({ apiResponses = {}, failPaths = [], session = {}, smartTurnE
     onOutOfCredit: () => events.outOfCredit++,
     onContactAudio: ({ type, itemId, audioEndMs }) => events.audio.push(audioEndMs === undefined ? `${type} ${itemId}` : `${type} ${itemId} ${audioEndMs}`),
     ...(smartTurnEngine && { smartTurnEngine }),
+    ...options,
   });
   const settle = () => new Promise((resolve) => setImmediate(resolve));
   const fire = async (event) => {
@@ -575,4 +576,97 @@ test('other replies never end the call by themselves', async (t) => {
   await context.fire({ type: 'output_audio_buffer.stopped', response_id: 'r1' });
   await pause(700);
   assert.deepEqual(context.events.ended, []);
+});
+
+// A stand-in recorder that notes what it was given.
+function fakeRecorder({ result = { blob: 'audio', fileName: 'ping-call.m4a' }, fail = null } = {}) {
+  const log = { started: [], added: [], stopped: 0 };
+  const engine = {
+    start({ streams }) {
+      if (fail) throw new Error(fail);
+      log.started.push(...streams.map((stream) => stream.id));
+      return {
+        add: (stream) => log.added.push(stream.id),
+        stop: async () => {
+          log.stopped += 1;
+          return result;
+        },
+      };
+    },
+  };
+  return { engine, log };
+}
+
+test('a recorded call records the microphone and hands over the recording once, when it ends', async () => {
+  const recordings = [];
+  const { engine, log } = fakeRecorder();
+  const { call, settle } = setupCall({ options: { record: true, recorderEngine: engine, onRecording: (...args) => recordings.push(args) } });
+  await settle();
+  await settle();
+  assert.deepEqual(log.started, ['microphone']);
+  call.hangUp();
+  await settle();
+  assert.equal(log.stopped, 1);
+  assert.deepEqual(recordings, [[{ blob: 'audio', fileName: 'ping-call.m4a' }, null]]);
+  // Hanging up twice doesn't report twice.
+  call.hangUp();
+  await settle();
+  assert.equal(recordings.length, 1);
+});
+
+test("the contact's voice is added to the recording when it arrives", async () => {
+  const { engine, log } = fakeRecorder();
+  const context = setupCall({ options: { record: true, recorderEngine: engine } });
+  await context.settle();
+  await context.settle();
+  await context.answer();
+  assert.equal(log.added.length, 1);
+  context.call.hangUp();
+});
+
+test('calls are not recorded unless asked', async () => {
+  const { engine, log } = fakeRecorder();
+  const recordings = [];
+  const { call, settle } = setupCall({ options: { recorderEngine: engine, onRecording: (...args) => recordings.push(args) } });
+  await settle();
+  await settle();
+  call.hangUp();
+  await settle();
+  assert.deepEqual(log.started, []);
+  assert.deepEqual(recordings, []);
+});
+
+test("a recording that can't start says why, and the call still goes ahead", async () => {
+  const { engine } = fakeRecorder({ fail: "This browser can't record calls." });
+  const recordings = [];
+  const { call, settle, events } = setupCall({ options: { record: true, recorderEngine: engine, onRecording: (...args) => recordings.push(args) } });
+  await settle();
+  await settle();
+  assert.deepEqual(recordings, [[null, "This browser can't record calls."]]);
+  assert.deepEqual(events.ended, []);
+  call.hangUp();
+  await settle();
+  assert.equal(recordings.length, 1);
+});
+
+test('a recorded call that ends before connecting says so, so the app never waits for it', async () => {
+  const recordings = [];
+  const { engine, log } = fakeRecorder();
+  const { call, settle } = setupCall({ options: { record: true, recorderEngine: engine, onRecording: (...args) => recordings.push(args) } });
+  call.hangUp();
+  await settle();
+  await settle();
+  assert.deepEqual(log.started, []);
+  assert.deepEqual(recordings, [[null, 'The call ended before it connected.']]);
+});
+
+test('an empty recording is reported as nothing recorded', async () => {
+  const recordings = [];
+  const { engine } = fakeRecorder({ result: null });
+  const { call, settle } = setupCall({ options: { record: true, recorderEngine: engine, onRecording: (...args) => recordings.push(args) } });
+  await settle();
+  await settle();
+  call.hangUp();
+  await settle();
+  assert.deepEqual(recordings, [[null, 'Nothing was recorded.']]);
 });

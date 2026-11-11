@@ -1,7 +1,7 @@
 import { initContacts } from './contacts.js';
 import { charsSaid, createPace } from './reveal.js';
 import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdmin, isPaid, onShow, readToken, refresh, setError, show, showCallingNote, showPlanBadge, state, writeToken } from './lib.js';
-import { initSettings } from './settings.js';
+import { initSettings, keepRecording, recordCallsOn } from './settings.js';
 import { initStack, renderStackTiles } from './stack.js';
 import { startCall } from './voice.js';
 
@@ -474,6 +474,8 @@ function beginCall(callId, contactName = 'Ping') {
   setMuted(false);
   show('call');
   let outOfCredit = false;
+  const record = recordCallsOn();
+  if (record) keepRecording({ recording: null, waiting: true });
   activeCall = startCall({
     callId,
     api,
@@ -486,6 +488,8 @@ function beginCall(callId, contactName = 'Ping') {
     },
     onLine: showLine,
     onContactAudio,
+    record,
+    onRecording: (recording, problem) => keepRecording({ recording, problem }),
     onOutOfCredit: () => {
       if (!isAdmin()) return;
       outOfCredit = true;
@@ -514,7 +518,8 @@ function beginCall(callId, contactName = 'Ping') {
       await saveTranscript(callId);
       await refresh().catch(() => {});
       goHome();
-      notice(outOfCredit ? OUT_OF_CREDIT_NOTICE : endedNotice(reason));
+      const ended = outOfCredit ? OUT_OF_CREDIT_NOTICE : endedNotice(reason);
+      notice(record ? [ended, 'Admin: save the recording from Settings.'].filter(Boolean).join(' ') : ended);
     },
   });
 }

@@ -161,6 +161,19 @@
         <button class="row-button" type="button" data-go="terms">Terms of Service</button>
         <button class="row-button" type="button" data-go="feedback">Feedback</button>
       </div>
+      <section id="admin-tools" class="stack full" aria-labelledby="admin-tools-title" hidden>
+        <h2 id="admin-tools-title">Admin tools</h2>
+        <p id="admin-tools-error" class="error" role="alert" hidden></p>
+        <button id="test-ring-button" class="secondary wide" type="button">Ring my phone in 10 seconds</button>
+        <p id="test-ring-status" class="muted" role="status" hidden></p>
+        <div class="setting row">
+          <label for="record-input">Record calls on this phone</label>
+          <input id="record-input" type="checkbox" role="switch" />
+        </div>
+        <p class="muted">iPhone screen recordings go silent during calls. This saves both voices as an audio file to line up with a screen recording. The recording stays on this phone until you save it, and the next recorded call replaces it.</p>
+        <button id="save-recording-button" class="secondary wide" type="button" hidden>Save last call's recording</button>
+        <p id="recording-status" class="muted" role="status" hidden></p>
+      </section>
     </main>
 
     <main id="screen-account" class="screen tabbed" hidden>
@@ -227,10 +240,6 @@
       <div class="setting row">
         <label for="calls-input">Calls on</label>
         <input id="calls-input" type="checkbox" role="switch" />
-      </div>
-      <div id="test-ring" class="stack full" hidden>
-        <button id="test-ring-button" class="secondary wide" type="button">Ring my phone in 5 seconds</button>
-        <p id="test-ring-status" class="muted" role="status"></p>
       </div>
     </main>
 
