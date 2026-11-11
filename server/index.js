@@ -23,9 +23,8 @@ const MAX_BODY_BYTES = 64_000; // room for a full call's transcript
 const MAX_FEEDBACK_LENGTH = 2_000;
 const MAX_WRONG_CODES_PER_MINUTE = 10;
 const MAX_TRACKED_IPS = 10_000;
-const DEFAULT_ADMIN_CODE = 'minabystella_admin_only';
-const DEFAULT_BETA_CODE = 'beta-01';
-const DEFAULT_YC_CODE = 'YC-Demo'; // for YC reviewers: the beta tester's version on Premium, counted separately
+// The invite codes come only from the environment, never from this file, so the code can be public.
+// A code that isn't set lets no one join with it. The yc code is for YC reviewers: the beta tester's version on Premium, counted separately.
 const PLAN_FOR_CODE = { yc: 'premium' }; // codes not listed start on Free
 const STARTER_STACK_CODES = new Set(['yc']); // accounts that start with a few example words and sentences
 
@@ -147,7 +146,7 @@ export function createApp({ engine, openai, config }) {
     }
   }
 
-  // Codes aren't case-sensitive, so "yc-demo" works as well as "YC-Demo".
+  // Codes aren't case-sensitive, so "abc-123" works as well as "ABC-123".
   const codeNameFor = (given) => Object.entries(inviteCodes).find(([, code]) => code && codesMatch(given.toLowerCase(), code.toLowerCase()))?.[0] ?? null;
 
   const recentWrongCodes = (ip) => (registerAttempts.get(ip) ?? []).filter((at) => Date.now() - at < 60_000);
@@ -479,9 +478,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     openai,
     config: {
       inviteCodes: {
-        admin: process.env.ADMIN_INVITE_CODE ?? DEFAULT_ADMIN_CODE,
-        beta: process.env.BETA_INVITE_CODE ?? DEFAULT_BETA_CODE,
-        yc: process.env.YC_INVITE_CODE ?? DEFAULT_YC_CODE,
+        admin: process.env.ADMIN_INVITE_CODE ?? '',
+        beta: process.env.BETA_INVITE_CODE ?? '',
+        yc: process.env.YC_INVITE_CODE ?? '',
       },
       vapidPublicKey: VAPID_PUBLIC_KEY,
       model: process.env.REALTIME_MODEL ?? 'gpt-realtime',
@@ -495,6 +494,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   server.listen(port, () => {
     console.log(`Ping running on http://localhost:${port}`);
     if (!process.env.OPENAI_API_KEY) console.warn('OPENAI_API_KEY is not set: calls and voice messages will not work.');
+    if (!process.env.ADMIN_INVITE_CODE && !process.env.BETA_INVITE_CODE && !process.env.YC_INVITE_CODE) {
+      console.warn('No invite codes are set, so no one can join. Set ADMIN_INVITE_CODE (and BETA_INVITE_CODE or YC_INVITE_CODE) in .env.');
+    }
     warmCompression();
   });
 }

@@ -16,9 +16,10 @@ const { publicKey, privateKey } = webpush.generateVAPIDKeys();
 writeFileSync(
   file,
   `OPENAI_API_KEY=
+ADMIN_INVITE_CODE=
 VAPID_PUBLIC_KEY=${publicKey}
 VAPID_PRIVATE_KEY=${privateKey}
 `,
   { mode: 0o600 },
 );
-console.log('Created .env. Add your OPENAI_API_KEY to it, then run: npm start');
+console.log('Created .env. Add your OPENAI_API_KEY and an ADMIN_INVITE_CODE to it, then run: npm start');

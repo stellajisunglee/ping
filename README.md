@@ -9,7 +9,7 @@ npm install
 npm run setup
 ```
 
-`npm run setup` creates a `.env` file with push keys. Add your `OPENAI_API_KEY` to that file, then:
+`npm run setup` creates a `.env` file with push keys. Add your `OPENAI_API_KEY` and an `ADMIN_INVITE_CODE` of your choice to that file, then:
 
 ```bash
 npm start
@@ -101,7 +101,7 @@ The invite code someone joins with decides which version they get. It can't be c
 
 The server enforces both limits. Accounts created before there were two codes are admins.
 
-A third code, `YC_INVITE_CODE` (`YC-Demo` by default), is for YC reviewers. It gives the beta tester's version, so no admin settings, but on Premium instead of Free, and its accounts are counted separately. Reviewers start with 4 example words and 3 example sentences in their stack (`STARTER_STACK` in `server/stack.js`), so the stack isn't empty when they first look. Like other beta testers, reviewers can't change their plan. Which plan each code starts on is `PLAN_FOR_CODE` in `server/index.js`. Codes aren't case-sensitive.
+A third code, `YC_INVITE_CODE`, is for YC reviewers. It gives the beta tester's version, so no admin settings, but on Premium instead of Free, and its accounts are counted separately. Reviewers start with 4 example words and 3 example sentences in their stack (`STARTER_STACK` in `server/stack.js`), so the stack isn't empty when they first look. Like other beta testers, reviewers can't change their plan. Which plan each code starts on is `PLAN_FOR_CODE` in `server/index.js`. Codes aren't case-sensitive.
 
 Admins see "Invite codes" at the bottom of the plan page (Settings, then Upgrade Plan or Manage Plan). For each code it shows how many accounts joined, how many made a call, how many calls connected in all, and the 20 newest accounts with when they joined, their calls and their words. Joining is what creates an account, so each account is one phone or browser, and someone who deletes their account and rejoins counts twice. Codes and call counts are only recorded from this version on, so older accounts show "before this was tracked".
 
@@ -121,7 +121,7 @@ Set these as environment variables, in `.env` locally or under the service's **E
 | Setting | What it does | If it's not set |
 | --- | --- | --- |
 | `OPENAI_API_KEY` | Powers calls and the voice message | Calls and voice messages don't work. The message still shows as text |
-| `ADMIN_INVITE_CODE`, `BETA_INVITE_CODE`, `YC_INVITE_CODE` | The codes people need to join | The defaults in `server/index.js` |
+| `ADMIN_INVITE_CODE`, `BETA_INVITE_CODE`, `YC_INVITE_CODE` | The codes people need to join. Don't reuse the built-in codes older versions had, since they're in this repo's history | No one can join with that code. With none set, no one can join at all |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Sign the push notifications. Changing them breaks every existing subscription until the user reopens the app | The server won't start |
 | `VAPID_SUBJECT` | A `mailto:` or `https:` contact for push services | Uses the Render URL |
 | `DATA_DIR` | Where user data and the voice message are stored | `./data` |
@@ -160,7 +160,7 @@ Ping is still a prototype, so do these before inviting testers:
 - Replace the 7-day OpenAI key with a longer-lasting one limited to the Realtime and text-to-speech APIs. Calls stop working when a key expires.
 - Set a monthly budget in your OpenAI account, and check that auto-recharge is set the way you want.
 - Before sharing the beta code, finish the first three items above, because every tester's calls spend your OpenAI credits.
-- Set your own `ADMIN_INVITE_CODE`, `BETA_INVITE_CODE` and `YC_INVITE_CODE` on Render if this repo will ever be shared, since the defaults are in the code.
+- Set `ADMIN_INVITE_CODE`, `BETA_INVITE_CODE` and `YC_INVITE_CODE` on Render. There are no defaults, so no one can join without them.
 - Replace the plan test switch with real payments, and remove the `PUT /api/plan` route.
 - Have the draft Privacy Policy and Terms of Service in `public/index.html` reviewed by a lawyer.
 - Add real accounts in onboarding. An account currently lives on one phone, so losing the app's storage loses access to it.

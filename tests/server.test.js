@@ -99,7 +99,7 @@ test('the invite codes never reach the browser', async () => {
   assert.ok(!JSON.stringify(config).includes(INVITE_CODE));
   for (const file of ['/', '/app.js', '/lib.js', '/settings.js', '/contacts.js']) {
     const text = await (await fetch(baseUrl + file)).text();
-    assert.ok(!text.includes('minabystella_admin_only') && !text.includes('beta-01'), file);
+    assert.ok(![INVITE_CODE, BETA_CODE, YC_CODE].some((code) => text.includes(code)), file);
   }
 });
 
