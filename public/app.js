@@ -493,8 +493,7 @@ function beginCall(callId, contactName = 'Ping') {
       await saveTranscript(callId);
       await refresh().catch(() => {});
       goHome();
-      const ended = outOfCredit ? OUT_OF_CREDIT_NOTICE : endedNotice(reason);
-      notice(record ? [ended, 'Admin: save the recording from Settings.'].filter(Boolean).join(' ') : ended);
+      notice(outOfCredit ? OUT_OF_CREDIT_NOTICE : endedNotice(reason));
     },
   });
 }
