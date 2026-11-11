@@ -300,11 +300,9 @@ function endedNotice(reason) {
   return ENDED_NOTICE[reason] ?? null;
 }
 
-// Calls stop at the plan's longest call, or sooner when a call the user made runs out of the month's minutes.
+// Calls stop at the plan's longest call.
 function timeLimitNotice() {
-  const { calling } = state.me;
-  if (calling.monthlyMinutes !== null && !calling.canCall) return calling.reason;
-  return `That was a good chat! Calls on your plan last up to ${calling.perCallMinutes} minutes.`;
+  return `That was a good chat! Calls on your plan last up to ${state.me.calling.perCallMinutes} minutes.`;
 }
 // Only admins are told and the call hangs up. For everyone else the call behaves as it did before.
 const OUT_OF_CREDIT_NOTICE = "Admin: OpenAI is out of credit, so Ping can't talk. Add credit at platform.openai.com/settings/organization/billing, then call again.";
@@ -511,7 +509,7 @@ function beginCall(callId, contactName = 'Ping') {
       clearInterval(revealTimer);
       revealTimer = null;
       $('call-avatar').classList.remove('speaking');
-      // Gives back the minutes the call didn't use.
+      // Tells the server the call is over, so it can't be reconnected.
       await api(`/api/calls/${callId}/ended`, { method: 'POST' }).catch((error) => console.warn('Could not end the call', error));
       await saveTranscript(callId);
       await refresh().catch(() => {});

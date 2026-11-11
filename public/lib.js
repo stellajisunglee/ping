@@ -48,13 +48,30 @@ export function showPlanBadge(id) {
   $(id).classList.toggle('free', plan === 'free');
 }
 
-// Whether the user can call now and their minutes, then on its own line how long calls last on their plan.
+export const planLabel = (plan = state.me?.plan) => PLAN_LABELS[plan] ?? plan;
+
+const callsText = (count) => `${count} more call${count === 1 ? '' : 's'}`;
+
+// How many calls the user can still make today, then on its own line how long calls last on their plan.
+function callingStatus(calling) {
+  if (!calling.canCall) return calling.reason;
+  const ping = calling.keptForPing ? ", plus Ping's call" : '';
+  if (calling.callsLeft && calling.callBackMissed) return `You can make ${callsText(calling.callsLeft)} today${ping}, and call back for the call you missed.`;
+  if (calling.callsLeft) return `You can make ${callsText(calling.callsLeft)} today${ping}.`;
+  if (calling.callBackMissed) return "You can call back for the call you missed. It doesn't count toward today's calls.";
+  return 'Try your first call now. It doesn\'t count toward today\'s calls.';
+}
+
 export function callingNote() {
   const calling = state.me?.calling;
   if (!calling) return null;
-  const length = `Calls last up to ${calling.perCallMinutes} minutes in your ${PLAN_LABELS[state.me.plan] ?? state.me.plan} plan.`;
-  const status = !calling.canCall ? calling.reason : calling.monthlyMinutes === null ? null : `${calling.minutesLeft} of ${calling.monthlyMinutes} minutes left this month.`;
-  return status ? `${status}\n${length}` : length;
+  return `${callingStatus(calling)}\nCalls last up to ${calling.perCallMinutes} minutes in your ${planLabel()} plan.`;
+}
+
+// "25 words" or "every word", for the stack and plan pages.
+export function savedText(plan, noun) {
+  const limit = state.me.planLimits[plan].savedItems;
+  return limit === null ? `every ${noun}` : `${limit} ${noun}s`;
 }
 
 export function showCallingNote(id) {
@@ -168,4 +185,6 @@ export const initialOf = (name) => (name === 'Ping' ? 'ピ' : name === 'Mero' ? 
 export const formatDate = (ms) => new Date(ms).toLocaleDateString([], { month: 'long', day: 'numeric' });
 
 export const clearWarning = () =>
-  state.me.clearAt ? `Your subscription ended. Words, sentences and conversations saved during it will clear on ${formatDate(state.me.clearAt)}. Resubscribe before then to keep them.` : '';
+  state.me.clearAt
+    ? `You moved to a smaller plan. On ${formatDate(state.me.clearAt)}, your stack will keep only your newest words and sentences, up to the ${planLabel()} plan's limit${state.me.plan === 'free' ? ', and saved conversations will clear' : ''}. Upgrade before then to keep everything.`
+    : '';

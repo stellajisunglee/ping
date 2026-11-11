@@ -8,12 +8,11 @@ import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
 import { CallEngine, LimitError, PlanError } from './calls.js';
-import { PING, PLAN_MINUTES } from './contacts.js';
+import { PING, PLAN_LIMITS } from './contacts.js';
 import { createPushSender } from './push.js';
 import { createOpenAI } from './openai.js';
 import { isValidTimeZone } from './schedule.js';
 import { cleanMetrics, metricsProblems } from '../public/turn-metrics.js';
-import { FREE_WORD_LIMIT } from './stack.js';
 import { buildSession, NOT_NOW_GOODBYES, smartTurnRules, turnDetection, voiceMessageFor } from './tutor.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -171,9 +170,8 @@ export function createApp({ engine, openai, config }) {
       contacts: engine.contacts(user),
       words: user.words,
       sentences: user.sentences,
-      freeWordLimit: FREE_WORD_LIMIT,
       calling: engine.calling(user),
-      planMinutes: PLAN_MINUTES,
+      planLimits: PLAN_LIMITS,
     };
   }
 

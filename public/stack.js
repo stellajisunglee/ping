@@ -1,6 +1,6 @@
 // My Stack: the words the user didn't understand, and the example sentences they saved.
 
-import { $, api, el, go, isPaid, onShow, setError, state } from './lib.js';
+import { $, api, el, go, onShow, planLabel, savedText, setError, state } from './lib.js';
 
 const SWIPE_REMOVE_SHARE = 0.35; // how far across the row a swipe has to travel
 
@@ -8,18 +8,26 @@ let currentWordId = null;
 
 // The Words and Sentences buttons on Home, with how many of each the user has.
 export function renderStackTiles() {
-  const { words, sentences, freeWordLimit } = state.me;
+  const { words, sentences } = state.me;
+  const limit = state.me.planLimits[state.me.plan].savedItems;
+  const count = (list) => (limit === null ? `${list.length}` : `${list.length} of ${limit}`);
   // Empty, each one says how to fill it.
-  $('stack-words-count').textContent = !words.length
-    ? 'Ask Ping what a word means on a call, and it saves here.'
-    : isPaid()
-      ? `${words.length}`
-      : `${words.length} of ${freeWordLimit}`;
-  $('stack-sentences-count').textContent = sentences.length
-    ? `${sentences.length}`
-    : isPaid()
-      ? 'Open a word to find example sentences to save.'
-      : 'Save example sentences with Premium.';
+  $('stack-words-count').textContent = words.length ? count(words) : 'Ask Ping what a word means on a call, and it saves here.';
+  $('stack-sentences-count').textContent = sentences.length ? count(sentences) : 'Open a word to find example sentences to save.';
+}
+
+// On plans with a limit, says what's kept and what upgrading adds.
+function stackLimitNote(noun) {
+  const { plan } = state.me;
+  if (plan === 'platinum') return null;
+  const next = plan === 'free' ? 'premium' : 'platinum';
+  return `Your ${planLabel()} plan keeps your latest ${savedText(plan, noun)}. Saving more removes the oldest. ${planLabel(next)} keeps ${savedText(next, noun)}.`;
+}
+
+function showLimitNote(id, noun) {
+  const note = stackLimitNote(noun);
+  $(id).hidden = !note;
+  $(id).querySelector('p').textContent = note ?? '';
 }
 
 function renderWords() {
@@ -48,11 +56,9 @@ function renderWord() {
   $('word-english').textContent = word.english;
   $('word-examples').replaceChildren();
   setError('word-error', null);
-  $('word-examples-button').hidden = !isPaid();
   $('word-examples-button').disabled = false;
   $('word-examples-button').textContent = 'Show example sentences';
-  $('word-remove-button').hidden = !isPaid();
-  $('word-upgrade').hidden = isPaid();
+  showLimitNote('word-upgrade', 'word');
 }
 
 async function showExamples() {
@@ -132,9 +138,9 @@ function swipeToRemove(row, front, remove) {
 function renderSentences() {
   const list = $('sentences-list');
   const { sentences } = state.me;
-  $('sentences-upgrade').hidden = isPaid();
+  showLimitNote('sentences-upgrade', 'sentence');
   $('sentences-hint').hidden = sentences.length === 0;
-  $('sentences-empty').hidden = sentences.length > 0 || !isPaid();
+  $('sentences-empty').hidden = sentences.length > 0;
   list.replaceChildren(
     ...sentences.map((sentence) => {
       const remove = async () => {

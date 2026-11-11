@@ -3,11 +3,11 @@
 // Also owns each user's record: plan, contacts, streak, stack and saved conversations.
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { canCall, cleanContact, contactList, findContact, isPaid, MAX_CUSTOM_CONTACTS, PING, PLAN_MINUTES, PLANS, selectedContact } from './contacts.js';
+import { canCall, cleanContact, contactList, findContact, isPaid, MAX_CUSTOM_CONTACTS, PING, planLimits, PLANS, selectedContact } from './contacts.js';
 import { recordCallDay, streakToShow } from './progress.js';
 import { localDay, localDayNumber, localParts, nextCallTime } from './schedule.js';
 import { applySettings, DEFAULT_SETTINGS } from './settings.js';
-import { addSentence, addStarterStack, addWord, cleanSentence, cleanWord, clearSubscriptionData } from './stack.js';
+import { addSentence, addStarterStack, addWord, applyDowngrade, cleanSentence, cleanWord } from './stack.js';
 import { pickQuestion, questionById, TURN_MODES } from './tutor.js';
 
 export const RING_MS = 10_000;
@@ -26,7 +26,6 @@ const MAX_TRANSCRIPT_LINES = 80;
 const MAX_LINE_LENGTH = 500;
 const KEEP_FEEDBACK = 1000;
 const MAX_ACCOUNTS_IN_REPORT = 20;
-const MIN_SECONDS_TO_CALL = 60; // below this, the month's minutes count as used up
 const MIN_SECONDS_TO_CONNECT = 10;
 const SCHEDULE_FIELDS = ['frequency', 'customDays', 'callStartHour', 'callEndHour'];
 const RENAMED_PLANS = { plus: 'premium', pro: 'platinum' };
@@ -38,7 +37,7 @@ export class PlanError extends Error {}
 
 const newUserFields = () => ({
   plan: 'free',
-  clearAt: null, // when a cancelled subscription's words, sentences and conversations are removed
+  clearAt: null, // when a downgrade takes effect: the stack shrinks to the new plan's limit
   contactId: PING.id,
   customContacts: [],
   words: [],
@@ -53,8 +52,7 @@ const newUserFields = () => ({
   joinedAt: null,
   connectedCalls: 0, // kept on the account, since calls themselves are removed after 7 days
   lastCallAt: null,
-  lastMissedAt: null, // the latest call from a contact the user missed or declined
-  minutes: { month: null, usedSeconds: 0 }, // this month's call time, in the user's time zone
+  missedCallToReturn: false, // they missed or declined a call and haven't called back yet, which doesn't use a call
 });
 
 export class CallEngine {
@@ -74,7 +72,11 @@ export class CallEngine {
         joinedWith: user.joinedWith ?? user.role ?? 'admin',
         plan: RENAMED_PLANS[user.plan] ?? user.plan ?? 'free',
         settings: { ...DEFAULT_SETTINGS, ...user.settings },
+        missedCallToReturn: user.missedCallToReturn ?? (user.lastMissedAt ?? 0) > (user.lastCallAt ?? 0),
+        usage: { ownCalls: 0, ...user.usage },
       });
+      delete user.minutes; // from when plans had monthly minutes
+      delete user.lastMissedAt;
       for (const contact of user.customContacts) contact.plan = 'platinum';
     }
   }
@@ -95,13 +97,13 @@ export class CallEngine {
       testRingAt: null,
       lastQuestionId: null,
       messages: [],
-      usage: { day: null, calls: 0 },
+      usage: { day: null, calls: 0, ownCalls: 0 }, // today's calls: all the user made, and those that used up the plan's calls
       ...newUserFields(),
       plan: PLANS.includes(plan) ? plan : 'free',
       joinedWith,
       joinedAt: this.now(),
     };
-    if (starterStack) addStarterStack(user, { now: this.now(), newId: randomUUID, paid: isPaid(user.plan) });
+    if (starterStack) addStarterStack(user, { now: this.now(), newId: randomUUID, limit: planLimits(user.plan).savedItems });
     this.store.users[user.id] = user;
     this.store.save();
     return { user, token };
@@ -155,7 +157,7 @@ export class CallEngine {
     }
     for (const user of Object.values(this.store.users)) {
       if (user.clearAt && now >= user.clearAt) {
-        clearSubscriptionData(user);
+        applyDowngrade(user, { limit: planLimits(user.plan).savedItems, keepConversations: isPaid(user.plan) });
         this.store.save();
       }
       if (user.testRingAt && now >= user.testRingAt) {
@@ -189,8 +191,8 @@ export class CallEngine {
       ringDeadline: now + DELIVERY_GRACE_MS,
       deliveredAt: null,
       sessions: 0,
-      // Ping's calls always come, even once the month's minutes are used up, and stop at the plan's longest call.
-      maxSeconds: this.#limits(user).perCall * 60,
+      // Ping's scheduled call always comes, since one of the day's calls is kept for it, and stops at the plan's longest call.
+      maxSeconds: planLimits(user.plan).perCall * 60,
     };
     this.store.calls[call.id] = call;
     this.store.save();
@@ -232,7 +234,7 @@ export class CallEngine {
       call.state = 'declined';
       this.#recordOutcome(call, 'declined');
       const user = this.store.users[call.userId];
-      if (user) user.lastMissedAt = this.now();
+      if (user) user.missedCallToReturn = true;
       this.store.save();
     }
     return call;
@@ -246,7 +248,7 @@ export class CallEngine {
     const message = { id: randomUUID(), callId: call.id, contactId: contact.id, at: this.now(), heard: false };
     user.messages = [message, ...user.messages].slice(0, KEEP_MESSAGES);
     user.lastCallOutcome = 'missed';
-    user.lastMissedAt = this.now();
+    user.missedCallToReturn = true;
     this.store.save();
     if (!user.subscription) return;
     const { gone } = await this.sendPush(user.subscription, { type: 'missed', callId: call.id, contactName: contact.name }, { ttl: 86_400 });
@@ -264,6 +266,9 @@ export class CallEngine {
     const calling = this.calling(user);
     if (!calling.canCall) throw new LimitError(calling.reason);
     this.#countCall(user);
+    // A first call or returning a missed call comes first, since neither uses one of the day's calls.
+    if (calling.callBackMissed) user.missedCallToReturn = false;
+    else if (!calling.firstCall) user.usage.ownCalls += 1;
     const question = pickQuestion(user.lastQuestionId, this.random);
     user.lastQuestionId = question.id;
     user.lastCallOutcome = 'answered';
@@ -279,8 +284,7 @@ export class CallEngine {
       ringDeadline: now,
       deliveredAt: now,
       sessions: 0,
-      // A call the user makes also stops when the month's minutes run out.
-      maxSeconds: Math.min(this.#limits(user).perCall * 60, this.#secondsLeft(user) ?? Infinity),
+      maxSeconds: planLimits(user.plan).perCall * 60,
     };
     this.store.calls[call.id] = call;
     this.store.save();
@@ -293,10 +297,10 @@ export class CallEngine {
     if (!call || call.userId !== user.id || call.state !== 'answered') return null;
     if (call.endedAt || call.sessions >= MAX_SESSIONS_PER_CALL) throw new LimitError('This call has ended.');
     // The time limit runs from the call's first connection, so reconnecting doesn't restart it.
-    call.maxSeconds ??= this.#limits(user).perCall * 60; // calls from before there were plan limits
+    call.maxSeconds ??= planLimits(user.plan).perCall * 60; // calls from before there were plan limits
     const secondsLeft = call.maxSeconds - (call.startedAt ? Math.floor((this.now() - call.startedAt) / 1000) : 0);
     if (secondsLeft < MIN_SECONDS_TO_CONNECT) throw new LimitError('This call has reached its time limit.');
-    if (!call.startedAt) this.#startMetering(user, call);
+    call.startedAt ??= this.now();
     call.sessions += 1;
     call.turnMode = user.turnMode; // kept with the call, so its metrics report the mode it really used
     this.store.save();
@@ -315,67 +319,49 @@ export class CallEngine {
     };
   }
 
-  // The phone reports the call ended. The call was charged its whole limit when it started, so the
-  // unused part goes back to the month's minutes. A call that never reports keeps its whole charge.
+  // The phone reports the call ended, so it can't be reconnected.
   endCall(user, callId) {
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id) return false;
     if (!call.startedAt || call.endedAt) return true;
     call.endedAt = this.now();
-    const usedSeconds = Math.min(call.maxSeconds, Math.ceil((call.endedAt - call.startedAt) / 1000));
-    if (call.chargedSeconds && user.minutes.month === call.chargedMonth) user.minutes.usedSeconds -= call.chargedSeconds - usedSeconds;
-    call.chargedSeconds = usedSeconds;
     this.store.save();
     return true;
   }
 
-  // Whether the user can call a contact right now, and the minutes behind it.
+  // Whether the user can call a contact right now, and the plan's limits behind it.
   calling(user) {
-    const { perCall, perMonth } = this.#limits(user);
-    const base = { perCallMinutes: perCall, monthlyMinutes: perMonth };
-    if (perMonth === null) {
-      // Free: a new account's first call, or calling back after missing a call since they last talked.
-      const canCall = !user.lastCallAt || (user.lastMissedAt ?? 0) > user.lastCallAt;
-      return { ...base, minutesLeft: null, canCall, reason: canCall ? null : 'On the Free plan, Ping calls you once a day. If you miss the call, you can call back.' };
-    }
-    const secondsLeft = this.#secondsLeft(user);
-    const canCall = secondsLeft >= MIN_SECONDS_TO_CALL;
-    const { year, month } = localParts(this.now(), user.timeZone);
-    const resetsOn = new Date(Date.UTC(year, month, 1)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-    return {
-      ...base,
-      minutesLeft: Math.floor(secondsLeft / 60),
-      resetsOn,
-      canCall,
-      reason: canCall ? null : `You've used this month's ${perMonth} minutes. Ping will still call you, and you can call again from ${resetsOn}.`,
-    };
+    const { callsPerDay, perCall } = planLimits(user.plan);
+    const keptForPing = this.#pingCallsToday(user);
+    const callsLeft = Math.max(0, callsPerDay - (keptForPing ? 1 : 0) - this.#usageToday(user).ownCalls);
+    const callBackMissed = user.missedCallToReturn;
+    const firstCall = !user.lastCallAt; // a new account can try a call before Ping's first one
+    const canCall = firstCall || callBackMissed || callsLeft > 0;
+    return { perCallMinutes: perCall, callsPerDay, callsLeft, keptForPing, callBackMissed, firstCall, canCall, reason: canCall ? null : this.#limitReason(user, keptForPing) };
   }
 
-  #limits(user) {
-    return PLAN_MINUTES[user.plan] ?? PLAN_MINUTES.free;
+  #limitReason(user, keptForPing) {
+    if (user.plan === 'free' && keptForPing) return 'On the Free plan, Ping calls you once a day. If you miss the call, you can call back.';
+    const pingStillCalling = keptForPing && !this.#rangToday(user);
+    return `You've made all your calls for today.${pingStillCalling ? ' Ping will still call you today, and you' : ' You'} can call again tomorrow.`;
   }
 
-  #thisMonth(user) {
-    const month = localDay(this.now(), user.timeZone).slice(0, 7);
-    if (user.minutes.month !== month) user.minutes = { month, usedSeconds: 0 };
-    return user.minutes;
+  // Whether Ping's scheduled call came today or is still coming, so one of the day's calls is kept for it.
+  #pingCallsToday(user) {
+    if (this.#rangToday(user)) return true;
+    if (!user.subscription || !user.settings.callsEnabled || !user.nextCallAt) return false;
+    return localDay(user.nextCallAt, user.timeZone) === localDay(this.now(), user.timeZone);
   }
 
-  // null on Free, which has no monthly minutes
-  #secondsLeft(user) {
-    const { perMonth } = this.#limits(user);
-    if (perMonth === null) return null;
-    return Math.max(0, perMonth * 60 - this.#thisMonth(user).usedSeconds);
+  #usageToday(user) {
+    const day = localDay(this.now(), user.timeZone);
+    if (user.usage.day !== day) user.usage = { day, calls: 0, ownCalls: 0 };
+    return user.usage;
   }
 
-  // Charges the call's whole limit up front, so a phone that never reports the end can't use more.
-  #startMetering(user, call) {
-    call.startedAt = this.now();
-    if (this.#limits(user).perMonth === null) return;
-    const minutes = this.#thisMonth(user);
-    minutes.usedSeconds += call.maxSeconds;
-    call.chargedSeconds = call.maxSeconds;
-    call.chargedMonth = minutes.month;
+  // During a downgrade's grace period nothing is dropped, so the old plan's stack stays whole until it ends.
+  #savedLimit(user) {
+    return user.clearAt ? null : planLimits(user.plan).savedItems;
   }
 
   setTurnMode(user, turnMode) {
@@ -449,10 +435,11 @@ export class CallEngine {
   // Only admins can reach this for now, through a test switch. Real payments would call it after checkout.
   setPlan(user, plan) {
     if (!PLANS.includes(plan)) return false;
-    const cancelled = isPaid(user.plan) && !isPaid(plan);
+    // A downgrade keeps the old plan's stack and conversations for a grace period, and an upgrade cancels a pending one.
+    const change = PLANS.indexOf(plan) - PLANS.indexOf(user.plan);
     user.plan = plan;
-    if (cancelled) user.clearAt = this.now() + CANCEL_WINDOW_MS;
-    else if (isPaid(plan)) user.clearAt = null;
+    if (change < 0) user.clearAt = this.now() + CANCEL_WINDOW_MS;
+    else if (change > 0) user.clearAt = null;
     user.contactId = selectedContact(user).id;
     this.store.save();
     return true;
@@ -500,7 +487,7 @@ export class CallEngine {
   addWord(user, input) {
     const word = cleanWord(input);
     if (!word) return { added: false, invalid: true, error: 'Give the word in hiragana or katakana as kana, with its romaji and a short English meaning.' };
-    const saved = addWord(user, word, { id: randomUUID(), now: this.now(), paid: isPaid(user.plan) });
+    const saved = addWord(user, word, { id: randomUUID(), now: this.now(), limit: this.#savedLimit(user) });
     if (!saved) {
       // Already in the stack, so the call can say so instead of looking like nothing happened.
       const existing = user.words.find((other) => other.kana === word.kana && other.kanji === word.kanji);
@@ -511,7 +498,6 @@ export class CallEngine {
   }
 
   removeWord(user, wordId) {
-    if (!isPaid(user.plan)) throw new PlanError('Removing words is part of a subscription.');
     const before = user.words.length;
     user.words = user.words.filter((word) => word.id !== wordId);
     if (user.words.length === before) return false;
@@ -519,9 +505,8 @@ export class CallEngine {
     return true;
   }
 
-  // Each lookup costs money, so a plan check and a daily limit come first.
+  // Each lookup costs money, so there's a daily limit.
   startLookup(user, wordId) {
-    if (!isPaid(user.plan)) throw new PlanError('Example sentences are part of a subscription.');
     const word = user.words.find((candidate) => candidate.id === wordId);
     if (!word) return null;
     const day = localDay(this.now(), user.timeZone);
@@ -533,10 +518,9 @@ export class CallEngine {
   }
 
   saveSentence(user, input) {
-    if (!isPaid(user.plan)) throw new PlanError('Saving sentences is part of a subscription.');
     const sentence = cleanSentence(input);
     if (!sentence) return null;
-    const saved = addSentence(user, sentence, { id: randomUUID(), now: this.now() });
+    const saved = addSentence(user, sentence, { id: randomUUID(), now: this.now(), limit: this.#savedLimit(user) });
     this.store.save();
     return saved;
   }
@@ -629,9 +613,9 @@ export class CallEngine {
     user.nextCallAt = nextCallTime({ now: this.now(), timeZone: user.timeZone, skipToday, random: this.random, settings: user.settings });
   }
 
+  // DAILY_CALL_LIMIT is a safety net on top of the plan's calls, counting every call the user makes.
   #countCall(user) {
-    const day = localDay(this.now(), user.timeZone);
-    if (user.usage.day !== day) user.usage = { day, calls: 0 };
+    this.#usageToday(user);
     if (this.dailyCallLimit && user.usage.calls >= this.dailyCallLimit) throw new LimitError("That's all the calls for today. Ping will call you again soon!");
     user.usage.calls += 1;
   }

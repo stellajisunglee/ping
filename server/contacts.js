@@ -6,14 +6,17 @@ export const MAX_CUSTOM_CONTACTS = 5;
 const MAX_NAME_LENGTH = 30;
 const MAX_TOPIC_LENGTH = 200;
 
-// The longest one call can last, and the minutes a month every call uses, Ping's calls included.
-// Once the month's minutes run out, Ping still calls, but the user can't call until the next month.
-// Free has no monthly minutes: Ping calls once a day, and the user can call back once after missing it.
-export const PLAN_MINUTES = {
-  free: { perCall: 3, perMonth: null },
-  premium: { perCall: 5, perMonth: 120 },
-  platinum: { perCall: 10, perMonth: 250 },
+// What each plan allows. callsPerDay counts Ping's scheduled call and the user's own calls together:
+// on a day Ping calls, one is kept for Ping, so the user can make one fewer themselves.
+// Calling back after missing Ping's call doesn't count. perCall is the longest one call can last, in minutes.
+// savedItems is how many words, and separately how many sentences, the stack keeps (null for no limit).
+export const PLAN_LIMITS = {
+  free: { callsPerDay: 1, perCall: 3, savedItems: 25 },
+  premium: { callsPerDay: 3, perCall: 5, savedItems: 100 },
+  platinum: { callsPerDay: 5, perCall: 10, savedItems: null },
 };
+
+export const planLimits = (plan) => PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
 
 export const isPaid = (plan) => plan === 'premium' || plan === 'platinum';
 

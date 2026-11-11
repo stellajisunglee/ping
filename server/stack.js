@@ -1,7 +1,6 @@
 // The user's word and sentence banks, and what they keep when their plan changes.
 
-export const FREE_WORD_LIMIT = 25;
-const MAX_SENTENCES = 500;
+const MAX_SAVED = 5000; // a safety cap for plans with no limit, so one account can't grow without end
 const MAX_FIELD_LENGTH = 200;
 const JAPANESE_KANA = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
 const JAPANESE_TEXT = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Han}]/u;
@@ -15,17 +14,15 @@ export function cleanWord(input = {}) {
   return word;
 }
 
-// Words saved on a free plan roll over at the limit. Words from a subscription don't count toward it.
-export function addWord(user, word, { id, now, paid }) {
+// Lists are newest first, so keeping the first `limit` drops the oldest. A null limit means no limit.
+const newest = (list, limit) => list.slice(0, limit ?? MAX_SAVED);
+
+// Once the list is full, a new word pushes out the oldest one.
+export function addWord(user, word, { id, now, limit }) {
   const sameWord = (other) => other.kana === word.kana && other.kanji === word.kanji;
   if (user.words.some(sameWord)) return null;
-  const saved = { id, ...word, at: now, fromSubscription: paid };
-  user.words = [saved, ...user.words];
-  if (!paid) {
-    const freeWords = user.words.filter((other) => !other.fromSubscription);
-    const dropped = new Set(freeWords.slice(FREE_WORD_LIMIT).map((other) => other.id));
-    user.words = user.words.filter((other) => !dropped.has(other.id));
-  }
+  const saved = { id, ...word, at: now };
+  user.words = newest([saved, ...user.words], limit);
   return saved;
 }
 
@@ -45,9 +42,9 @@ export const STARTER_STACK = {
 };
 
 // Listed first to last, so each gets a slightly earlier time and they keep that order.
-export function addStarterStack(user, { now, newId, paid }) {
-  STARTER_STACK.words.forEach((word, index) => addWord(user, word, { id: newId(), now: now - index * 1000, paid }));
-  STARTER_STACK.sentences.forEach((sentence, index) => addSentence(user, sentence, { id: newId(), now: now - index * 1000 }));
+export function addStarterStack(user, { now, newId, limit }) {
+  STARTER_STACK.words.forEach((word, index) => addWord(user, word, { id: newId(), now: now - index * 1000, limit }));
+  STARTER_STACK.sentences.forEach((sentence, index) => addSentence(user, sentence, { id: newId(), now: now - index * 1000, limit }));
   user.words.sort((a, b) => b.at - a.at);
   user.sentences.sort((a, b) => b.at - a.at);
 }
@@ -57,17 +54,20 @@ export function cleanSentence(input = {}) {
   return JAPANESE_TEXT.test(sentence.japanese) && sentence.romaji && sentence.english ? sentence : null;
 }
 
-export function addSentence(user, sentence, { id, now }) {
+// Like words, once the list is full a new sentence pushes out the oldest one.
+export function addSentence(user, sentence, { id, now, limit }) {
   const existing = user.sentences.find((other) => other.japanese === sentence.japanese);
   if (existing) return existing;
   const saved = { id, ...sentence, at: now };
-  user.sentences = [saved, ...user.sentences].slice(0, MAX_SENTENCES);
+  user.sentences = newest([saved, ...user.sentences], limit);
   return saved;
 }
 
-export function clearSubscriptionData(user) {
-  user.words = user.words.filter((word) => !word.fromSubscription);
-  user.sentences = [];
-  user.conversations = [];
+// When a downgrade's grace period ends: the stack shrinks to the new plan's limit, keeping the newest,
+// and saved conversations go if the new plan doesn't keep them.
+export function applyDowngrade(user, { limit, keepConversations }) {
+  user.words = newest(user.words, limit);
+  user.sentences = newest(user.sentences, limit);
+  if (!keepConversations) user.conversations = [];
   user.clearAt = null;
 }

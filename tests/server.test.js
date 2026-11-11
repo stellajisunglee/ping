@@ -179,27 +179,21 @@ test("Smart Turn's files are served compressed, with the right types, and kept b
 
 const WORD = { kanji: '元気', kana: 'げんき', romaji: 'genki', english: 'healthy, well' };
 
-test('a word can be added on any plan, but only subscribers can remove it', async () => {
+test('a word can be added and removed on any plan', async () => {
   const token = await join();
   const { data } = await request('/api/stack/words', { method: 'POST', token, body: WORD });
   assert.equal(data.added, true);
   assert.equal((await request('/api/stack/words', { method: 'POST', token, body: WORD })).data.added, false);
   assert.equal((await request('/api/stack/words', { method: 'POST', token, body: { kana: 'hello', romaji: 'x', english: 'y' } })).status, 400);
-  assert.equal((await request(`/api/stack/words/${data.word.id}`, { method: 'DELETE', token })).status, 403);
-
-  await request('/api/plan', { method: 'PUT', token, body: { plan: 'premium' } });
   const removed = await request(`/api/stack/words/${data.word.id}`, { method: 'DELETE', token });
   assert.equal(removed.status, 200);
   assert.deepEqual(removed.data.words, []);
 });
 
-test('example sentences need a subscription, and are only saved on request', async () => {
+test('example sentences work on any plan, and are only saved on request', async () => {
   const token = await join();
   const { data } = await request('/api/stack/words', { method: 'POST', token, body: WORD });
   const path = `/api/stack/words/${data.word.id}/examples`;
-  assert.equal((await request(path, { method: 'POST', token })).status, 403);
-
-  await request('/api/plan', { method: 'PUT', token, body: { plan: 'premium' } });
   const { data: examples } = await request(path, { method: 'POST', token });
   assert.equal(examples.sentences.length, 1);
   assert.deepEqual((await request('/api/me', { token })).data.sentences, []);
@@ -272,7 +266,7 @@ test('YC reviewers join as beta testers, and admins can see who joined with each
   assert.equal(reviewer.sentences.length, 3);
   assert.ok(reviewer.sentences.every((sentence) => sentence.romaji && reviewer.words.some((word) => word.kanji === sentence.word)));
   assert.equal((await signUp(BETA_CODE)).data.words.length, 0);
-  assert.equal(reviewer.calling.monthlyMinutes, 120);
+  assert.equal(reviewer.calling.callsPerDay, 3);
   // Still not an admin: no plan switching, test rings or turn-detection switch.
   assert.equal((await request('/api/plan', { method: 'PUT', token: reviewer.token, body: { plan: 'platinum' } })).status, 403);
   assert.equal((await request('/api/test-ring', { method: 'POST', token: reviewer.token })).status, 403);
@@ -296,19 +290,19 @@ test('YC reviewers join as beta testers, and admins can see who joined with each
   assert.ok(!JSON.stringify(data).includes(YC_CODE), 'the codes themselves are never sent');
 });
 
-test("a call's session stops at the plan's limit, and ending it gives back unused minutes", async () => {
+test("a call's session stops at the plan's limit, and an ended call stays ended", async () => {
   const token = await join();
   await request('/api/plan', { method: 'PUT', token, body: { plan: 'platinum' } });
   const { data: me } = await request('/api/me', { token });
-  assert.deepEqual([me.calling.canCall, me.calling.perCallMinutes, me.calling.minutesLeft], [true, 10, 250]);
-  assert.equal(me.planMinutes.premium.perCall, 5);
+  assert.deepEqual([me.calling.canCall, me.calling.perCallMinutes, me.calling.callsPerDay], [true, 10, 5]);
+  assert.deepEqual(me.planLimits.premium, { callsPerDay: 3, perCall: 5, savedItems: 100 });
 
   const { data: call } = await request('/api/calls', { method: 'POST', token });
   const { data: session } = await request(`/api/calls/${call.id}/session`, { method: 'POST', token });
   assert.equal(session.maxSeconds, 600);
-  assert.equal((await request('/api/me', { token })).data.calling.minutesLeft, 240);
   const { data: ended } = await request(`/api/calls/${call.id}/ended`, { method: 'POST', token });
-  assert.equal(ended.calling.minutesLeft, 249);
+  assert.equal(ended.calling.canCall, true);
+  assert.equal((await request(`/api/calls/${call.id}/session`, { method: 'POST', token })).status, 429);
 });
 
 test('a connected call counts toward the streak', async () => {

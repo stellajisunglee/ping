@@ -61,29 +61,30 @@ Home is the first screen after joining:
 - **My Stack's Words and Sentences buttons,** with how many of each. Empty, they say how to fill them.
 
 - **Streak:** days in a row with a connected call, answered or called back. Days off in the user's schedule don't break it. Home also shows the all-time best. The server keeps the last 14 practice days as day numbers, for Home's week. Streaks from before that are filled in from their count.
-- **Words:** words the user didn't understand, saved by the voice model. Free users keep their latest 25, with the oldest replaced, and can't remove any.
-- **Sentences:** example sentences, looked up one word at a time and stored only if the user saves them. Each shows its Japanese, romaji and English translation, like a word. Sentences saved before romaji was added show without it. Swipe left to remove.
+- **Words:** words the user didn't understand, saved by the voice model. Each plan keeps the latest ones up to its limit (25 on Free, 100 on Premium, no limit on Platinum), replacing the oldest. Anyone can remove a word.
+- **Sentences:** example sentences, looked up one word at a time and stored only if the user saves them, on any plan. They have their own limit, the same number as words. Each shows its Japanese, romaji and English translation, like a word. Sentences saved before romaji was added show without it. Swipe left to remove.
 
 ## Plans
 
-Plans are a test switch under Settings for now, with no payment. Only admins can use it.
+Plans are a test switch under Settings for now, with no payment. Only admins can use it. The limits are `PLAN_LIMITS` in `server/contacts.js`, and the app reads them from the server, so the plan page always matches what's enforced.
 
 | | Free | Premium | Platinum |
 | --- | --- | --- | --- |
-| Contacts | Ping | Ping | Also create your own |
-| Words | Latest 25 | No limit, and can remove | Same |
-| Example sentences | No | Yes | Yes |
-| Calls remember past conversations | No | Yes | Yes |
+| Calls a day, Ping's included | 1 | 3 | 5 |
 | Longest call | 3 minutes | 5 minutes | 10 minutes |
-| Calling a contact yourself | Your first call, then only to call back after missing a call | From 120 minutes a month | From 250 minutes a month |
+| Saved words, and saved sentences | Latest 25 of each | Latest 100 of each | No limit |
+| Contacts | Ping | Ping, plus more as they're added | Also create your own |
+| Calls remember past conversations | No | Yes | Yes |
 
-Calls on the paid plans use minutes from the month, counted in the user's time zone, and Ping's own calls count too. Once the minutes run out, Ping still calls, up to the plan's longest call, but the user can't call until the next month. A call the user makes also stops early if the month's minutes run out during it. Home and Contacts show the minutes left, and the plan page shows each plan's limits, which come from the server. Manage Calls, for call times and how the contact talks, is at the bottom of Contacts. The user's plan shows as a badge at the top right of Home (tapping it opens the plan page) and in the upgrade note on Contacts.
+How the day's calls work, in the user's time zone:
+- On a day Ping's scheduled call comes (it rang today, or it's set for later today), one of the day's calls is kept for it, so the user can make one fewer themselves: none on Free, 2 on Premium, 4 on Platinum. Ping's call always comes. On a day it doesn't call, the user can make all of them.
+- Missing or declining a call lets the user call back once, and that call back doesn't count.
+- A new account's first call doesn't count either, so someone can try Ping before its first call.
+- `DAILY_CALL_LIMIT`, if set, is a safety net on top: the most calls a user can start in a day, call backs included.
 
-On Free, the user can call Ping themselves once on a new account, and after that only to call back when they've missed or declined a call since they last talked. That keeps Free at about one call a day.
+Home and Contacts show how many calls are left today and how long calls last on the plan. Manage Calls, for call times and how the contact talks, is at the bottom of Contacts. The user's plan shows as a badge at the top right of Home (tapping it opens the plan page) and in the upgrade note on Contacts. A call's time limit runs from its first connection, so reconnecting doesn't restart it.
 
-How minutes are counted: when a call first connects, its whole limit comes off the month's minutes. When the phone reports the call ended, the part it didn't use goes back. A call whose end never arrives, for example because the app was closed, keeps its whole limit, so a phone can't use more than it's charged for. The limit runs from the call's first connection, so reconnecting doesn't restart it.
-
-Cancelling starts a 30-day window, shown on Home and the plan page. After it, words saved during the subscription, sentences and conversations are removed. Words saved on the free plan stay, and resubscribing in time keeps everything.
+Moving to a smaller plan starts a 30-day window, shown on Home and the plan page, during which nothing is removed. After it, the stack keeps the newest words and sentences up to the new plan's limit, and on Free saved conversations are removed. Upgrading in time cancels it.
 
 Mero is hidden for now, and Contacts shows it greyed out as "Coming soon". To bring it back, give it a topic and remove `hidden` in `server/contacts.js`.
 
@@ -137,7 +138,7 @@ Other rules:
 | Ring time | 10 seconds | `RING_MS` in `server/calls.js` |
 | Default call hours and frequency | 10:00 to 20:00, daily | `DEFAULT_SETTINGS` in `server/settings.js` |
 | Free word limit | 25 | `FREE_WORD_LIMIT` in `server/stack.js` |
-| Longest call and monthly minutes per plan | Free 3 min; Premium 5 min, 120 a month; Platinum 10 min, 250 a month | `PLAN_MINUTES` in `server/contacts.js` |
+| Calls a day, longest call and saved items per plan | Free 1, 3 min, 25; Premium 3, 5 min, 100; Platinum 5, 10 min, no limit | `PLAN_LIMITS` in `server/contacts.js` |
 | Cancellation window | 30 days | `CANCEL_WINDOW_MS` in `server/calls.js` |
 | Example lookups per user per day | 50 | `MAX_LOOKUPS_PER_DAY` in `server/calls.js` |
 | Extra pause time at slow speeds | | `SLOW_SPEED_PATIENCE` in `server/settings.js` |
@@ -150,7 +151,7 @@ Other rules:
 
 In semantic mode, "Time to answer" sets how eager OpenAI is to reply instead of a silence length. `normal` and `long` currently behave the same there, because `low` is the lowest eagerness level. In Smart Turn mode it sets how sure Smart Turn must be and how long its backup waits, as well as the silence it falls back to.
 
-The hang-up at the time limit runs in the browser, so someone who modifies the page could stay on longer in a call that's already connected. The server still charges the call's whole limit up front and won't reconnect it past the limit. OpenAI's own session limit is the backstop. Set a monthly budget in your OpenAI account too.
+The hang-up at the time limit runs in the browser, so someone who modifies the page could stay on longer in a call that's already connected. The server still won't reconnect it past the limit. OpenAI's own session limit is the backstop. Set a monthly budget in your OpenAI account too.
 
 ## Before beta launch
 

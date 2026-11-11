@@ -1,22 +1,25 @@
 // The Settings tab and the pages under it.
 
-import { $, api, clearWarning, el, go, isAdmin, onShow, setError, show, state, writeToken } from './lib.js';
+import { $, api, clearWarning, el, go, isAdmin, onShow, savedText, setError, show, state, writeToken } from './lib.js';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FREQUENCY_BUTTONS = { daily: 'Daily', 'every-other-day': 'Every other day', weekdays: 'Weekdays only', weekends: 'Weekends only', custom: 'Custom' };
 const PLAN_NAMES = { free: 'Free', premium: 'Premium', platinum: 'Platinum' };
 const TURN_MODE_NAMES = { silence: 'Silence', semantic: 'Semantic', smartTurn: 'Smart Turn' };
-const PLAN_DETAILS = {
-  free: 'Ping as your contact, and your latest 25 words.',
-  premium: 'A lifetime word bank, removing words, example sentences, and calls that remember past conversations.',
+const PLAN_EXTRAS = {
+  free: 'Ping as your contact.',
+  premium: 'More contacts, and calls that remember past conversations.',
   platinum: 'Everything in Premium, plus creating your own contacts.',
 };
 
-// The call limits come from the server, so the page always matches what's enforced.
+// The limits come from the server, so the page always matches what's enforced.
 function callDetails(plan) {
-  const { perCall, perMonth } = state.me.planMinutes[plan];
-  if (perMonth === null) return `Ping calls once a day, for up to ${perCall} minutes. Miss it and you can call back.`;
-  return `${perMonth} minutes of calls a month, up to ${perCall} minutes each.`;
+  const { callsPerDay, perCall } = state.me.planLimits[plan];
+  const calls = callsPerDay === 1
+    ? `Ping calls once a day, for up to ${perCall} minutes. Miss it and you can call back.`
+    : `Up to ${callsPerDay} calls a day, Ping's included, each up to ${perCall} minutes. Calling back after a missed call doesn't count.`;
+  const saved = plan === 'platinum' ? 'Keeps every word and sentence.' : `Keeps your latest ${savedText(plan, 'word')} and ${savedText(plan, 'sentence')}.`;
+  return `${calls} ${saved}`;
 }
 
 const INVITE_NAMES = { yc: 'YC reviewers', beta: 'Beta testers', admin: 'Admins' };
@@ -94,7 +97,7 @@ function renderPlan() {
   setError('plan-clear', clearWarning());
   $('plan-choices').replaceChildren(
     ...Object.entries(PLAN_NAMES).map(([plan, name]) => {
-      const button = el('button', { type: 'button', className: 'plan-choice' }, el('strong', { textContent: name }), el('span', { className: 'muted', textContent: `${callDetails(plan)} ${PLAN_DETAILS[plan]}` }));
+      const button = el('button', { type: 'button', className: 'plan-choice' }, el('strong', { textContent: name }), el('span', { className: 'muted', textContent: `${callDetails(plan)} ${PLAN_EXTRAS[plan]}` }));
       button.setAttribute('aria-pressed', String(state.me.plan === plan));
       button.disabled = !isAdmin();
       button.addEventListener('click', async () => {
