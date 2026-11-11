@@ -18,9 +18,17 @@ function loadWorker({ deliveredState = 'ringing', windows = [], ringClosedAfter 
     location: { origin: 'https://ping.test' },
     registration: {
       showNotification: async (title, options) => {
-        shown.push({ title, ...options });
+        // A notification with the same tag replaces the one showing.
+        shown.filter((notification) => notification.tag === options.tag).forEach((notification) => (notification.open = false));
+        const notification = { title, ...options, open: true };
+        notification.close = () => (notification.open = false);
+        shown.push(notification);
       },
-      getNotifications: async () => (state.ringClosedAfter !== null && shown.length >= state.ringClosedAfter ? [] : shown.slice(-1)),
+      // Answering or declining in the app closes the call's notifications, here after a set number of rings.
+      getNotifications: async () => {
+        if (state.ringClosedAfter !== null && shown.length >= state.ringClosedAfter) shown.forEach((notification) => (notification.open = false));
+        return shown.filter((notification) => notification.open);
+      },
     },
     clients: {
       matchAll: async () => windows,
@@ -55,26 +63,29 @@ test('a ring shows the notification and confirms delivery', async () => {
   assert.deepEqual(worker.fetched, [{ path: '/api/calls/c1/delivered', method: 'POST' }]);
 });
 
+const showing = (worker) => worker.shown.filter((notification) => notification.open);
+
 test('a ring that arrives after the call was missed becomes a missed call', async () => {
   const worker = loadWorker({ deliveredState: 'missed' });
   await worker.push({ type: 'ring', callId: 'c1', contactName: 'Yuki' });
-  assert.equal(worker.shown.at(-1).title, 'Missed call from Yuki');
-  assert.equal(worker.shown.at(-1).tag, worker.shown[0].tag);
+  assert.deepEqual(showing(worker).map(({ title }) => title), ['Missed call from Yuki']);
 });
 
 test('a missed call replaces the ring notification', async () => {
   const worker = loadWorker();
   await worker.push({ type: 'ring', callId: 'c1' });
   await worker.push({ type: 'missed', callId: 'c1' });
-  assert.equal(worker.shown.at(-1).tag, worker.shown[0].tag);
-  assert.equal(worker.shown.at(-1).data.type, 'missed');
+  assert.deepEqual(showing(worker).map(({ data }) => data.type), ['missed']);
 });
 
-test('the phone keeps ringing during the 10 seconds', async () => {
+test('the phone keeps ringing during the 10 seconds, each ring a new notification so it makes a sound', async () => {
   const worker = loadWorker();
   await worker.push({ type: 'ring', callId: 'c1', contactName: 'Ping' });
   assert.equal(worker.shown.length, 4);
-  assert.ok(worker.shown.every((ring) => ring.renotify && ring.data.type === 'ring'));
+  assert.ok(worker.shown.every((ring) => ring.data.type === 'ring' && ring.tag.startsWith('ping-call')));
+  assert.equal(new Set(worker.shown.map(({ tag }) => tag)).size, 4);
+  // Only the newest ring is left showing.
+  assert.deepEqual(showing(worker), [worker.shown.at(-1)]);
 });
 
 test('ringing stops once the call is answered or declined', async () => {

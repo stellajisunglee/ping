@@ -2,12 +2,11 @@ import { initContacts } from './contacts.js';
 import { charsSaid, createPace } from './reveal.js';
 import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdmin, isPaid, onShow, readToken, refresh, setError, show, showCallingNote, showPlanBadge, state, writeToken } from './lib.js';
 import { initSettings, keepRecording, recordCallsOn } from './settings.js';
+import { audioUnlocked, startRingtone, unlockAudio } from './ringtone.js';
 import { initStack, renderStackTiles } from './stack.js';
 import { startCall } from './voice.js';
 
 const RING_FALLBACK_MS = 12_000; // the server decides a call was missed. This only covers its message getting lost.
-const RING_TONE_EVERY_MS = 3_000;
-const VIBRATION = [400, 200, 400, 200, 400];
 // Calling a contact rings this long first, like a real phone call, before Ping picks up.
 const OUTGOING_RING_MS = 3_000;
 
@@ -204,31 +203,6 @@ const goHome = () => go('home');
 
 // Ringing
 
-function playRingTone() {
-  const AudioContextClass = window.AudioContext ?? window.webkitAudioContext;
-  const context = AudioContextClass ? new AudioContextClass() : null;
-  const ringOnce = () => {
-    navigator.vibrate?.(VIBRATION);
-    if (!context) return;
-    for (const [frequency, start] of [[880, 0], [660, 0.25], [880, 0.6], [660, 0.85]]) {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.frequency.value = frequency;
-      gain.gain.value = 0.08;
-      oscillator.connect(gain).connect(context.destination);
-      oscillator.start(context.currentTime + start);
-      oscillator.stop(context.currentTime + start + 0.2);
-    }
-  };
-  ringOnce();
-  const interval = setInterval(ringOnce, RING_TONE_EVERY_MS);
-  ringTone = () => {
-    clearInterval(interval);
-    navigator.vibrate?.(0);
-    context?.close();
-  };
-}
-
 function stopRinging() {
   clearTimeout(ringFallback);
   ringTone?.();
@@ -238,8 +212,9 @@ function stopRinging() {
 
 async function closeNotifications() {
   const registration = await navigator.serviceWorker?.getRegistration();
-  const notifications = (await registration?.getNotifications({ tag: 'ping-call' })) ?? [];
-  notifications.forEach((notification) => notification.close());
+  // Each re-ring is its own notification, so close every one of this app's call notifications.
+  const notifications = (await registration?.getNotifications()) ?? [];
+  notifications.filter(({ tag }) => tag?.startsWith('ping-call')).forEach((notification) => notification.close());
 }
 
 function showRinging(callId, contactName = 'Ping') {
@@ -248,7 +223,7 @@ function showRinging(callId, contactName = 'Ping') {
   $('ringing-name').textContent = contactName;
   $('ringing-avatar').textContent = initialOf(contactName);
   show('ringing');
-  playRingTone();
+  ringTone = startRingtone();
   ringFallback = setTimeout(() => {
     stopRinging();
     refresh().then(goHome, goHome);
@@ -575,6 +550,10 @@ function cancelOutgoing() {
 // Getting going
 
 function bindEvents() {
+  // A ringtone can only play through audio that a tap set up, so the first taps prepare it for later calls.
+  for (const type of ['touchend', 'click', 'keydown']) {
+    document.addEventListener(type, () => audioUnlocked() || unlockAudio(), { capture: true, passive: true });
+  }
   document.addEventListener('click', (event) => {
     const link = event.target.closest('[data-go]');
     if (link) go(link.dataset.go);

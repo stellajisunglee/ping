@@ -1,7 +1,7 @@
 // Makes the phone "ring" while the app is closed, and keeps the app shell available offline.
 
-const CACHE = 'ping-v6';
-const SHELL = ['/', '/index.html', '/app.js', '/lib.js', '/stack.js', '/contacts.js', '/settings.js', '/aizuchi.js', '/turn-metrics.js', '/turn-machine.js', '/reveal.js', '/smart-turn.js', '/features.js', '/capture-worklet.js', '/voice.js', '/recorder.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
+const CACHE = 'ping-v7';
+const SHELL = ['/', '/index.html', '/app.js', '/lib.js', '/stack.js', '/contacts.js', '/settings.js', '/aizuchi.js', '/turn-metrics.js', '/turn-machine.js', '/reveal.js', '/smart-turn.js', '/features.js', '/capture-worklet.js', '/voice.js', '/recorder.js', '/ringtone.js', '/style.css', '/manifest.webmanifest', '/icons/icon-192.png'];
 // Smart Turn's runtime and models: about 25 MB, versioned by path, and only fetched by Smart Turn calls.
 // They live in their own cache, kept across app updates, so a phone downloads them once.
 const MODEL_CACHE = 'ping-smart-turn-1';
@@ -52,11 +52,19 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-function showRing(callId, contactName) {
-  return self.registration.showNotification(`${contactName} is calling`, {
+// This call's ring notifications that are still showing. Answering, declining or a missed call closes them.
+async function ringsShowing(callId) {
+  const showing = await self.registration.getNotifications();
+  return showing.filter(({ data }) => data?.type === 'ring' && data.callId === callId);
+}
+
+// Each ring is a new notification with its own tag, because an iPhone only plays the notification
+// sound for a new one, not for one that replaces another. The earlier rings are closed once it shows.
+async function showRing(callId, contactName, ring = 0) {
+  const earlier = await ringsShowing(callId);
+  await self.registration.showNotification(`${contactName} is calling`, {
     body: 'Tap to answer',
-    tag: NOTIFICATION_TAG,
-    renotify: true,
+    tag: `${NOTIFICATION_TAG}-ring-${callId}-${ring}`,
     requireInteraction: true,
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
@@ -67,10 +75,12 @@ function showRing(callId, contactName) {
       { action: 'decline', title: 'Decline' },
     ],
   });
+  earlier.forEach((notification) => notification.close());
 }
 
-function showMissed(callId, contactName) {
-  return self.registration.showNotification(`Missed call from ${contactName}`, {
+async function showMissed(callId, contactName) {
+  const rings = await ringsShowing(callId);
+  await self.registration.showNotification(`Missed call from ${contactName}`, {
     body: 'You have a voice message. Tap to listen and call back.',
     tag: NOTIFICATION_TAG,
     renotify: true,
@@ -78,6 +88,7 @@ function showMissed(callId, contactName) {
     badge: '/icons/icon-192.png',
     data: { type: 'missed', callId },
   });
+  rings.forEach((notification) => notification.close());
 }
 
 async function tellOpenApps(message) {
@@ -87,11 +98,10 @@ async function tellOpenApps(message) {
 
 // Rings the phone again until the call is answered, declined or missed, so one buzz isn't easy to miss.
 async function keepRinging(callId, contactName) {
-  for (let count = 0; count < RING_AGAIN_TIMES; count += 1) {
+  for (let count = 1; count <= RING_AGAIN_TIMES; count += 1) {
     await new Promise((resolve) => setTimeout(resolve, RING_AGAIN_EVERY_MS));
-    const open = await self.registration.getNotifications({ tag: NOTIFICATION_TAG });
-    if (!open.some(({ data }) => data?.type === 'ring' && data.callId === callId)) return;
-    await showRing(callId, contactName);
+    if (!(await ringsShowing(callId)).length) return;
+    await showRing(callId, contactName, count);
   }
 }
 

@@ -28,7 +28,7 @@ Pages are served "cross-origin isolated" (`Cross-Origin-Opener-Policy` and `Cros
 ## How a call works
 
 1. Each user gets a call at a random time inside the hours they set, on the days their call frequency allows. The default is daily, between 10:00 and 20:00 in their time zone.
-2. The server sends a push and the phone shows "Ping is calling". The phone confirms the push arrived, and that starts the 10 seconds. The notification re-alerts every 2.5 seconds until then.
+2. The server sends a push and the phone shows "Ping is calling". The phone confirms the push arrived, and that starts the 10 seconds. The phone rings again every 2.5 seconds until then. Each ring is a new notification that replaces the last, because an iPhone only plays the notification sound for a new one. If the app is open, it shows a ringing screen and plays a ringtone (`public/ringtone.js`). iPhones only play web audio that a tap started, so the app prepares its audio on the first tap anywhere and rings through it later. The ringtone follows the phone's silent switch. A web app can't play its own ringtone when it's closed or in the background, so then the iPhone's notification sound is all there is.
 3. Tapping the notification answers. The browser gets a one-minute key from the server and connects straight to OpenAI over WebRTC. When the contact calls, it greets the user and first asks if it's a good time (「今、お時間大丈夫ですか？」, or 「今、話せる？」 when casual). If yes, it asks the question. If not, it says it'll call another time and hangs up; the phone hangs up after hearing that goodbye even if the voice engine forgets to. When the user calls, the contact thanks them for calling and goes straight to the question. Calls stop at the plan's longest call (see "Plans").
 4. If nobody taps in 10 seconds, the call is missed. The notification changes to "Missed call", and a voicemail with a call-back button appears on Home.
 5. If the phone never confirms the push, for example because it's offline, the call counts as missed after 30 seconds.
@@ -81,6 +81,7 @@ How the day's calls work, in the user's time zone:
 - Missing or declining a call lets the user call back once, and that call back doesn't count.
 - A new account's first call doesn't count either, so someone can try Ping before its first call.
 - `DAILY_CALL_LIMIT`, if set, is a safety net on top: the most calls a user can start in a day, call backs included.
+- Admins and YC reviewers can call as often as they like, past both the plan and `DAILY_CALL_LIMIT` (`unlimitedCalls` in `server/calls.js`). Each call still lasts only as long as their plan allows.
 
 Home and Contacts show how many calls are left today and how long calls last on the plan. Manage Calls, for call times and how the contact talks, is at the bottom of Contacts. The user's plan shows as a badge at the top right of Home (tapping it opens the plan page) and in the upgrade note on Contacts. A call's time limit runs from its first connection, so reconnecting doesn't restart it.
 
@@ -98,12 +99,13 @@ The invite code someone joins with decides which version they get. It can't be c
 | Plan | Can switch freely | Stays on Free |
 | "Ring my phone in 10 seconds" (Settings, Admin tools) | Yes | No |
 | Record calls on this phone (Settings, Admin tools) | Yes | No |
+| Calls a day | No limit | The plan's limit |
 | Turn detection | Can switch between silence, semantic and Smart Turn, on the plan page | Silence, the default |
 | OpenAI out of credit | The call hangs up and says so, with where to add credit | The call behaves as before: it connects but the contact stays silent |
 
 The server enforces both limits. Accounts created before there were two codes are admins.
 
-A third code, `YC_INVITE_CODE`, is for YC reviewers. It gives the beta tester's version, so no admin settings, but on Premium instead of Free, and its accounts are counted separately. Reviewers start with 4 example words and 3 example sentences in their stack (`STARTER_STACK` in `server/stack.js`), so the stack isn't empty when they first look. Like other beta testers, reviewers can't change their plan. Which plan each code starts on is `PLAN_FOR_CODE` in `server/index.js`. Codes aren't case-sensitive.
+A third code, `YC_INVITE_CODE`, is for YC reviewers. It gives the beta tester's version, so no admin settings, but on Premium instead of Free, with no limit on calls a day, and its accounts are counted separately. Reviewers start with 4 example words and 3 example sentences in their stack (`STARTER_STACK` in `server/stack.js`), so the stack isn't empty when they first look. Like other beta testers, reviewers can't change their plan. Which plan each code starts on is `PLAN_FOR_CODE` in `server/index.js`. Codes aren't case-sensitive.
 
 Admins see "Invite codes" at the bottom of the plan page (Settings, then Upgrade Plan or Manage Plan). For each code it shows how many accounts joined, how many made a call, how many calls connected in all, and the 20 newest accounts with when they joined, their calls and their words. Joining is what creates an account, so each account is one phone or browser, and someone who deletes their account and rejoins counts twice. Codes and call counts are only recorded from this version on, so older accounts show "before this was tracked".
 
@@ -132,7 +134,7 @@ Set these as environment variables, in `.env` locally or under the service's **E
 | `REALTIME_MODEL` | The voice model | `gpt-realtime` |
 | `REALTIME_VOICE` | Ping's voice | `marin` |
 | `TEXT_MODEL` | Writes example sentences | `gpt-6-luna` |
-| `DAILY_CALL_LIMIT` | How many calls a user can start per day, including test rings | No limit |
+| `DAILY_CALL_LIMIT` | How many calls a user can start per day, including test rings. Admins and YC reviewers aren't limited | No limit |
 
 Other rules:
 
