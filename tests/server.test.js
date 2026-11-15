@@ -4,6 +4,9 @@ import { createApp } from '../server/index.js';
 import { CallEngine } from '../server/calls.js';
 import { silenceMs } from '../server/settings.js';
 import { Store } from '../server/store.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join as joinPath } from 'node:path';
 
 const SUBSCRIPTION = { endpoint: 'https://push.example/1', keys: { p256dh: 'a', auth: 'b' } };
 const INVITE_CODE = 'test-invite';
@@ -47,7 +50,7 @@ const join = async () => (await request('/api/register', { method: 'POST', body:
 
 before(async () => {
   engine = new CallEngine({ store: new Store(), sendPush: async () => ({ gone: false }) });
-  ({ server } = createApp({ engine, openai, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE, yc: YC_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null } }));
+  ({ server } = createApp({ engine, openai, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE, yc: YC_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null, recordingsDir: mkdtempSync(joinPath(tmpdir(), 'ping-recordings-')) } }));
   await new Promise((resolve) => server.listen(0, resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
@@ -496,4 +499,89 @@ test('a Smart Turn call starts in silence mode, and the phone is told to take ov
   const { data: changed } = await request('/api/settings', { method: 'PATCH', token, body: { thinkingTime: 'long' } });
   assert.equal(changed.turnDetection.type, 'server_vad', 'the silence settings to switch back to');
   assert.deepEqual(changed.smartTurn, { doneAt: 0.7, backupMs: 4000 }, 'a long time to answer makes Smart Turn more patient too');
+});
+
+// Call recordings
+
+const AUDIO = new Uint8Array([0, 1, 2, 3, 4, 5]);
+const joinWith = async (inviteCode) => (await request('/api/register', { method: 'POST', body: { inviteCode, timeZone: 'America/Los_Angeles' } })).data;
+const uploadAudio = async (token, callId, { type = 'audio/mp4', body = AUDIO } = {}) =>
+  (await fetch(`${baseUrl}/api/calls/${callId}/recording`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': type }, body })).status;
+// A call that has connected, which is when it's decided whether it's recorded.
+async function connectedCall(token) {
+  const { data: call } = await request('/api/calls', { method: 'POST', token });
+  await request(`/api/calls/${call.id}/session`, { method: 'POST', token });
+  return call;
+}
+const RECORDED_LINES = [{ from: 'contact', text: '今日は何をしましたか？' }, { from: 'you', text: 'えーと…ラーメンを食べました' }];
+
+test('calls are recorded for review, audio and transcript, even on the free plan, and only admins can listen', async () => {
+  const tester = await joinWith(BETA_CODE);
+  assert.deepEqual(tester.recording, { on: true, canTurnOff: false });
+  assert.equal(tester.policyNotice, false); // the join screen already says calls are recorded
+  const call = await connectedCall(tester.token);
+  assert.equal(await uploadAudio(tester.token, call.id), 201);
+  const { data } = await request(`/api/calls/${call.id}/transcript`, { method: 'POST', token: tester.token, body: { lines: RECORDED_LINES } });
+  assert.deepEqual([data.saved, data.recorded], [false, true]); // not kept as Free-plan memory, but kept for review
+
+  assert.equal((await request('/api/admin/recordings', { token: tester.token })).status, 403);
+  assert.equal((await request(`/api/admin/recordings/${call.id}/audio`, { token: tester.token })).status, 403);
+  const admin = await join();
+  const listed = (await request('/api/admin/recordings', { token: admin })).data.recordings.find((item) => item.callId === call.id);
+  assert.deepEqual([listed.joinedWith, listed.audio, listed.lineCount, listed.lines], ['beta', 'm4a', 2, undefined]);
+  assert.deepEqual((await request(`/api/admin/recordings/${call.id}`, { token: admin })).data.lines, RECORDED_LINES);
+  const audio = await fetch(`${baseUrl}/api/admin/recordings/${call.id}/audio`, { headers: { Authorization: `Bearer ${admin}` } });
+  assert.equal(audio.headers.get('content-type'), 'audio/mp4');
+  assert.deepEqual(new Uint8Array(await audio.arrayBuffer()), AUDIO);
+});
+
+test('YC reviewers can turn recording off, which stops future recordings only, and testers and admins cannot', async () => {
+  const reviewer = await joinWith(YC_CODE);
+  assert.deepEqual(reviewer.recording, { on: true, canTurnOff: true });
+  const earlier = await connectedCall(reviewer.token);
+  assert.equal(await uploadAudio(reviewer.token, earlier.id), 201);
+  assert.equal((await request('/api/recording', { method: 'PUT', token: reviewer.token, body: { on: 'no' } })).status, 400);
+  assert.deepEqual((await request('/api/recording', { method: 'PUT', token: reviewer.token, body: { on: false } })).data.recording, { on: false, canTurnOff: true });
+
+  const later = await connectedCall(reviewer.token);
+  assert.equal(await uploadAudio(reviewer.token, later.id), 404);
+  assert.equal((await request(`/api/calls/${later.id}/transcript`, { method: 'POST', token: reviewer.token, body: { lines: RECORDED_LINES } })).data.recorded, false);
+  const admin = await join();
+  const callIds = (await request('/api/admin/recordings', { token: admin })).data.recordings.map((item) => item.callId);
+  assert.ok(callIds.includes(earlier.id), 'turning recording off keeps earlier recordings');
+  assert.ok(!callIds.includes(later.id));
+
+  for (const token of [admin, (await joinWith(BETA_CODE)).token]) {
+    assert.equal((await request('/api/recording', { method: 'PUT', token, body: { on: false } })).status, 403);
+    assert.equal((await request('/api/me', { token })).data.recording.on, true);
+  }
+});
+
+test("uploads must be audio the app records, for the user's own recorded call", async () => {
+  const token = await join();
+  const call = await connectedCall(token);
+  assert.equal(await uploadAudio(token, call.id, { type: 'text/plain' }), 415);
+  assert.equal(await uploadAudio(token, call.id, { body: new Uint8Array() }), 400);
+  assert.equal(await uploadAudio(await join(), call.id), 404);
+  const { data: notConnected } = await request('/api/calls', { method: 'POST', token });
+  assert.equal(await uploadAudio(token, notConnected.id), 404);
+  assert.equal(await uploadAudio(token, call.id, { type: 'audio/webm;codecs=opus' }), 201);
+  const listed = (await request('/api/admin/recordings', { token })).data.recordings.find((item) => item.callId === call.id);
+  assert.equal(listed.audio, 'webm');
+});
+
+test("deleting an account deletes the account's recordings", async () => {
+  const tester = await joinWith(BETA_CODE);
+  const call = await connectedCall(tester.token);
+  assert.equal(await uploadAudio(tester.token, call.id), 201);
+  await request('/api/me', { method: 'DELETE', token: tester.token });
+  assert.equal((await request(`/api/admin/recordings/${call.id}`, { token: await join() })).status, 404);
+});
+
+test('accounts from before calls were recorded see a one-time notice', async () => {
+  const token = await join();
+  engine.userForToken(token).policyVersion = 0; // as an older account loads
+  assert.equal((await request('/api/me', { token })).data.policyNotice, true);
+  assert.equal((await request('/api/policy/seen', { method: 'POST', token })).status, 200);
+  assert.equal((await request('/api/me', { token })).data.policyNotice, false);
 });

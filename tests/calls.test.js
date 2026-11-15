@@ -603,6 +603,8 @@ test('an account from before these features still works', () => {
   assert.equal(user.joinedWith, 'admin');
   assert.equal(user.connectedCalls, 0);
   assert.equal(user.turnMode, 'silence');
+  assert.equal(user.policyVersion, 0, 'joined before calls were recorded, so they get the notice');
+  assert.equal(user.recordingOff, false);
   assert.deepEqual(user.words, []);
   assert.equal(engine.streak(user).current, 0);
   assert.equal(engine.callBack(user).contactId, 'ping');

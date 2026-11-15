@@ -99,6 +99,8 @@ The invite code someone joins with decides which version they get. It can't be c
 | Plan | Can switch freely | Stays on Free |
 | "Ring my phone in 10 seconds" (Settings, Admin tools) | Yes | No |
 | Record calls on this phone (Settings, Admin tools) | Yes | No |
+| Calls recorded for review (see "Call recordings") | Always | Always. YC reviewers can turn it off |
+| Call recordings page (Settings, Admin tools) | Yes | No |
 | Calls a day | No limit | The plan's limit |
 | Turn detection | Can switch between silence, semantic and Smart Turn, on the plan page | Silence, the default |
 | OpenAI out of credit | The call hangs up and says so, with where to add credit | The call behaves as before: it connects but the contact stays silent |
@@ -110,6 +112,18 @@ A third code, `YC_INVITE_CODE`, is for YC reviewers. It gives the beta tester's 
 Admins see "Invite codes" at the bottom of the plan page (Settings, then Upgrade Plan or Manage Plan). For each code it shows how many accounts joined, how many made a call, how many calls connected in all, and the 20 newest accounts with when they joined, their calls and their words. Joining is what creates an account, so each account is one phone or browser, and someone who deletes their account and rejoins counts twice. Codes and call counts are only recorded from this version on, so older accounts show "before this was tracked".
 
 **Recording calls (admins only).** iPhone screen recordings go silent once a call opens the microphone: the phone switches to its voice-call audio mode, and screen recording leaves that out, as it does for FaceTime. So with "Record calls on this phone" on, the app mixes the microphone and the contact's voice in the browser and records them with `MediaRecorder` (`public/recorder.js`): .m4a on an iPhone, .webm elsewhere. After the call, "Save last call's recording" in Settings opens the share sheet, or downloads the file where there isn't one. The recording is only in the phone's memory: nothing is uploaded, the next recorded call replaces it, and closing the app loses it. For a demo video, screen record the call too and line the two up; the ring in the screen recording marks where the call starts. The switch is kept per phone, in `localStorage`.
+
+## Call recordings
+
+Calls are recorded so the Ping team can listen to them and read their transcripts, to improve Ping's conversations.
+
+- **Who's recorded:** every account, from the call's first connection. Admin and beta tester accounts always are, as part of testing. YC reviewers and any future accounts can turn off "Use my calls to improve Ping" in Manage Account. That stops recording calls that start after it, and keeps calls already recorded. Whether a call is recorded is decided once, when it first connects (`call.recorded`), and the server refuses uploads for any other call.
+- **How:** the phone records both voices with the same recorder admins use for demo videos (`public/recorder.js`). After the call it uploads the audio (`POST /api/calls/:id/recording`, .m4a from an iPhone or .webm, up to 25 MB) and the transcript (`POST /api/calls/:id/transcript`, the same request paid plans already send). The transcript is what was heard: a line Ping was cut off in ends where it stopped.
+- **Where:** files on the server's disk, outside the main JSON store: `DATA_DIR/recordings/<user id>/<call id>.json` (who, when, which contact, turn mode, length, transcript) and `.m4a` or `.webm` beside it (`server/recordings.js`).
+- **How long:** until the user deletes their account, which deletes their recordings too. Nothing removes them automatically.
+- **Listening:** admins open Settings, Admin tools, Call recordings. Each call shows the account kind (admin, beta tester or YC reviewer) and the first characters of its account id, and opens to a player and the transcript.
+- **Telling users:** the join screen says calls are recorded, and the Privacy Policy and Terms say how. Accounts that joined before calls were recorded see a one-time card on Home (`policyVersion` on the account, `POLICY_VERSION` in `server/calls.js`). Raise `POLICY_VERSION` to show it again after another change users need to know about.
+- **Space:** a 3-minute call is about 1.5–3 MB, so Render's 1 GB disk holds a few hundred calls. Move recordings to cloud storage before there are many testers.
 
 OpenAI's docs don't say how a Realtime call reports running out of credit, so the app treats any call error, failed reply or refused connection whose type or code mentions "quota" or "credit" as out of credit. The app has no documented way to read the remaining balance, so it can only tell once credit has run out, not when it's running low. For that, set a usage alert or auto-recharge in OpenAI's billing settings.
 
@@ -168,7 +182,8 @@ Ping is still a prototype, so do these before inviting testers:
 - Before sharing the beta code, finish the first three items above, because every tester's calls spend your OpenAI credits.
 - Set `ADMIN_INVITE_CODE`, `BETA_INVITE_CODE` and `YC_INVITE_CODE` on Render. There are no defaults, so no one can join without them.
 - Replace the plan test switch with real payments, and remove the `PUT /api/plan` route.
-- Have the draft Privacy Policy and Terms of Service in `public/index.html` reviewed by a lawyer.
+- Have the draft Privacy Policy and Terms of Service in `public/index.html` reviewed by a lawyer, especially the call recordings. They're written for adults in the US only. Testers anywhere else need a different policy first (for example GDPR in the EU and UK).
+- Move call recordings off the Render disk to cloud storage, which also needs adding to the Privacy Policy's list of companies that handle them.
 - Add real accounts in onboarding. An account currently lives on one phone, so losing the app's storage loses access to it.
 
 ## Deploy on Render
@@ -177,12 +192,15 @@ Use **New > Blueprint** and point it at this repo. `render.yaml` sets up a web s
 
 ## Privacy
 
-- Audio goes directly from the browser to OpenAI during a call. Ping's server never sees it and doesn't record calls.
-- At the end of a call, the app sends timing numbers (no audio, no words) to the server to measure conversation quality.
-- In Smart Turn mode, the voice detector and Smart Turn run on the phone. The audio they hear never leaves it. The server only gets the same kind of timing numbers: how many turns Smart Turn or the backup ended, how long decisions and loading took, and whether the call fell back to silence mode.
-- Transcripts appear on the call screen. On a free plan they're never sent to Ping's server. On a paid plan, the text of the last 20 calls is stored to personalize later calls.
-- The server stores each user's time zone, settings, plan, streak (with the day numbers of their last 14 practice days), contacts, stack, push subscription, voicemail list and recent call times, in one JSON file. Calls are deleted after 7 days.
-- There are no names or emails. "Delete my account" removes everything for that user.
+Ping is for adults in the US, and the Privacy Policy and Terms in the app are drafts written for US users only.
+
+- During a call, audio goes directly from the browser to OpenAI. Ping's server doesn't take part in the live call.
+- **Calls are recorded.** After each recorded call, the phone uploads the recording (both voices) and the transcript to Ping's server, where only admins can listen to them. They're kept until the user deletes their account. See "Call recordings". They're never sold, shared, or used to identify or copy anyone's voice.
+- At the end of a call, the app also sends timing numbers to the server to measure conversation quality.
+- In Smart Turn mode, the voice detector and Smart Turn run on the phone, and send no audio anywhere themselves. The call's recording is uploaded as above. Smart Turn adds only the same kind of timing numbers: how many turns Smart Turn or the backup ended, how long decisions and loading took, and whether the call fell back to silence mode.
+- Transcripts appear on the call screen. A recorded call's transcript is kept for review on any plan. On a paid plan, the text of the last 20 calls is also stored with the account to personalize later calls. A free-plan call that isn't recorded sends no transcript to the server.
+- The server stores each user's time zone, settings, plan, streak (with the day numbers of their last 14 practice days), contacts, stack, push subscription, voicemail list, recent call times, whether they've turned recording off, and which version of the Privacy Policy they've seen, in one JSON file. Calls are deleted from it after 7 days. Recordings are separate files (see "Call recordings").
+- There are no names or emails, though a recording can include anything the user says. "Delete my account" removes everything for that user, recordings included.
 - Feedback is stored without the sender's account, and also appears in the server logs.
 - Contacts say they're an AI if asked, and the join screen says so too.
 
@@ -198,6 +216,7 @@ Use **New > Blueprint** and point it at this repo. `render.yaml` sets up a web s
 - `server/openai.js`: the only code that holds the OpenAI key.
 - `server/push.js`: sends web pushes.
 - `server/store.js`: saves state to one JSON file.
+- `server/recordings.js`: call recordings and transcripts, as files outside the JSON store.
 - `public/sw.js`: shows the ring and missed call notifications, and handles tapping them.
 - `public/voice.js`: the WebRTC call, including running the voice model's tools.
 - `public/aizuchi.js`: decides whether talking over the contact was only aizuchi, so the contact carries on instead of answering.

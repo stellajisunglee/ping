@@ -40,6 +40,20 @@ export const hashToken = (token) => createHash('sha256').update(token).digest('h
 export class LimitError extends Error {}
 export class PlanError extends Error {}
 
+// Version 2 of the Privacy Policy is the one where calls are recorded. Accounts that joined
+// before it see a one-time notice on Home.
+export const POLICY_VERSION = 2;
+// Admins and beta testers record every call as part of testing. YC reviewers and everyone else
+// can turn recording off in Manage Account, which stops future recordings only.
+export const recordingLocked = (user) => user.role === 'admin' || user.joinedWith === 'beta';
+export const recordsCalls = (user) => recordingLocked(user) || !user.recordingOff;
+
+// A transcript as the phone sends it, kept to who said what: 'you' or 'contact'.
+export const cleanTranscript = (lines) =>
+  (Array.isArray(lines) ? lines : [])
+    .filter((line) => (line?.from === 'you' || line?.from === 'contact') && typeof line.text === 'string' && line.text.trim())
+    .map(({ from, text }) => ({ from, text: text.trim().slice(0, MAX_LINE_LENGTH) }));
+
 const newUserFields = () => ({
   plan: 'free',
   clearAt: null, // when a downgrade takes effect: the stack shrinks to the new plan's limit
@@ -58,6 +72,8 @@ const newUserFields = () => ({
   connectedCalls: 0, // kept on the account, since calls themselves are removed after 7 days
   lastCallAt: null,
   missedCallToReturn: false, // they missed or declined a call and haven't called back yet, which doesn't use a call
+  recordingOff: false, // turned off in Manage Account, where the account allows it
+  policyVersion: 0, // the Privacy Policy version they've seen. 0: joined before calls were recorded
 });
 
 export class CallEngine {
@@ -107,6 +123,7 @@ export class CallEngine {
       plan: PLANS.includes(plan) ? plan : 'free',
       joinedWith,
       joinedAt: this.now(),
+      policyVersion: POLICY_VERSION, // the join screen tells them calls are recorded
     };
     if (starterStack) addStarterStack(user, { now: this.now(), newId: randomUUID, limit: planLimits(user.plan).savedItems });
     this.store.users[user.id] = user;
@@ -308,6 +325,7 @@ export class CallEngine {
     call.startedAt ??= this.now();
     call.sessions += 1;
     call.turnMode = user.turnMode; // kept with the call, so its metrics report the mode it really used
+    call.recorded ??= recordsCalls(user); // decided once, when the call first connects
     this.store.save();
     const contact = this.#contactOf(call, user);
     const local = localParts(this.now(), user.timeZone);
@@ -562,15 +580,46 @@ export class CallEngine {
     return true;
   }
 
+  // Returns false when the account can't turn recording off.
+  setRecording(user, on) {
+    if (recordingLocked(user)) return false;
+    user.recordingOff = !on;
+    this.store.save();
+    return true;
+  }
+
+  acknowledgePolicy(user) {
+    user.policyVersion = POLICY_VERSION;
+    this.store.save();
+  }
+
+  // The user's call, if it's one being recorded, or null. Only these calls' audio and transcripts are kept.
+  recordedCall(user, callId) {
+    const call = this.store.calls[callId];
+    return call && call.userId === user.id && call.recorded ? call : null;
+  }
+
+  // What's saved alongside a recording, so it still makes sense after the call is removed from the store.
+  recordingInfo(user, call) {
+    return {
+      userId: user.id,
+      callId: call.id,
+      joinedWith: user.joinedWith,
+      plan: user.plan,
+      contactName: this.#contactOf(call, user).name,
+      direction: call.direction,
+      turnMode: call.turnMode ?? null,
+      at: call.connectedAt ?? call.startedAt ?? call.createdAt,
+      seconds: call.startedAt && call.endedAt ? Math.round((call.endedAt - call.startedAt) / 1000) : null,
+    };
+  }
+
   // Only subscribers' conversations are kept, to personalize their future calls.
   saveConversation(user, callId, lines) {
     if (!isPaid(user.plan) || !Array.isArray(lines)) return false;
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id) return false;
-    const cleanLines = lines
-      .filter((line) => (line?.from === 'you' || line?.from === 'contact') && typeof line.text === 'string' && line.text.trim())
-      .slice(-MAX_TRANSCRIPT_LINES)
-      .map(({ from, text }) => ({ from, text: text.trim().slice(0, MAX_LINE_LENGTH) }));
+    const cleanLines = cleanTranscript(lines).slice(-MAX_TRANSCRIPT_LINES);
     if (!cleanLines.some((line) => line.from === 'you')) return false;
     const conversation = { callId, contactId: call.contactId, at: this.now(), lines: cleanLines };
     user.conversations = [conversation, ...user.conversations.filter((saved) => saved.callId !== callId)].slice(0, KEEP_CONVERSATIONS);

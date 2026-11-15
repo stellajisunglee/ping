@@ -36,7 +36,7 @@
         <button class="primary" type="submit">Join</button>
         <p id="join-error" class="error" role="alert" hidden></p>
       </form>
-      <p class="fine">Ping is an AI. During a call, your voice goes to OpenAI so Ping can reply. Calls aren't recorded.</p>
+      <p class="fine">Ping is an AI, for adults in the US. During a call, your voice goes to OpenAI so Ping can reply. Calls are recorded and transcribed so the Ping team can review them and improve Ping. By joining, you agree to the Privacy Policy and Terms of Service, which are in Settings.</p>
     </main>
 
     <main id="screen-enable" class="screen centered" hidden>
@@ -57,6 +57,15 @@
         <button id="home-plan" class="badge plan-badge" type="button" data-go="plan"></button>
       </header>
       <p id="home-notice" class="notice" role="status" hidden></p>
+      <section id="policy-notice" class="card policy-notice" aria-labelledby="policy-notice-title" hidden>
+        <h2 id="policy-notice-title">Calls are now recorded</h2>
+        <p>To improve Ping, calls are now recorded and transcribed, and the Ping team may listen to them. The Privacy Policy has the details.</p>
+        <p id="policy-notice-choice" class="muted">You can turn this off in Manage Account.</p>
+        <div class="button-row">
+          <button class="secondary" type="button" data-go="privacy">Privacy Policy</button>
+          <button id="policy-notice-ok" class="primary" type="button">OK</button>
+        </div>
+      </section>
       <section class="card call-card" aria-label="Call">
         <p id="home-status" class="muted"></p>
         <button id="home-call-button" class="primary wide call-now" type="button">Call Ping now</button>
@@ -186,14 +195,20 @@
         <p class="muted">iPhone screen recordings go silent during calls. This saves both voices as an audio file to line up with a screen recording. The recording stays on this phone until you save it, and the next recorded call replaces it.</p>
         <button id="save-recording-button" class="secondary wide" type="button" hidden>Save last call's recording</button>
         <p id="recording-status" class="muted" role="status" hidden></p>
+        <button class="secondary wide" type="button" data-go="recordings">Call recordings</button>
       </section>
     </main>
 
     <main id="screen-account" class="screen tabbed" hidden>
       <button class="back" type="button" data-back>‹ Settings</button>
       <h1>Manage Account</h1>
-      <p class="muted">Your account lives on this phone, with no email or password yet. Deleting it removes your streak, stack, contacts and saved conversations.</p>
+      <p class="muted">Your account lives on this phone, with no email or password yet. Deleting it removes your streak, stack, contacts, saved conversations and call recordings.</p>
       <p id="account-error" class="error" role="alert" hidden></p>
+      <div class="setting row">
+        <label for="recording-input">Use my calls to improve Ping</label>
+        <input id="recording-input" type="checkbox" role="switch" />
+      </div>
+      <p id="recording-hint" class="muted"></p>
       <button id="delete-button" class="text-danger wide" type="button">Delete my account</button>
     </main>
 
@@ -279,16 +294,26 @@
       <button class="back" type="button" data-back>‹ Settings</button>
       <h1>Privacy Policy</h1>
       <p class="notice warning">Draft for testing. It needs a legal review before launch.</p>
-      <h2>Your voice</h2>
-      <p>During a call, your voice goes directly from your phone to OpenAI so the AI can reply. Ping doesn't record audio.</p>
-      <h2>What Ping stores</h2>
-      <p>Which invite code you joined with and when, how many calls you've made and the minutes they used, your time zone, settings, plan, streak, notification details, voicemails, recent call times, your word and sentence stacks, and your contacts.</p>
+      <h2>Who Ping is for</h2>
+      <p>Ping is for adults, 18 or older, in the United States.</p>
+      <h2>Your voice and your calls</h2>
+      <p>During a call, your voice goes from your phone to OpenAI so the AI can reply. Ping records each call, both your voice and the AI's, and keeps a written transcript of it. After the call, your phone uploads the recording and the transcript to Ping's server, so the Ping team can listen to them and use them to improve Ping's conversations.</p>
+      <h2>Who sees your recordings</h2>
+      <p>Only the Ping team. Ping doesn't sell or share your recordings, play them for anyone else, or use them to identify you by your voice or copy your voice. Two companies handle them for Ping: OpenAI processes calls and transcripts, and Render hosts Ping's server, where the recordings are stored.</p>
+      <h2>Turning recording off</h2>
+      <p>On most accounts, you can turn off "Use my calls to improve Ping" in Manage Account. Calls after that aren't recorded, and calls recorded before are kept. On beta tester and admin accounts, recording is part of testing, so it stays on.</p>
+      <h2>How long Ping keeps them</h2>
+      <p>Recordings and transcripts are kept until you delete your account.</p>
+      <h2>What else Ping stores</h2>
+      <p>Which invite code you joined with and when, how many calls you've made, your time zone, settings, plan, streak, notification details, voicemails, recent call times, your word and sentence stacks, your contacts, and timing numbers from each call, such as how long Ping took to reply.</p>
       <h2>Conversations</h2>
-      <p>On a paid plan, the text of your recent calls is stored to personalize future calls. On the free plan, conversation text isn't stored.</p>
+      <p>On a paid plan, the text of your recent calls is also used to personalize future calls.</p>
       <h2>Cancelling and deleting</h2>
-      <p>If you move to a smaller plan, words and sentences beyond its limit, and on the free plan your saved conversations, clear after 30 days. Deleting your account in Manage Account removes your account data right away.</p>
+      <p>If you move to a smaller plan, words and sentences beyond its limit, and on the free plan your saved conversations, clear after 30 days. Deleting your account in Manage Account removes your account data right away, including your call recordings and transcripts.</p>
       <h2>Feedback</h2>
       <p>Anything you send through Feedback is stored without your account attached.</p>
+      <h2>Changes</h2>
+      <p>If this policy changes in a way that affects you, Ping will tell you in the app.</p>
     </main>
 
     <main id="screen-terms" class="screen tabbed prose" hidden>
@@ -297,12 +322,24 @@
       <p class="notice warning">Draft for testing. It needs a legal review before launch.</p>
       <h2>Prototype</h2>
       <p>Ping is an early prototype offered by invitation. It may change, stop working, or lose data.</p>
+      <h2>Who can use Ping</h2>
+      <p>You must be 18 or older and in the United States.</p>
       <h2>AI conversations</h2>
       <p>Everyone you talk to on Ping is an AI. It can make mistakes, including about Japanese, so don't rely on it for anything important.</p>
+      <h2>Recorded calls</h2>
+      <p>Calls are recorded and transcribed, as the Privacy Policy describes. If you joined as a beta tester, recording is part of testing and can't be turned off. Please don't share sensitive information on calls, such as passwords, financial details or health information.</p>
       <h2>Using Ping</h2>
       <p>Please don't misuse the service or try to get around its limits.</p>
       <h2>Plans</h2>
       <p>Paid plans are in test mode, and nothing is charged.</p>
+    </main>
+
+    <main id="screen-recordings" class="screen tabbed" hidden>
+      <button class="back" type="button" data-back>‹ Settings</button>
+      <h1>Call recordings</h1>
+      <p class="muted">Every recorded call, newest first. Only admins can see this page.</p>
+      <p id="recordings-error" class="error" role="alert" hidden></p>
+      <ol id="recordings-list" class="recordings"></ol>
     </main>
 
     <main id="screen-feedback" class="screen tabbed" hidden>

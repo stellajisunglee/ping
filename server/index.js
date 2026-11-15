@@ -7,7 +7,8 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
-import { CallEngine, LimitError, PlanError } from './calls.js';
+import { CallEngine, cleanTranscript, LimitError, PlanError, POLICY_VERSION, recordingLocked, recordsCalls } from './calls.js';
+import { audioExtension, Recordings } from './recordings.js';
 import { PING, PLAN_LIMITS } from './contacts.js';
 import { createPushSender } from './push.js';
 import { createOpenAI } from './openai.js';
@@ -19,6 +20,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = join(ROOT, 'public');
 const TICK_MS = 1_000;
 const MAX_BODY_BYTES = 64_000; // room for a full call's transcript
+const MAX_RECORDING_BYTES = 25_000_000; // a 10-minute call is about 10 MB from an iPhone
+const MAX_RECORDED_LINES = 400;
 const MAX_FEEDBACK_LENGTH = 2_000;
 const MAX_WRONG_CODES_PER_MINUTE = 10;
 const MAX_TRACKED_IPS = 10_000;
@@ -80,15 +83,28 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-async function readJson(req) {
+class TooLargeError extends Error {}
+
+async function readBody(req, limit) {
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > MAX_BODY_BYTES) throw new SyntaxError('Body too large');
+    if (size > limit) throw new TooLargeError('Body too large');
     chunks.push(chunk);
   }
-  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+  return Buffer.concat(chunks);
+}
+
+async function readJson(req) {
+  let body;
+  try {
+    body = await readBody(req, MAX_BODY_BYTES);
+  } catch (error) {
+    if (error instanceof TooLargeError) throw new SyntaxError(error.message);
+    throw error;
+  }
+  return body.length ? JSON.parse(body.toString('utf8')) : {};
 }
 
 const isSubscription = (value) =>
@@ -96,6 +112,7 @@ const isSubscription = (value) =>
 
 export function createApp({ engine, openai, config }) {
   const { inviteCodes, vapidPublicKey, model, voice, dataDir } = config;
+  const recordings = new Recordings(config.recordingsDir ?? join(dataDir ?? join(ROOT, 'data'), 'recordings'));
   const registerAttempts = new Map();
   const voiceMessageJobs = new Map();
   const voiceMessageFile = (contactId) => join(dataDir ?? ROOT, 'voice-messages', `${contactId}.mp3`);
@@ -172,6 +189,8 @@ export function createApp({ engine, openai, config }) {
       sentences: user.sentences,
       calling: engine.calling(user),
       planLimits: PLAN_LIMITS,
+      recording: { on: recordsCalls(user), canTurnOff: !recordingLocked(user) },
+      policyNotice: (user.policyVersion ?? 0) < POLICY_VERSION, // joined before calls were recorded, and hasn't seen the notice
     };
   }
 
@@ -216,6 +235,7 @@ export function createApp({ engine, openai, config }) {
 
     if (method === 'DELETE' && pathname === '/api/me') {
       for (const contact of user.customContacts) rmSync(voiceMessageFile(contact.id), { force: true });
+      recordings.deleteUser(user.id);
       engine.deleteUser(user);
       return json(res, 200, {});
     }
@@ -241,6 +261,37 @@ export function createApp({ engine, openai, config }) {
       if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
       engine.requestTestRing(user);
       return json(res, 202, {});
+    }
+
+    if (method === 'PUT' && pathname === '/api/recording') {
+      const { on } = await readJson(req);
+      if (typeof on !== 'boolean') return json(res, 400, { error: 'Invalid request.' });
+      if (!engine.setRecording(user, on)) return json(res, 403, { error: 'Recording is part of testing, so it stays on for this account.' });
+      return json(res, 200, { recording: { on: recordsCalls(user), canTurnOff: true } });
+    }
+
+    if (method === 'POST' && pathname === '/api/policy/seen') {
+      engine.acknowledgePolicy(user);
+      return json(res, 200, {});
+    }
+
+    if (method === 'GET' && pathname === '/api/admin/recordings') {
+      if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
+      return json(res, 200, { recordings: recordings.list() });
+    }
+
+    const recordingRoute = pathname.match(/^\/api\/admin\/recordings\/([\w-]+)(\/audio)?$/);
+    if (method === 'GET' && recordingRoute) {
+      if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
+      if (!recordingRoute[2]) {
+        const found = recordings.find(recordingRoute[1]);
+        return found ? json(res, 200, found) : json(res, 404, { error: 'Recording not found.' });
+      }
+      const audio = recordings.audio(recordingRoute[1]);
+      if (!audio) return json(res, 404, { error: 'Recording not found.' });
+      res.writeHead(200, { 'Content-Type': audio.type, 'Content-Length': audio.size, 'Cache-Control': 'no-store', ...SECURITY_HEADERS });
+      audio.stream().pipe(res);
+      return;
     }
 
     if (method === 'GET' && pathname === '/api/admin/invites') {
@@ -370,10 +421,33 @@ export function createApp({ engine, openai, config }) {
       return json(res, 201, {});
     }
 
+    // The phone sends a transcript after every recorded call, and after every call on a paid plan.
+    // A paid plan keeps it to personalize later calls; a recorded call keeps it for review.
     const transcript = pathname.match(/^\/api\/calls\/([\w-]+)\/transcript$/);
     if (method === 'POST' && transcript) {
       const { lines } = await readJson(req);
-      return json(res, 200, { saved: engine.saveConversation(user, transcript[1], lines) });
+      const recordedCall = engine.recordedCall(user, transcript[1]);
+      const recorded = recordedCall ? recordings.saveTranscript(engine.recordingInfo(user, recordedCall), cleanTranscript(lines).slice(-MAX_RECORDED_LINES)) : false;
+      return json(res, 200, { saved: engine.saveConversation(user, transcript[1], lines), recorded });
+    }
+
+    // The call's audio, both voices, uploaded by the phone after a recorded call.
+    const recordingUpload = pathname.match(/^\/api\/calls\/([\w-]+)\/recording$/);
+    if (method === 'POST' && recordingUpload) {
+      const recordedCall = engine.recordedCall(user, recordingUpload[1]);
+      if (!recordedCall) return json(res, 404, { error: 'This call is not being recorded.' });
+      const extension = audioExtension(req.headers['content-type']);
+      if (!extension) return json(res, 415, { error: 'Unsupported audio format.' });
+      let audio;
+      try {
+        audio = await readBody(req, MAX_RECORDING_BYTES);
+      } catch (error) {
+        if (error instanceof TooLargeError) return json(res, 413, { error: 'The recording is too large.' });
+        throw error;
+      }
+      if (!audio.length) return json(res, 400, { error: 'The recording is empty.' });
+      recordings.saveAudio(engine.recordingInfo(user, recordedCall), audio, extension);
+      return json(res, 201, {});
     }
 
     const heard = pathname.match(/^\/api\/messages\/([\w-]+)\/heard$/);

@@ -1,6 +1,6 @@
 import { initContacts } from './contacts.js';
 import { charsSaid, createPace } from './reveal.js';
-import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdmin, isPaid, onShow, readToken, refresh, setError, show, showCallingNote, showPlanBadge, state, writeToken } from './lib.js';
+import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdmin, isPaid, onShow, readToken, refresh, setError, show, showCallingNote, showPlanBadge, state, upload, writeToken } from './lib.js';
 import { initSettings, keepRecording, recordCallsOn } from './settings.js';
 import { audioUnlocked, startRingtone, unlockAudio } from './ringtone.js';
 import { initStack, renderStackTiles } from './stack.js';
@@ -197,6 +197,19 @@ function renderHome() {
   setError('home-clear', clearWarning());
   renderStackTiles();
   renderVoicemail();
+  renderPolicyNotice();
+}
+
+// Accounts that joined before calls were recorded are told once, on Home.
+function renderPolicyNotice() {
+  $('policy-notice').hidden = !state.me.policyNotice;
+  $('policy-notice-choice').hidden = !state.me.recording?.canTurnOff;
+}
+
+async function dismissPolicyNotice() {
+  $('policy-notice').hidden = true;
+  state.me.policyNotice = false;
+  await api('/api/policy/seen', { method: 'POST' }).catch((error) => console.warn('Could not save that the notice was seen', error));
 }
 
 const goHome = () => go('home');
@@ -425,8 +438,9 @@ function startCountdown(seconds) {
   callCountdown = setInterval(update, 1000);
 }
 
-async function saveTranscript(callId) {
-  if (!isPaid()) return;
+// Paid plans keep the transcript to personalize later calls, and recorded calls keep it for review.
+async function saveTranscript(callId, recorded) {
+  if (!isPaid() && !recorded) return;
   const lines = [...transcript.values()].map((line) => ({ from: line.from, text: heardText(line) })).filter((line) => line.text.trim());
   await api(`/api/calls/${callId}/transcript`, { method: 'POST', body: { lines } }).catch((error) => console.warn('Could not save the conversation', error));
 }
@@ -449,8 +463,10 @@ function beginCall(callId, contactName = 'Ping') {
   setMuted(false);
   show('call');
   let outOfCredit = false;
-  const record = recordCallsOn();
-  if (record) keepRecording({ recording: null, waiting: true });
+  // Admins can keep a copy on the phone for demo videos. Accounts with recording on upload it for review.
+  const keepOnPhone = recordCallsOn();
+  const forReview = Boolean(state.me.recording?.on);
+  if (keepOnPhone) keepRecording({ recording: null, waiting: true });
   activeCall = startCall({
     callId,
     api,
@@ -463,8 +479,11 @@ function beginCall(callId, contactName = 'Ping') {
     },
     onLine: showLine,
     onContactAudio,
-    record,
-    onRecording: (recording, problem) => keepRecording({ recording, problem }),
+    record: keepOnPhone || forReview,
+    onRecording: (recording, problem) => {
+      if (keepOnPhone) keepRecording({ recording, problem });
+      if (forReview && recording) upload(`/api/calls/${callId}/recording`, recording.blob).catch((error) => console.warn('Could not upload the recording', error));
+    },
     onOutOfCredit: () => {
       if (!isAdmin()) return;
       outOfCredit = true;
@@ -490,7 +509,7 @@ function beginCall(callId, contactName = 'Ping') {
       $('call-avatar').classList.remove('speaking');
       // Tells the server the call is over, so it can't be reconnected.
       await api(`/api/calls/${callId}/ended`, { method: 'POST' }).catch((error) => console.warn('Could not end the call', error));
-      await saveTranscript(callId);
+      await saveTranscript(callId, forReview);
       await refresh().catch(() => {});
       goHome();
       notice(outOfCredit ? OUT_OF_CREDIT_NOTICE : endedNotice(reason));
@@ -562,6 +581,7 @@ function bindEvents() {
   $('enable-button').addEventListener('click', enable);
   $('answer-button').addEventListener('click', () => answer(ringingCallId));
   $('outgoing-cancel').addEventListener('click', cancelOutgoing);
+  $('policy-notice-ok').addEventListener('click', dismissPolicyNotice);
   $('home-call-button').addEventListener('click', () => callContact(homeContact()?.id ?? 'ping'));
   $('decline-button').addEventListener('click', decline);
   $('hangup-button').addEventListener('click', () => activeCall?.hangUp());

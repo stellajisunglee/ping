@@ -1,4 +1,5 @@
-// Records a call for admins: both voices mixed into one audio file that stays on this phone.
+// Records a call: both voices mixed into one audio file. The app uploads it for review when the account's
+// calls are recorded, and admins can also keep it on the phone.
 // iPhone screen recordings go silent once a call opens the microphone, so for a demo video,
 // screen record the call as usual and line this file up with it afterwards.
 // No browser globals are read at import time, so the tests can pass stand-ins.

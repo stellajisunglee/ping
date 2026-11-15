@@ -1,6 +1,6 @@
 // The Settings tab and the pages under it.
 
-import { $, api, clearWarning, el, go, isAdmin, onShow, savedText, setError, show, state, writeToken } from './lib.js';
+import { $, api, clearWarning, el, fetchBlob, go, isAdmin, onShow, savedText, setError, show, state, writeToken } from './lib.js';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FREQUENCY_BUTTONS = { daily: 'Daily', 'every-other-day': 'Every other day', weekdays: 'Weekdays only', weekends: 'Weekends only', custom: 'Custom' };
@@ -29,6 +29,7 @@ function callDetails(plan) {
 }
 
 const INVITE_NAMES = { yc: 'YC reviewers', beta: 'Beta testers', admin: 'Admins' };
+const ACCOUNT_KINDS = { yc: 'YC reviewer', beta: 'Beta tester', admin: 'Admin' };
 const INVITE_ORDER = ['yc', 'beta', 'admin'];
 
 const hourLabel = (hour) => `${String(hour).padStart(2, '0')}:00`;
@@ -273,8 +274,81 @@ async function sendFeedback(event) {
   }
 }
 
+// Manage Account's recording switch. Admin and beta tester accounts can't turn it off.
+function renderAccount() {
+  const { on, canTurnOff } = state.me.recording;
+  $('recording-input').checked = on;
+  $('recording-input').disabled = !canTurnOff;
+  $('recording-hint').textContent = canTurnOff
+    ? 'Calls are recorded and transcribed so the Ping team can review them and improve Ping. Turning this off stops recording future calls.'
+    : 'Calls are recorded and transcribed so the Ping team can review them. Recording is part of testing, so it stays on for this account.';
+}
+
+async function changeRecording(on) {
+  setError('account-error', null);
+  try {
+    const { recording } = await api('/api/recording', { method: 'PUT', body: { on } });
+    state.me.recording = recording;
+  } catch (error) {
+    setError('account-error', error.message);
+  }
+  renderAccount();
+}
+
+const callLength = (seconds) => (seconds == null ? '' : ` · ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
+
+// One recorded call. Its audio and transcript load when it's opened, so the list stays quick.
+function recordingRow(call) {
+  const when = new Date(call.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const who = `${ACCOUNT_KINDS[call.joinedWith] ?? call.joinedWith} ${call.userId.slice(0, 6)}`;
+  const details = el(
+    'details',
+    { className: 'recording' },
+    el('summary', {}, el('strong', { textContent: `${when}${callLength(call.seconds)}` }), el('span', { className: 'muted', textContent: ` ${who} · ${call.contactName} · ${call.turnMode ?? 'silence'}` })),
+  );
+  let loaded = false;
+  details.addEventListener('toggle', async () => {
+    if (!details.open || loaded) return;
+    loaded = true;
+    const body = el('div', { className: 'recording-body' });
+    details.append(body);
+    try {
+      if (call.audio) {
+        const audio = await fetchBlob(`/api/admin/recordings/${call.callId}/audio`);
+        body.append(el('audio', { controls: true, preload: 'metadata', src: URL.createObjectURL(audio) }));
+      } else {
+        body.append(el('p', { className: 'muted', textContent: 'No audio was uploaded for this call.' }));
+      }
+      const { lines } = await api(`/api/admin/recordings/${call.callId}`);
+      body.append(
+        lines.length
+          ? el('ol', { className: 'recording-lines' }, ...lines.map((line) => el('li', { className: line.from, textContent: `${line.from === 'you' ? 'User' : call.contactName}: ${line.text}` })))
+          : el('p', { className: 'muted', textContent: 'No transcript was saved for this call.' }),
+      );
+    } catch (error) {
+      body.append(el('p', { className: 'error', textContent: error.message }));
+    }
+  });
+  return el('li', {}, details);
+}
+
+async function renderRecordings() {
+  setError('recordings-error', null);
+  const list = $('recordings-list');
+  list.replaceChildren(el('li', { className: 'muted', textContent: 'Loading…' }));
+  try {
+    const { recordings } = await api('/api/admin/recordings');
+    list.replaceChildren(...(recordings.length ? recordings.map(recordingRow) : [el('li', { className: 'muted', textContent: 'No recorded calls yet.' })]));
+  } catch (error) {
+    list.replaceChildren();
+    setError('recordings-error', error.message);
+  }
+}
+
 export function initSettings() {
   onShow('settings', renderSettings);
+  onShow('account', renderAccount);
+  onShow('recordings', renderRecordings);
   onShow('manage-calls', renderManageCalls);
   onShow('plan', renderPlan);
   onShow('feedback', () => {
@@ -300,6 +374,7 @@ export function initSettings() {
   $('record-input').addEventListener('change', (event) => setRecordSwitch(event.target.checked));
   $('save-recording-button').addEventListener('click', saveRecording);
   $('delete-button').addEventListener('click', deleteAccount);
+  $('recording-input').addEventListener('change', (event) => changeRecording(event.target.checked));
   $('feedback-form').addEventListener('submit', sendFeedback);
   $('plan-button').addEventListener('click', () => go('plan'));
 }

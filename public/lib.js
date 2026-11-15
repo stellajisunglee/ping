@@ -18,6 +18,7 @@ const SCREEN_TABS = {
   privacy: 'settings',
   terms: 'settings',
   feedback: 'settings',
+  recordings: 'settings',
 };
 const SCREENS = [...Object.keys(SCREEN_TABS), 'install', 'join', 'enable', 'ringing', 'outgoing', 'call'];
 const renderers = {};
@@ -121,6 +122,32 @@ export async function api(path, { method = 'GET', body } = {}) {
     throw error;
   }
   return data;
+}
+
+// Sends a file as the request body, like a call's recording.
+export async function upload(path, blob) {
+  const { token } = state;
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': blob.type || 'application/octet-stream' },
+    body: blob,
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error ?? 'Upload failed.');
+  }
+}
+
+// Fetches a file only signed-in users can get, like a call recording on the admin page.
+// An <audio> tag can't send the sign-in header itself, so the page plays the file from memory.
+export async function fetchBlob(path) {
+  const { token } = state;
+  const response = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error ?? 'Something went wrong. Please try again.');
+  }
+  return response.blob();
 }
 
 export async function refresh() {

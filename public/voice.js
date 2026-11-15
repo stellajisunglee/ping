@@ -32,7 +32,7 @@ export function startCall({
   onNeedsTap,
   onContactAudio = () => {}, // when the contact's voice starts, finishes or is cut off, per line
   onOutOfCredit = () => {}, // OpenAI refused the call because the account has no credit left
-  record = false, // admins only: record both voices on this phone
+  record = false, // record both voices: for review, and for admins' demo videos
   onRecording = () => {}, // once the call ends: { blob, fileName }, or null with the reason it couldn't record
   recorderEngine = { start: startRecording }, // swapped for a stand-in in tests
   smartTurnEngine = { load: loadSmartTurn, start: startSmartTurn }, // swapped for a stand-in in tests
