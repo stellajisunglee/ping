@@ -1,0 +1,365 @@
+[
+  {
+    "id": "word-meaning-japanese",
+    "area": "help",
+    "title": "Asks what a word means, in Japanese",
+    "question": "weekend",
+    "turns": [
+      "「予定」ってどういう意味？"
+    ],
+    "expect": "Ping explains 予定 in one short English sentence, saves it to the stack, then carries on in simple Japanese.",
+    "checks": [
+      {
+        "type": "calledTool",
+        "name": "add_to_stack",
+        "turn": 1
+      },
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "word-meaning-english",
+    "area": "help",
+    "title": "Asks what a word means, in English",
+    "question": "lately",
+    "turns": [
+      "Sorry, what does 最近 mean?"
+    ],
+    "expect": "Ping explains 最近 in one short English sentence, saves it to the stack, then asks again in simple Japanese.",
+    "checks": [
+      {
+        "type": "calledTool",
+        "name": "add_to_stack",
+        "turn": 1
+      },
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "how-do-you-say",
+    "area": "help",
+    "title": "Asks how to say something",
+    "question": "weekend",
+    "turns": [
+      "How do you say 'hiking' in Japanese?"
+    ],
+    "expect": "Ping gives the Japanese word in a short English answer, saves it to the stack, then returns to the conversation in Japanese.",
+    "checks": [
+      {
+        "type": "calledTool",
+        "name": "add_to_stack",
+        "turn": 1
+      },
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "translate-request",
+    "area": "repair",
+    "title": "Doesn't understand Ping's question",
+    "question": "lately",
+    "turns": [
+      "Sorry, I didn't understand. Can you say that in English?"
+    ],
+    "expect": "Ping says what it just asked in one short English sentence, then asks again in easier Japanese. It does not repeat the same Japanese sentence.",
+    "checks": [
+      {
+        "type": "usesEnglish",
+        "turn": 1
+      },
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      },
+      {
+        "type": "noRepeat"
+      }
+    ]
+  },
+  {
+    "id": "still-lost",
+    "area": "repair",
+    "title": "Still lost after one rephrase",
+    "question": "doing",
+    "turns": [
+      "えっと…わかりません。",
+      "すみません、まだわかりません…"
+    ],
+    "expect": "Each time, Ping makes it easier: first simpler Japanese, then English help or an easier question. It never repeats a sentence it already said.",
+    "checks": [
+      {
+        "type": "noRepeat"
+      }
+    ]
+  },
+  {
+    "id": "how-to-answer",
+    "area": "repair",
+    "title": "Asks how to answer",
+    "question": "day",
+    "turns": [
+      "How should I answer that? Like what kind of answer?"
+    ],
+    "expect": "Ping explains in a short English sentence what it was asking and gives an example of a simple answer, then invites the learner to try in Japanese. It doesn't just repeat the question.",
+    "checks": [
+      {
+        "type": "usesEnglish",
+        "turn": 1
+      },
+      {
+        "type": "noRepeat"
+      }
+    ]
+  },
+  {
+    "id": "culture-question",
+    "area": "culture",
+    "title": "Asks a culture question in English",
+    "question": "eat",
+    "turns": [
+      "Wait, is it rude to eat while walking in Japan?"
+    ],
+    "expect": "Ping answers in one or two short English sentences, then picks the conversation back up in Japanese.",
+    "checks": [
+      {
+        "type": "calledTool",
+        "name": "back_to_conversation",
+        "turn": 1
+      },
+      {
+        "type": "usesEnglish",
+        "turn": 1
+      },
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "english-answer",
+    "area": "language",
+    "title": "Answers in English",
+    "question": "did",
+    "turns": [
+      "I went to the gym and then cooked dinner."
+    ],
+    "expect": "Ping reacts warmly and gently encourages the learner to try saying it in Japanese, perhaps offering a few words to start with.",
+    "checks": [
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "short-beginner-answer",
+    "area": "conversation",
+    "title": "Gives a short beginner answer",
+    "question": "day",
+    "turns": [
+      "いい日です。"
+    ],
+    "expect": "Ping reacts warmly and asks one simple follow-up question in Japanese.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      },
+      {
+        "type": "maxSentences",
+        "max": 3,
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "hesitant-answer",
+    "area": "conversation",
+    "title": "Answers with pauses and fillers",
+    "question": "weekend",
+    "turns": [
+      "えーと…週末は…あの…友達と…映画を…見ます。"
+    ],
+    "expect": "Ping responds to the content (the movie with a friend), not to the hesitation, and asks a simple related question. It doesn't comment on the pauses.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "grammar-mistake",
+    "area": "conversation",
+    "title": "Makes a grammar mistake",
+    "question": "did",
+    "turns": [
+      "昨日、公園を行きました。"
+    ],
+    "expect": "Ping keeps the conversation going. If it corrects the mistake (公園に行きました), it does so lightly, by using the right form naturally, without explaining grammar.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "asks-about-ping",
+    "area": "persona",
+    "title": "Asks Ping a question back",
+    "question": "doing",
+    "turns": [
+      "テレビを見ています。Pingさんは今何をしていますか？"
+    ],
+    "expect": "Ping answers briefly from its own day, like a friend, then turns the conversation back to the learner.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "off-topic",
+    "area": "persona",
+    "title": "Steers far off Ping's topic",
+    "question": "eat",
+    "turns": [
+      "株はどれを買ったらいいですか？"
+    ],
+    "expect": "Ping says it isn't sure (ちょっとわかりません or similar) and steers back to daily life, without giving financial advice.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "slow-down",
+    "area": "settings",
+    "title": "Asks Ping to slow down",
+    "question": "lately",
+    "turns": [
+      "Could you speak a bit slower please?"
+    ],
+    "expect": "Ping changes its speed, confirms in a few English words, then asks again in Japanese.",
+    "checks": [
+      {
+        "type": "calledTool",
+        "name": "update_settings",
+        "turn": 1
+      },
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "stop-calling",
+    "area": "confirmation",
+    "title": "Says to stop calling",
+    "question": "day",
+    "aspirational": true,
+    "turns": [
+      "Actually, please stop calling me."
+    ],
+    "expect": "Turning calls off is a big change, so Ping first checks that the learner means it (for example, asking whether they want a break or no more calls at all) before changing anything.",
+    "checks": [
+      {
+        "type": "didNotCallTool",
+        "name": "update_settings",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "goodbye",
+    "area": "closing",
+    "title": "Says goodbye",
+    "question": "weekend",
+    "turns": [
+      "そろそろ行かなきゃ。またね！"
+    ],
+    "expect": "Ping says a short, warm goodbye in Japanese and ends the call.",
+    "checks": [
+      {
+        "type": "calledTool",
+        "name": "end_call",
+        "turn": 1
+      },
+      {
+        "type": "noEnglish",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "not-a-good-time",
+    "area": "closing",
+    "title": "Ping calls at a bad time",
+    "question": "day",
+    "incoming": true,
+    "turns": [
+      "Sorry, I'm in a meeting right now."
+    ],
+    "expect": "Ping says it will call another time (わかりました。また電話しますね！) and ends the call, without asking its question.",
+    "checks": [
+      {
+        "type": "calledTool",
+        "name": "end_call",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "casual-style",
+    "area": "conversation",
+    "title": "Casual speech style",
+    "question": "eat",
+    "settings": {
+      "formality": "casual"
+    },
+    "turns": [
+      "ラーメン食べた！おいしかった。"
+    ],
+    "expect": "Ping uses casual Japanese throughout (no です/ます), reacts to the ramen, and asks a casual follow-up.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "intermediate-learner",
+    "area": "conversation",
+    "title": "Intermediate learner, longer answer",
+    "question": "lately",
+    "settings": {
+      "proficiency": "intermediate"
+    },
+    "turns": [
+      "最近は仕事が忙しくて、あまり寝られていないんですが、週末に温泉に行く予定なので楽しみにしています。"
+    ],
+    "expect": "Ping answers in natural everyday Japanese suited to an intermediate learner (not simplified baby talk), reacts to the onsen plan, and asks a follow-up.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      }
+    ]
+  }
+]
