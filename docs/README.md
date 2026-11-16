@@ -24,6 +24,7 @@ Ping phones Japanese learners for short speaking practice. It's a web app instal
 | [../README.md](../README.md) | The operating manual: behavior, plans, settings, privacy, deploy. Kept up to date with every behavior change. |
 | [turn-taking-plan.md](turn-taking-plan.md) | The six-session turn-taking build plan (Sessions 0–6), with what happened in each. |
 | [../bench/README.md](../bench/README.md), [../bench/RESULTS.md](../bench/RESULTS.md) | The end-of-turn benchmark: how to run it, and the results. |
+| [deepgram-friction-log.md](deepgram-friction-log.md) | What building on Deepgram's Voice Agent was like: friction, what worked, open questions. |
 | [learning-metrics.md](learning-metrics.md) | Proposal: how to measure language learning in Ping, and why it's the moat. |
 | [../evals/README.md](../evals/README.md) | Conversation evals: scenarios, code checks, the Claude judge, and checking the judge against your labels. |
 | [spec-changes-and-suggestions.md](spec-changes-and-suggestions.md) | How the build differs from the original product spec, and UX and naturalness ideas. |

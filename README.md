@@ -49,6 +49,12 @@ OpenAI stops the contact's audio as soon as the user makes a sound, and the app,
 
 The **call log** keeps one entry per call that connected (`callLog` in the data file, the latest 5,000): the account's invite code and id, when, the engine, the turn mode it was assigned and the one it actually ended in (Smart Turn can fall back to silence), whether it was random or manual, and how it went: length, gap before replies, wait after the user stopped, suspected cut-offs, barge-ins, ignored aizuchi, turns, and the user's two ratings. Numbers and ids only. Admins see it under Settings, Admin tools, Call log. Deleting an account removes its entries.
 
+**Deepgram Voice Agent (admins only for now).** A second engine, `deepgram-agent`, built differently from OpenAI's speech-to-speech model: Deepgram Flux (`flux-general-multi`, hinted Japanese and English) hears the learner and decides when their turn is over, an OpenAI model run by Deepgram (`DEEPGRAM_THINK_MODEL`, default `gpt-4.1-mini`) writes the reply from Ping's same instructions and tools, and a Japanese Flux voice (`DEEPGRAM_VOICE`, default `flux-ayumi-ja`) speaks it.
+- **Connecting:** the server mints a 30-second Deepgram token per call (the key needs Deepgram's Member role) and sends the agent settings (`server/deepgram.js`). The phone connects straight to Deepgram with the token as the `bearer` WebSocket subprotocol, streams the microphone as 16 kHz 16-bit audio through the same worklet Smart Turn uses, and plays Deepgram's 24 kHz audio through the call's `<audio>` element, so the speaker button and recording work (`public/deepgram-call.js`).
+- **Turns:** Flux's patience follows "time to answer" (`FLUX_PATIENCE`: how sure Flux must be the learner is done, and the silence that ends the turn anyway); the voice's speed follows the speed setting. Both update mid-call. These calls have no turn mode, so it's blank in the call log.
+- **What's different from OpenAI calls:** Deepgram speaks the greeting itself; near the time limit the phone has it say a fixed goodbye (`TIME_UP_LINES`), because Deepgram can't take a mid-call instruction; there's no aizuchi carry-on rule or Smart Turn; transcripts come without fillers like えーと; and the timing numbers can't tell when the learner actually went quiet, only when Flux ended the turn.
+- **Rollout:** admins pick it with "Choose them myself". Before it joins the random mix, make a few admin test calls (including on speaker, to check Deepgram doesn't hear Ping's own voice) and add Deepgram to the Privacy Policy as a company that handles call audio. What building on it was like: `docs/deepgram-friction-log.md`.
+
 **Smart Turn mode.** The phone, not OpenAI, decides when the user has finished talking:
 - A call starts in silence mode while the phone loads Smart Turn, about 12 MB the first time and from the phone's cache after that. Once Smart Turn is loaded and hearing the microphone, the app switches OpenAI's own turn detection off.
 - Silero, a small voice detector, hears when the user starts and stops talking. After 0.2 seconds of quiet, Smart Turn v3.2 listens to the last 8 seconds and decides whether they've finished. If it says yes, the app ends the turn straight away. If it keeps saying "still thinking", the turn ends after 2.5 seconds of quiet anyway. On a `long` time to answer, Smart Turn has to be surer (a score of 0.7 instead of 0.5) and the backup waits 4 seconds.
@@ -155,6 +161,8 @@ Set these as environment variables, in `.env` locally or under the service's **E
 | `REALTIME_MODEL` | The voice model | `gpt-realtime` |
 | `REALTIME_VOICE` | Ping's voice | `marin` |
 | `TEXT_MODEL` | Writes example sentences and lists a sentence's kanji words | `gpt-6-luna` |
+| `DEEPGRAM_API_KEY` | Deepgram's Voice Agent engine. Needs the Member role or higher, to mint call tokens | Deepgram calls say Deepgram isn't set up |
+| `DEEPGRAM_THINK_MODEL`, `DEEPGRAM_VOICE` | The model that writes Deepgram calls' replies, and their voice | `gpt-4.1-mini`, `flux-ayumi-ja` |
 | `DAILY_CALL_LIMIT` | How many calls a user can start per day, including test rings. Admins and YC reviewers aren't limited | No limit |
 
 Other rules:
@@ -226,8 +234,9 @@ Ping is for adults in the US, and the Privacy Policy and Terms in the app are dr
 - `server/store.js`: saves state to one JSON file.
 - `server/recordings.js`: call recordings and transcripts, as files outside the JSON store.
 - `server/experiment.js`: the engines, and the random mix each call's engine and turn mode come from.
+- `server/deepgram.js`: Deepgram call tokens and the agent settings built from Ping's instructions and tools.
 - `public/sw.js`: shows the ring and missed call notifications, and handles tapping them.
-- `public/voice.js`: the WebRTC call, including running the voice model's tools.
+- `public/voice.js`: the WebRTC call, including running the voice model's tools. A call assigned to Deepgram is handed to `public/deepgram-call.js`, which runs it over a WebSocket with the same callbacks.
 - `public/aizuchi.js`: decides whether talking over the contact was only aizuchi, so the contact carries on instead of answering.
 - `public/smart-turn.js`: Smart Turn mode on the phone. It loads the WebAssembly runtime and the two models, listens to the call's microphone through `public/capture-worklet.js`, and reports when the user starts talking and when their turn is over.
 - `public/turn-machine.js`: the rules Smart Turn mode follows, as plain functions with no browser code, so they're fully tested.

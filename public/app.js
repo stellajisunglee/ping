@@ -332,9 +332,9 @@ function showSpeedPopup(open) {
 
 async function changeCallSpeed(speed) {
   try {
-    const { settings, turnDetection, smartTurn } = await api('/api/settings', { method: 'PATCH', body: { speed } });
+    const { settings, turnDetection, smartTurn, agent } = await api('/api/settings', { method: 'PATCH', body: { speed } });
     state.me.settings = settings;
-    activeCall?.updateVoice({ settings, turnDetection, smartTurn });
+    activeCall?.updateVoice({ settings, turnDetection, smartTurn, agent });
   } catch (error) {
     callHint(error.message);
   }

@@ -8,6 +8,8 @@ import { TURN_MODES } from './tutor.js';
 // that decides turns itself (full duplex, or its own end-of-turn model), where the turn mode is blank.
 export const ENGINES = {
   'gpt-realtime': { name: 'OpenAI gpt-realtime', turnModes: TURN_MODES },
+  // Cascaded: Deepgram Flux hears and decides turns, an OpenAI model thinks, a Deepgram Flux voice speaks.
+  'deepgram-agent': { name: 'Deepgram Voice Agent', turnModes: [] },
 };
 
 // What every caller is randomized across. A new engine or mode joins only after a few admin test calls.

@@ -57,6 +57,18 @@ function openingQuestion({ question, contact, formality }) {
   return `ask exactly: 「${formality === 'formal' ? question.japanese : question.casual}」`;
 }
 
+// The words a contact says first, for engines that speak a fixed greeting themselves (Deepgram's Voice Agent).
+// When the user called, Ping's question follows straight away, as it does on OpenAI.
+export function openingWords({ question, contact = PING, formality = 'formal', calledBack, localHour }) {
+  const greeting = greetingFor({ localHour, calledBack, contact, formality });
+  if (!calledBack || contact.id !== PING.id) return greeting;
+  return `${greeting}${formality === 'formal' ? question.japanese : question.casual}`;
+}
+
+// What the contact says when the call reaches its time limit, on engines where the phone has to say it
+// (Deepgram's Voice Agent can't take a mid-call instruction the way OpenAI can).
+export const TIME_UP_LINES = { formal: '時間になりました。今日はありがとうございました。また話しましょう！', casual: '時間になっちゃった。今日はありがとう。また話そうね！' };
+
 // What the contact says when it isn't a good time. The phone hangs up after hearing it, even if the
 // voice engine forgets to call end_call, which it sometimes does after speaking.
 export const NOT_NOW_GOODBYES = { formal: 'わかりました。また電話しますね！', casual: 'わかった。また電話するね！' };
@@ -142,7 +154,7 @@ Never ask the same question more than twice in a row. If they ask you something 
 Always speak Japanese unless a rule above says to use English. Never spell out romaji or explain grammar unless they ask.${memorySection(memories)}`;
 }
 
-const TOOLS = [
+export const TOOLS = [
   {
     type: 'function',
     name: 'add_to_stack',

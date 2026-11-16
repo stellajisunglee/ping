@@ -10,12 +10,13 @@ import { Store } from './store.js';
 import { CallEngine, cleanRating, cleanTranscript, LimitError, PlanError, POLICY_VERSION, recordingLocked, recordsCalls } from './calls.js';
 import { audioExtension, Recordings } from './recordings.js';
 import { ENGINES, RANDOM_MIX } from './experiment.js';
+import { AGENT_URL, agentListen, agentSettings, agentSpeak, createDeepgram } from './deepgram.js';
 import { PING, PLAN_LIMITS } from './contacts.js';
 import { createPushSender } from './push.js';
 import { createOpenAI } from './openai.js';
 import { isValidTimeZone } from './schedule.js';
 import { cleanMetrics, metricsProblems } from '../public/turn-metrics.js';
-import { buildSession, NOT_NOW_GOODBYES, smartTurnRules, turnDetection, voiceMessageFor } from './tutor.js';
+import { buildSession, NOT_NOW_GOODBYES, smartTurnRules, TIME_UP_LINES, turnDetection, voiceMessageFor } from './tutor.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = join(ROOT, 'public');
@@ -55,7 +56,7 @@ const SMART_TURN_FILES = new Set([
 
 const SECURITY_HEADERS = {
   // 'wasm-unsafe-eval' lets Smart Turn's WebAssembly compile. It doesn't allow eval() of JavaScript.
-  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.openai.com; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.openai.com wss://agent.deepgram.com; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'",
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
   // These two make the page "cross-origin isolated", which browsers require before WebAssembly can use
@@ -111,8 +112,10 @@ async function readJson(req) {
 const isSubscription = (value) =>
   typeof value?.endpoint === 'string' && value.endpoint.startsWith('https://') && typeof value.keys?.p256dh === 'string' && typeof value.keys?.auth === 'string';
 
-export function createApp({ engine, openai, config }) {
+export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: '' }), config }) {
   const { inviteCodes, vapidPublicKey, model, voice, dataDir } = config;
+  const deepgramThinkModel = config.deepgramThinkModel ?? 'gpt-4.1-mini';
+  const deepgramVoice = config.deepgramVoice ?? 'flux-ayumi-ja';
   const recordings = new Recordings(config.recordingsDir ?? join(dataDir ?? join(ROOT, 'data'), 'recordings'));
   const registerAttempts = new Map();
   const voiceMessageJobs = new Map();
@@ -257,6 +260,8 @@ export function createApp({ engine, openai, config }) {
         // A call keeps the turn mode it was assigned, so a mid-call change only adjusts its timing.
         turnDetection: turnDetection({ thinkingTime: settings.thinkingTime, speed: settings.speed, turnMode: engine.liveTurnMode(user) ?? 'silence' }),
         smartTurn: smartTurnRules(settings.thinkingTime),
+        // On Deepgram, a mid-call change updates Flux's patience and the voice's speed.
+        agent: { listen: agentListen(settings), speak: agentSpeak(settings, deepgramVoice) },
       });
     }
 
@@ -485,15 +490,30 @@ export function createApp({ engine, openai, config }) {
 
     const session = pathname.match(/^\/api\/calls\/([\w-]+)\/session$/);
     if (method === 'POST' && session) {
-      if (!openai.hasKey) return json(res, 503, { error: 'The voice engine is not set up yet.' });
       const details = engine.sessionDetails(user, session[1]);
       if (!details) return json(res, 409, { error: 'This call has ended.' });
+      const hangUpLines = details.calledBack ? [] : Object.values(NOT_NOW_GOODBYES);
+      if (details.engine === 'deepgram-agent') {
+        if (!deepgram.hasKey) return json(res, 503, { error: 'Deepgram is not set up yet.' });
+        return json(res, 200, {
+          engine: details.engine,
+          token: await deepgram.mintToken(),
+          agentUrl: AGENT_URL,
+          settings: agentSettings({ ...details, thinkModel: deepgramThinkModel, voice: deepgramVoice }),
+          timeUpLine: TIME_UP_LINES[details.settings.formality === 'casual' ? 'casual' : 'formal'],
+          maxSeconds: details.maxSeconds,
+          hangUpLines,
+          question: details.question,
+          turnMode: null,
+        });
+      }
+      if (!openai.hasKey) return json(res, 503, { error: 'The voice engine is not set up yet.' });
       const clientSecret = await mintSession(buildSession({ model, voice, ...details }), user.id);
       return json(res, 200, {
         clientSecret,
         sdpUrl: openai.sdpUrl,
         maxSeconds: details.maxSeconds,
-        hangUpLines: details.calledBack ? [] : Object.values(NOT_NOW_GOODBYES),
+        hangUpLines,
         question: details.question,
         engine: details.engine,
         turnMode: details.turnMode,
@@ -586,10 +606,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   });
   const engine = new CallEngine({ store, sendPush, dailyCallLimit: Number(process.env.DAILY_CALL_LIMIT) || null });
   const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '', baseUrl: process.env.OPENAI_BASE_URL, textModel: process.env.TEXT_MODEL });
+  const deepgram = createDeepgram({ apiKey: process.env.DEEPGRAM_API_KEY ?? '' });
   const { server, ensureVoiceMessage } = createApp({
     engine,
     openai,
+    deepgram,
     config: {
+      deepgramThinkModel: process.env.DEEPGRAM_THINK_MODEL,
+      deepgramVoice: process.env.DEEPGRAM_VOICE,
       inviteCodes: {
         admin: process.env.ADMIN_INVITE_CODE ?? '',
         beta: process.env.BETA_INVITE_CODE ?? '',

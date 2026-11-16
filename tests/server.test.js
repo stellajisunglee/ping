@@ -669,9 +669,54 @@ test('the call log shows each call’s engine and turn mode with how it went, fo
     [entry.joinedWith, entry.engine, entry.turnMode, entry.assigned, entry.cutOffs, entry.naturalness, entry.replyGapMedianMs, typeof entry.seconds],
     ['beta', 'gpt-realtime', assignedMode, 'random', 3, 4, METRICS.replyGapMedianMs, 'number'],
   );
+  assert.equal(entry.recorded, true, 'beta testers are always recorded');
   assert.equal(entry.actualTurnMode, assignedMode === 'smartTurn' ? 'silence' : assignedMode, 'a Smart Turn call that fell back shows silence as what it ended in');
   assert.ok(Object.values(entry).every((value) => value === null || ['number', 'string', 'boolean'].includes(typeof value)));
 
   await request('/api/me', { method: 'DELETE', token: tester.token });
   assert.ok(!engine.store.callLog.some((item) => item.callId === call.id));
+});
+
+test('an admin can pick Deepgram: its session has a call token and agent settings, and its turn mode is blank', async () => {
+  const token = await join();
+  const pick = await request('/api/call-setup', { method: 'PUT', token, body: { manual: true, engine: 'deepgram-agent' } });
+  assert.equal(pick.data.callSetup.engine, 'deepgram-agent');
+  assert.deepEqual(pick.data.callSetup.engines['deepgram-agent'].turnModes, []);
+
+  // Without a Deepgram key, the call says so instead of failing silently.
+  const first = (await request('/api/calls', { method: 'POST', token })).data;
+  const unset = await request(`/api/calls/${first.id}/session`, { method: 'POST', token });
+  assert.equal(unset.status, 503);
+
+  const deepgram = { hasKey: true, mintToken: async () => 'jwt-for-the-phone' };
+  const { server: withDeepgram } = createApp({ engine, openai, deepgram, config: { inviteCodes: { admin: INVITE_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null, recordingsDir: mkdtempSync(joinPath(tmpdir(), 'ping-recordings-')) } });
+  await new Promise((resolve) => withDeepgram.listen(0, resolve));
+  const base = `http://127.0.0.1:${withDeepgram.address().port}`;
+  const call = async (path, options = {}) => {
+    const response = await fetch(base + path, { method: options.method ?? 'GET', headers: { Authorization: `Bearer ${token}`, ...(options.body ? { 'Content-Type': 'application/json' } : {}) }, body: options.body ? JSON.stringify(options.body) : undefined });
+    return { status: response.status, data: await response.json() };
+  };
+  try {
+    const second = (await call('/api/calls', { method: 'POST' })).data;
+    const { status, data } = await call(`/api/calls/${second.id}/session`, { method: 'POST' });
+    assert.equal(status, 200);
+    assert.deepEqual([data.engine, data.token, data.agentUrl, data.turnMode], ['deepgram-agent', 'jwt-for-the-phone', 'wss://agent.deepgram.com/v1/agent/converse', null]);
+    assert.equal(data.settings.type, 'Settings');
+    assert.match(data.timeUpLine, /時間/);
+    assert.equal(data.clientSecret, undefined, 'no OpenAI key is minted for a Deepgram call');
+    const stored = engine.store.calls[second.id];
+    assert.deepEqual([stored.engine, stored.turnMode, stored.assigned], ['deepgram-agent', null, 'manual']);
+    const { data: changed } = await call('/api/settings', { method: 'PATCH', body: { thinkingTime: 'long' } });
+    assert.equal(changed.agent.listen.provider.eot_threshold, 0.9);
+    const logged = engine.store.callLog.findLast((entry) => entry.callId === second.id);
+    assert.deepEqual([logged.engine, logged.turnMode], ['deepgram-agent', null]);
+  } finally {
+    withDeepgram.close();
+  }
+  await request('/api/call-setup', { method: 'PUT', token, body: { manual: false } });
+});
+
+test('the page may connect to Deepgram, and nowhere else new', async () => {
+  const response = await fetch(baseUrl + '/');
+  assert.match(response.headers.get('content-security-policy'), /connect-src 'self' https:\/\/api\.openai\.com wss:\/\/agent\.deepgram\.com;/);
 });

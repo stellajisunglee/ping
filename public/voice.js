@@ -1,6 +1,7 @@
 // One phone call with a contact: a WebRTC connection straight from this browser to the voice model.
 
 import { classifyTurn, resumeNote } from './aizuchi.js';
+import { startDeepgramCall } from './deepgram-call.js';
 import { startRecording } from './recorder.js';
 import { loadSmartTurn, startSmartTurn } from './smart-turn.js';
 import { summarizeTurns, TIMED_EVENTS } from './turn-metrics.js';
@@ -36,7 +37,9 @@ export function startCall({
   onRecording = () => {}, // once the call ends: { blob, fileName }, or null with the reason it couldn't record
   recorderEngine = { start: startRecording }, // swapped for a stand-in in tests
   smartTurnEngine = { load: loadSmartTurn, start: startSmartTurn }, // swapped for a stand-in in tests
+  deepgramEngine = { start: startDeepgramCall }, // swapped for a stand-in in tests
 }) {
+  let agentCall = null; // set when the call runs on Deepgram's Voice Agent instead of OpenAI
   let pc = null;
   let channel = null;
   let microphone = null;
@@ -403,7 +406,9 @@ export function startCall({
 
   async function connect() {
     onStatus('connecting');
-    const { clientSecret, sdpUrl, maxSeconds, turnMode, smartTurn, hangUpLines: lines = [] } = await api(`/api/calls/${callId}/session`, { method: 'POST' });
+    const session = await api(`/api/calls/${callId}/session`, { method: 'POST' });
+    if (session.engine === 'deepgram-agent') return connectToDeepgram(session);
+    const { clientSecret, sdpUrl, maxSeconds, turnMode, smartTurn, hangUpLines: lines = [] } = session;
     hangUpLines = lines.map(withoutPunctuation);
     smart.rules = smartTurn ?? null;
     // Start loading Smart Turn straight away, so it's usually ready by the time the greeting ends.
@@ -465,16 +470,56 @@ export function startCall({
     );
   }
 
+  // Deepgram's Voice Agent runs the whole call itself, with the same callbacks.
+  async function connectToDeepgram(session) {
+    if (ended) return;
+    microphone = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    if (ended) {
+      microphone.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    if (record) {
+      try {
+        recorder = recorderEngine.start({ streams: [microphone] });
+      } catch (error) {
+        console.warn('Could not record the call', error);
+        reportRecording(null, error.message);
+      }
+    }
+    const callRecorder = recorder;
+    recorder = null; // the Deepgram call stops and reports it
+    agentCall = deepgramEngine.start({
+      callId,
+      api,
+      audio,
+      session,
+      microphone,
+      onStatus,
+      onLine,
+      onWordAdded,
+      onSpeaking,
+      onSettings,
+      onNeedsTap,
+      onContactAudio,
+      recorder: callRecorder,
+      reportRecording,
+      onEnded: (reason) => {
+        ended = true;
+        onEnded(reason);
+      },
+    });
+  }
+
   connect().catch((error) => {
     console.warn('Call failed', error);
     end(error.name === 'NotAllowedError' ? 'no-microphone' : 'failed');
   });
 
   return {
-    hangUp: () => end('hung-up'),
+    hangUp: () => (agentCall ? agentCall.hangUp() : end('hung-up')),
     setMuted: (muted) => microphone?.getAudioTracks().forEach((track) => (track.enabled = !muted)),
-    resumeAudio: playAudio,
-    updateVoice,
+    resumeAudio: () => (agentCall ? agentCall.resumeAudio() : playAudio()),
+    updateVoice: (change) => (agentCall ? agentCall.updateVoice(change) : updateVoice(change)),
     // Browsers only sometimes let a page pick the speaker, so this reports whether it worked.
     async setSpeaker(on) {
       if (!audio.setSinkId) return false;

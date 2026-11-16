@@ -338,8 +338,8 @@ export class CallEngine {
     if (secondsLeft < MIN_SECONDS_TO_CONNECT) throw new LimitError('This call has reached its time limit.');
     call.startedAt ??= this.now();
     call.sessions += 1;
-    if (!call.engine) this.#assignCombo(call, user); // decided once, at the first connection
     call.recorded ??= recordsCalls(user); // decided once, when the call first connects
+    if (!call.engine) this.#assignCombo(call, user); // likewise, and logged with the above
     this.store.save();
     const contact = this.#contactOf(call, user);
     const local = localParts(this.now(), user.timeZone);
