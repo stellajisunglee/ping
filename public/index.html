@@ -36,7 +36,7 @@
         <button class="primary" type="submit">Join</button>
         <p id="join-error" class="error" role="alert" hidden></p>
       </form>
-      <p class="fine">Ping is an AI, for adults in the US. During a call, your voice goes to OpenAI so Ping can reply. Calls are recorded and transcribed so the Ping team can review them and improve Ping. By joining, you agree to the Privacy Policy and Terms of Service, which are in Settings.</p>
+      <p class="fine">Ping is an AI, for adults in the US. During a call, your voice goes to an AI voice service (OpenAI or Deepgram) so Ping can reply. Calls are recorded and transcribed so the Ping team can review them and improve Ping. By joining, you agree to the Privacy Policy and Terms of Service, which are in Settings.</p>
     </main>
 
     <main id="screen-enable" class="screen centered" hidden>
@@ -59,7 +59,7 @@
       <p id="home-notice" class="notice" role="status" hidden></p>
       <section id="policy-notice" class="card policy-notice" aria-labelledby="policy-notice-title" hidden>
         <h2 id="policy-notice-title">Calls are now recorded</h2>
-        <p>To improve Ping, calls are now recorded and transcribed, and the Ping team may listen to them. The Privacy Policy has the details.</p>
+        <p id="policy-notice-text">To improve Ping, calls are now recorded and transcribed, and the Ping team may listen to them. The Privacy Policy has the details.</p>
         <p id="policy-notice-choice" class="muted">You can turn this off in Manage Account.</p>
         <div class="button-row">
           <button class="secondary" type="button" data-go="privacy">Privacy Policy</button>
@@ -312,9 +312,9 @@
       <h2>Who Ping is for</h2>
       <p>Ping is for adults, 18 or older, in the United States.</p>
       <h2>Your voice and your calls</h2>
-      <p>During a call, your voice goes from your phone to OpenAI so the AI can reply. Ping records each call, both your voice and the AI's, and keeps a written transcript of it. After the call, your phone uploads the recording and the transcript to Ping's server, so the Ping team can listen to them and use them to improve Ping's conversations.</p>
+      <p>During a call, your voice goes from your phone to an AI voice service so the AI can reply. Ping uses two: OpenAI, and on some calls Deepgram, which also has an OpenAI model write the replies. Ping records each call, both your voice and the AI's, and keeps a written transcript of it. After the call, your phone uploads the recording and the transcript to Ping's server, so the Ping team can listen to them and use them to improve Ping's conversations.</p>
       <h2>Who sees your recordings</h2>
-      <p>Only the Ping team. Ping doesn't sell or share your recordings, play them for anyone else, or use them to identify you by your voice or copy your voice. Two companies handle them for Ping: OpenAI processes calls and transcripts, and Render hosts Ping's server, where the recordings are stored.</p>
+      <p>Only the Ping team. Ping doesn't sell or share your recordings, play them for anyone else, or use them to identify you by your voice or copy your voice. Three companies handle your calls for Ping: OpenAI and Deepgram process the call audio and transcripts while you talk, and Render hosts Ping's server, where the recordings are stored.</p>
       <h2>Turning recording off</h2>
       <p>On most accounts, you can turn off "Use my calls to improve Ping" in Manage Account. Calls after that aren't recorded, and calls recorded before are kept. On beta tester and admin accounts, recording is part of testing, so it stays on.</p>
       <h2>How long Ping keeps them</h2>

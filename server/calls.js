@@ -43,9 +43,11 @@ export const hashToken = (token) => createHash('sha256').update(token).digest('h
 export class LimitError extends Error {}
 export class PlanError extends Error {}
 
-// Version 2 of the Privacy Policy is the one where calls are recorded. Accounts that joined
-// before it see a one-time notice on Home.
-export const POLICY_VERSION = 2;
+// The Privacy Policy's version. 2: calls are recorded. 3: Deepgram joins OpenAI as a voice service.
+// Accounts that saw an older version get a one-time notice on Home about what changed since.
+export const POLICY_VERSION = 3;
+const RECORDING_POLICY = 2;
+export const policyNoticeFor = (seen = 0) => (seen >= POLICY_VERSION ? null : seen < RECORDING_POLICY ? 'recording' : 'update');
 // Admins and beta testers record every call as part of testing. YC reviewers and everyone else
 // can turn recording off in Manage Account, which stops future recordings only.
 export const recordingLocked = (user) => user.role === 'admin' || user.joinedWith === 'beta';
@@ -136,7 +138,7 @@ export class CallEngine {
       plan: PLANS.includes(plan) ? plan : 'free',
       joinedWith,
       joinedAt: this.now(),
-      policyVersion: POLICY_VERSION, // the join screen tells them calls are recorded
+      policyVersion: POLICY_VERSION, // the join screen tells them what the policy says
     };
     if (starterStack) addStarterStack(user, { now: this.now(), newId: randomUUID, limit: planLimits(user.plan).savedItems });
     this.store.users[user.id] = user;

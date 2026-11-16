@@ -7,7 +7,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
-import { CallEngine, cleanRating, cleanTranscript, LimitError, PlanError, POLICY_VERSION, recordingLocked, recordsCalls } from './calls.js';
+import { CallEngine, cleanRating, cleanTranscript, LimitError, PlanError, policyNoticeFor, recordingLocked, recordsCalls } from './calls.js';
 import { audioExtension, Recordings } from './recordings.js';
 import { ENGINES, RANDOM_MIX } from './experiment.js';
 import { AGENT_URL, agentListen, agentSettings, agentSpeak, createDeepgram } from './deepgram.js';
@@ -194,7 +194,7 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       calling: engine.calling(user),
       planLimits: PLAN_LIMITS,
       recording: { on: recordsCalls(user), canTurnOff: !recordingLocked(user) },
-      policyNotice: (user.policyVersion ?? 0) < POLICY_VERSION, // joined before calls were recorded, and hasn't seen the notice
+      policyNotice: policyNoticeFor(user.policyVersion), // null, or what changed since the policy they last saw
       ...(user.role === 'admin' ? { callSetup: { manual: user.callSetupManual, engine: user.engine, turnMode: user.turnMode, engines: ENGINES, randomMix: RANDOM_MIX } } : {}),
     };
   }

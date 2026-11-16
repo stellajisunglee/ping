@@ -523,7 +523,7 @@ const RECORDED_LINES = [{ from: 'contact', text: '今日は何をしましたか
 test('calls are recorded for review, audio and transcript, even on the free plan, and only admins can listen', async () => {
   const tester = await joinWith(BETA_CODE);
   assert.deepEqual(tester.recording, { on: true, canTurnOff: false });
-  assert.equal(tester.policyNotice, false); // the join screen already says calls are recorded
+  assert.equal(tester.policyNotice, null); // the join screen already says what the policy says
   const call = await connectedCall(tester.token);
   assert.equal(await uploadAudio(tester.token, call.id), 201);
   const { data } = await request(`/api/calls/${call.id}/transcript`, { method: 'POST', token: tester.token, body: { lines: RECORDED_LINES } });
@@ -583,12 +583,16 @@ test("deleting an account deletes the account's recordings", async () => {
   assert.equal((await request(`/api/admin/recordings/${call.id}`, { token: await join() })).status, 404);
 });
 
-test('accounts from before calls were recorded see a one-time notice', async () => {
+test('accounts that saw an older Privacy Policy get a one-time notice about what changed', async () => {
   const token = await join();
   engine.userForToken(token).policyVersion = 0; // as an older account loads
-  assert.equal((await request('/api/me', { token })).data.policyNotice, true);
+  assert.equal((await request('/api/me', { token })).data.policyNotice, 'recording');
   assert.equal((await request('/api/policy/seen', { method: 'POST', token })).status, 200);
-  assert.equal((await request('/api/me', { token })).data.policyNotice, false);
+  assert.equal((await request('/api/me', { token })).data.policyNotice, null);
+  engine.userForToken(token).policyVersion = 2; // saw the recording notice, before Deepgram was named
+  assert.equal((await request('/api/me', { token })).data.policyNotice, 'update');
+  await request('/api/policy/seen', { method: 'POST', token });
+  assert.equal((await request('/api/me', { token })).data.policyNotice, null);
 });
 
 test('after a call, the user can rate cut-offs and naturalness from 1 to 5, as numbers only', async () => {

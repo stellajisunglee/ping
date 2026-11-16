@@ -200,15 +200,30 @@ function renderHome() {
   renderPolicyNotice();
 }
 
-// Accounts that joined before calls were recorded are told once, on Home.
+// When the Privacy Policy changes in a way that affects people, they're told once, on Home.
+const POLICY_NOTICES = {
+  recording: {
+    title: 'Calls are now recorded',
+    text: 'To improve Ping, calls are now recorded and transcribed, and the Ping team may listen to them. The Privacy Policy has the details.',
+  },
+  update: {
+    title: 'Privacy Policy updated',
+    text: 'Some calls now run on Deepgram, another voice AI service, as well as OpenAI. The Privacy Policy lists who handles your calls.',
+  },
+};
+
 function renderPolicyNotice() {
-  $('policy-notice').hidden = !state.me.policyNotice;
-  $('policy-notice-choice').hidden = !state.me.recording?.canTurnOff;
+  const notice = POLICY_NOTICES[state.me.policyNotice];
+  $('policy-notice').hidden = !notice;
+  if (!notice) return;
+  $('policy-notice-title').textContent = notice.title;
+  $('policy-notice-text').textContent = notice.text;
+  $('policy-notice-choice').hidden = state.me.policyNotice !== 'recording' || !state.me.recording?.canTurnOff;
 }
 
 async function dismissPolicyNotice() {
   $('policy-notice').hidden = true;
-  state.me.policyNotice = false;
+  state.me.policyNotice = null;
   await api('/api/policy/seen', { method: 'POST' }).catch((error) => console.warn('Could not save that the notice was seen', error));
 }
 
