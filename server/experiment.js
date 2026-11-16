@@ -33,6 +33,54 @@ export function validCombo({ engine, turnMode }) {
   return spec.turnModes.length ? spec.turnModes.includes(turnMode) : turnMode == null;
 }
 
+// What a call actually ran on, read from the session sent to its engine rather than from defaults: an OpenAI
+// realtime session, or Deepgram's Settings message. Every field is there for both engines, null where it
+// doesn't apply. smartTurn is the phone's Smart Turn patience, for Smart Turn calls only.
+// Model and voice names and turn detection numbers only: never the instructions, keys or tokens.
+export function callConfig({ session, smartTurn = null }) {
+  const config = {
+    realtimeModel: null,
+    transcriptionModel: null,
+    thinkModel: null,
+    listenModel: null,
+    voice: null,
+    voiceSpeed: null,
+    turnDetection: null, // server_vad (silence, and Smart Turn until it takes over), semantic_vad or flux
+    silenceMs: null,
+    eagerness: null,
+    smartTurnDoneAt: null,
+    smartTurnBackupMs: null,
+    eotThreshold: null,
+    eotTimeoutMs: null,
+  };
+  if (session?.type === 'Settings') {
+    const { listen, think, speak } = session.agent ?? {};
+    return {
+      ...config,
+      thinkModel: think?.provider?.model ?? null,
+      listenModel: listen?.provider?.model ?? null,
+      voice: speak?.provider?.model ?? null,
+      voiceSpeed: speak?.provider?.speed ?? null,
+      turnDetection: 'flux',
+      eotThreshold: listen?.provider?.eot_threshold ?? null,
+      eotTimeoutMs: listen?.provider?.eot_timeout_ms ?? null,
+    };
+  }
+  const detection = session?.audio?.input?.turn_detection ?? {};
+  return {
+    ...config,
+    realtimeModel: session?.model ?? null,
+    transcriptionModel: session?.audio?.input?.transcription?.model ?? null,
+    voice: session?.audio?.output?.voice ?? null,
+    voiceSpeed: session?.audio?.output?.speed ?? null,
+    turnDetection: detection.type ?? null,
+    silenceMs: detection.silence_duration_ms ?? null,
+    eagerness: detection.eagerness ?? null,
+    smartTurnDoneAt: smartTurn?.doneAt ?? null,
+    smartTurnBackupMs: smartTurn?.backupMs ?? null,
+  };
+}
+
 // counts: how many calls this person has had with each combination, by comboKey.
 export function pickCombo(counts = {}, random = Math.random, mix = RANDOM_MIX) {
   const fewest = Math.min(...mix.map((combo) => counts[comboKey(combo)] ?? 0));

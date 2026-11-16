@@ -9,17 +9,20 @@ import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
 import { CallEngine, cleanRating, cleanTranscript, LimitError, PlanError, policyNoticeFor, recordingLocked, recordsCalls } from './calls.js';
 import { audioExtension, Recordings } from './recordings.js';
-import { ENGINES, RANDOM_MIX } from './experiment.js';
+import { callConfig, ENGINES, RANDOM_MIX } from './experiment.js';
 import { AGENT_URL, agentListen, agentSettings, agentSpeak, createDeepgram } from './deepgram.js';
 import { PING, PLAN_LIMITS } from './contacts.js';
 import { createPushSender } from './push.js';
 import { createOpenAI } from './openai.js';
 import { isValidTimeZone } from './schedule.js';
 import { cleanMetrics, metricsProblems } from '../public/turn-metrics.js';
-import { buildSession, NOT_NOW_GOODBYES, smartTurnRules, TIME_UP_LINES, turnDetection, voiceMessageFor } from './tutor.js';
+import { buildSession, NOT_NOW_GOODBYES, PROMPT_VERSION, smartTurnRules, TIME_UP_LINES, turnDetection, voiceMessageFor } from './tutor.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = join(ROOT, 'public');
+// The deployed commit, for the call log. Render sets RENDER_GIT_COMMIT on every deploy; anything that
+// doesn't look like a commit (or no value, as on a laptop) is saved as null rather than guessed.
+export const buildCommit = (value) => (typeof value === 'string' && /^[0-9a-f]{7,40}$/i.test(value) ? value.toLowerCase() : null);
 const TICK_MS = 1_000;
 const MAX_BODY_BYTES = 64_000; // room for a full call's transcript
 const MAX_RECORDING_BYTES = 25_000_000; // a 10-minute call is about 10 MB from an iPhone
@@ -116,6 +119,7 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
   const { inviteCodes, vapidPublicKey, model, voice, dataDir } = config;
   const deepgramThinkModel = config.deepgramThinkModel ?? 'gpt-4.1-mini';
   const deepgramVoice = config.deepgramVoice ?? 'flux-ayumi-ja';
+  const commit = buildCommit(config.buildCommit);
   const recordings = new Recordings(config.recordingsDir ?? join(dataDir ?? join(ROOT, 'data'), 'recordings'));
   const registerAttempts = new Map();
   const voiceMessageJobs = new Map();
@@ -155,16 +159,21 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
     };
   }
 
-  // A problem with the transcript shouldn't stop the call itself.
+  // A problem with the transcript shouldn't stop the call itself. Returns the key and the session it was made
+  // for, so the call log records whether the transcript was dropped.
   async function mintSession(session, userId) {
     try {
-      return await openai.mintClientSecret(session, userId);
+      return { clientSecret: await openai.mintClientSecret(session, userId), session };
     } catch (error) {
       console.warn(`Retrying the voice session without a transcript: ${error.message}`);
       const { transcription, ...input } = session.audio.input;
-      return openai.mintClientSecret({ ...session, audio: { ...session.audio, input } }, userId);
+      const withoutTranscript = { ...session, audio: { ...session.audio, input } };
+      return { clientSecret: await openai.mintClientSecret(withoutTranscript, userId), session: withoutTranscript };
     }
   }
+
+  // Build, prompt version, and what the engine was actually sent, kept with the call's log entry.
+  const recordConfig = (user, callId, setup) => engine.recordConfig(user, callId, { buildCommit: commit, promptVersion: PROMPT_VERSION, ...callConfig(setup) });
 
   // Codes aren't case-sensitive, so "abc-123" works as well as "ABC-123".
   const codeNameFor = (given) => Object.entries(inviteCodes).find(([, code]) => code && codesMatch(given.toLowerCase(), code.toLowerCase()))?.[0] ?? null;
@@ -509,11 +518,13 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
         }
       }
       if (details.engine === 'deepgram-agent') {
+        const settings = agentSettings({ ...details, thinkModel: deepgramThinkModel, voice: deepgramVoice });
+        recordConfig(user, session[1], { session: settings });
         return json(res, 200, {
           engine: details.engine,
           token: agentToken,
           agentUrl: AGENT_URL,
-          settings: agentSettings({ ...details, thinkModel: deepgramThinkModel, voice: deepgramVoice }),
+          settings,
           timeUpLine: TIME_UP_LINES[details.settings.formality === 'casual' ? 'casual' : 'formal'],
           maxSeconds: details.maxSeconds,
           hangUpLines,
@@ -522,7 +533,9 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
         });
       }
       if (!openai.hasKey) return json(res, 503, { error: 'The voice engine is not set up yet.' });
-      const clientSecret = await mintSession(buildSession({ model, voice, ...details }), user.id);
+      const smartTurn = smartTurnRules(details.settings.thinkingTime);
+      const { clientSecret, session: minted } = await mintSession(buildSession({ model, voice, ...details }), user.id);
+      recordConfig(user, session[1], { session: minted, smartTurn: details.turnMode === 'smartTurn' ? smartTurn : null });
       return json(res, 200, {
         clientSecret,
         sdpUrl: openai.sdpUrl,
@@ -531,7 +544,7 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
         question: details.question,
         engine: details.engine,
         turnMode: details.turnMode,
-        smartTurn: smartTurnRules(details.settings.thinkingTime),
+        smartTurn,
       });
     }
 
@@ -631,6 +644,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     openai,
     deepgram,
     config: {
+      buildCommit: process.env.RENDER_GIT_COMMIT,
       deepgramThinkModel: process.env.DEEPGRAM_THINK_MODEL,
       deepgramVoice: process.env.DEEPGRAM_VOICE,
       inviteCodes: {

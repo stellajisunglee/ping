@@ -374,7 +374,8 @@ export class CallEngine {
     this.#retryIfBroken(user, call, reason);
     if (!call.startedAt || call.endedAt) return true;
     call.endedAt = this.now();
-    this.#log(call, { seconds: Math.round((call.endedAt - (call.connectedAt ?? call.startedAt)) / 1000) });
+    // Kept in the log, since the call itself is removed after 7 days. Missing means the phone never said.
+    this.#log(call, { seconds: Math.round((call.endedAt - (call.connectedAt ?? call.startedAt)) / 1000), endReason: call.endReason });
     this.store.save();
     return true;
   }
@@ -450,12 +451,25 @@ export class CallEngine {
   fallBack(user, callId) {
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id) return null;
+    // What it was assigned first, so the log can still tell a fallback from a call assigned the fallback's combination.
+    const original = { fallbackFromEngine: call.engine, fallbackFromTurnMode: call.turnMode ?? null, fallbackFromAssigned: call.assigned ?? null };
     call.engine = FALLBACK_COMBO.engine;
     call.turnMode = FALLBACK_COMBO.turnMode;
     call.assigned = 'fallback';
-    this.#log(call, { engine: call.engine, turnMode: call.turnMode, assigned: call.assigned });
+    this.#log(call, { engine: call.engine, turnMode: call.turnMode, assigned: call.assigned, ...original });
     this.store.save();
     return { engine: call.engine, turnMode: call.turnMode };
+  }
+
+  // What the call actually ran on (build, prompt version, models, voices and turn detection), from its first
+  // session that started. A reconnect keeps it, so a setting changed mid-call doesn't rewrite it.
+  recordConfig(user, callId, config) {
+    const call = this.store.calls[callId];
+    if (!call || call.userId !== user.id || call.configRecorded) return false;
+    call.configRecorded = true;
+    this.#log(call, config);
+    this.store.save();
+    return true;
   }
 
   // The turn mode of the user's call in progress, for settings changed mid-call.
@@ -791,7 +805,9 @@ export class CallEngine {
     call.turnMode = combo.turnMode ?? null;
     call.assigned = manual ? 'manual' : 'random';
     if (!manual) user.comboCounts[comboKey(combo)] = (user.comboCounts[comboKey(combo)] ?? 0) + 1;
-    this.#log(call, {});
+    // The settings as the call starts. Ids and setting values only: never a custom contact's name or topic.
+    const { proficiency, formality, thinkingTime, speed } = user.settings;
+    this.#log(call, { contactId: call.contactId ?? null, questionId: call.questionId ?? null, proficiency, formality, thinkingTime, speed });
   }
 
   // Adds to the call's entry in the call log, creating it the first time.

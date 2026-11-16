@@ -6,7 +6,7 @@ import { PING } from './contacts.js';
 import { buildInstructions } from './prompt.js';
 import { silenceMs } from './settings.js';
 
-export { buildInstructions } from './prompt.js';
+export { buildInstructions, PROMPT_VERSION } from './prompt.js';
 export { NOT_NOW_GOODBYES, openingWords, pickQuestion, QUESTIONS, questionById, TIME_UP_LINES, voiceMessageFor } from './lines.js';
 
 const TRANSCRIPTION_MODEL = 'gpt-transcribe';

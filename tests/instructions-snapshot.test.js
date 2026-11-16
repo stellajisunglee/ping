@@ -6,8 +6,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { buildInstructions, openingWords, questionById } from '../server/tutor.js';
+import { buildInstructions, openingWords, PROMPT_VERSION, questionById } from '../server/tutor.js';
 import { DEFAULT_SETTINGS } from '../server/settings.js';
 
 const DIR = new URL('./fixtures/instructions/', import.meta.url);
@@ -18,6 +19,9 @@ const LOCAL_DATE = { year: 2026, month: 11, day: 15 };
 const YUKI = { id: 'custom-yuki', name: 'Yuki', spokenName: 'ユキ', topic: 'cooking and recipes', voice: 'cedar', plan: 'platinum' };
 const MEMORIES = ['週末は友達と京都に行きます。お寺を見たいです。', 'ラーメンが好きです。昨日は味噌ラーメンを食べました。'];
 const settings = (change) => ({ ...DEFAULT_SETTINGS, ...change });
+// A fingerprint of every case's instructions and opening words, for each PROMPT_VERSION. Calls are compared by
+// prompt version in the call log, so the version has to change whenever the words do.
+const FINGERPRINTS = { 1: '7a173835eec3dd0a8458a1359fe44bdeab6ef07fcbc036eca1c371d79e289a85' };
 
 // Between them: Ping and a custom contact, every level and speech style, the contact calling or being
 // called back at each time of day (including after midnight), and memories or none.
@@ -72,4 +76,18 @@ test('the opening words are unchanged', () => {
 test('a default call with no memories still gets no memory section', () => {
   assert.ok(!buildInstructions(inputsFor(CASES[0])).includes('WHAT YOU REMEMBER'));
   assert.ok(buildInstructions(inputsFor(CASES[5])).includes('WHAT YOU REMEMBER'));
+});
+
+test('the prompt version changes whenever the instructions do', () => {
+  const hash = createHash('sha256');
+  for (const testCase of CASES) {
+    const { question, contact, settings: caseSettings, calledBack, localHour } = inputsFor(testCase);
+    hash.update(`${buildInstructions(inputsFor(testCase))}\0${openingWords({ question, contact, formality: caseSettings.formality, calledBack, localHour })}\0`);
+  }
+  const fingerprint = hash.digest('hex');
+  assert.equal(
+    FINGERPRINTS[PROMPT_VERSION],
+    fingerprint,
+    `The instructions changed. Raise PROMPT_VERSION in server/prompt.js and add { ${PROMPT_VERSION + 1}: '${fingerprint}' } to FINGERPRINTS here.`,
+  );
 });

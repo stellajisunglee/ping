@@ -8,6 +8,11 @@ import { describeDay, PING_BIO, PING_PERSONA, pingsDay } from './persona.js';
 import { greetingFor, NOT_NOW_GOODBYES, NOT_SURE } from './lines.js';
 import { DEFAULT_SETTINGS } from './settings.js';
 
+// Which version of the instructions a call got, saved in the call log so calls can be compared across prompt
+// changes. Raise it by one whenever what a contact is told changes (this file, persona.js or lines.js).
+// tests/instructions-snapshot.test.js fails until it's raised, since it pins the golden copies to it.
+export const PROMPT_VERSION = 1;
+
 const LEVEL_GUIDE = {
   beginner: 'The user is a beginner. Use only very common words and simple sentence patterns.',
   intermediate: 'The user is intermediate. Use natural everyday sentences and ordinary vocabulary.',

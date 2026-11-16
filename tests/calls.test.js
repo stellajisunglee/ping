@@ -961,3 +961,77 @@ test('admins and YC reviewers are unlimited already, so a dropped call changes n
   placeCall(context, { seconds: 5, reason: 'dropped' });
   assert.equal(context.user.usage.retriesGiven ?? 0, 0);
 });
+
+// The call log's record of each call
+
+test('the call log keeps why a call ended after the call itself is removed, and only the first report counts', async () => {
+  const context = setup();
+  const call = placeCall(context, { seconds: 60, reason: 'dropped' });
+  context.engine.endCall(context.user, call.id, 'hung-up'); // a later report changes nothing
+  context.clock.now += 8 * 86_400_000;
+  await context.engine.tick();
+  assert.equal(context.store.calls[call.id], undefined, 'the full call is gone after 7 days');
+  const entry = context.engine.callLog().find((item) => item.callId === call.id);
+  assert.deepEqual([entry.endReason, entry.seconds], ['dropped', 60]);
+  assert.deepEqual([entry.contactId, entry.questionId], ['ping', call.questionId]);
+});
+
+test('the settings are logged as the call starts, and neither a later change nor a reconnect rewrites them', () => {
+  const context = setup();
+  context.engine.updateSettings(context.user, { formality: 'casual', proficiency: 'advanced' });
+  const call = context.engine.callBack(context.user);
+  context.engine.sessionDetails(context.user, call.id);
+  assert.equal(context.engine.recordConfig(context.user, call.id, { promptVersion: 1, silenceMs: 1300 }), true);
+  context.engine.updateSettings(context.user, { thinkingTime: 'long', speedChange: 'slower' });
+  context.engine.sessionDetails(context.user, call.id); // a reconnect, with the new settings
+  assert.equal(context.engine.recordConfig(context.user, call.id, { promptVersion: 1, silenceMs: 2500 }), false);
+  const entry = context.engine.callLog().find((item) => item.callId === call.id);
+  assert.deepEqual(
+    [entry.proficiency, entry.formality, entry.thinkingTime, entry.speed, entry.silenceMs],
+    ['advanced', 'casual', 'normal', 1, 1300],
+  );
+  assert.equal(context.engine.recordConfig(setup().user, call.id, {}), false, "someone else's call");
+});
+
+test('a fallback keeps what the call was first assigned beside what it ran on', () => {
+  const context = setup();
+  context.user.comboCounts = { 'gpt-realtime|silence': 1, 'gpt-realtime|smartTurn': 1, 'gpt-realtime|semantic': 1 }; // Deepgram is next
+  const call = context.engine.callBack(context.user);
+  context.engine.sessionDetails(context.user, call.id);
+  context.engine.fallBack(context.user, call.id);
+  const entry = context.engine.callLog().find((item) => item.callId === call.id);
+  assert.deepEqual(
+    [entry.engine, entry.turnMode, entry.assigned, entry.fallbackFromEngine, entry.fallbackFromTurnMode, entry.fallbackFromAssigned],
+    ['gpt-realtime', 'silence', 'fallback', 'deepgram-agent', null, 'random'],
+  );
+});
+
+test('call log entries from before these fields still read and update', () => {
+  const context = setup();
+  const call = context.engine.callBack(context.user);
+  context.engine.sessionDetails(context.user, call.id);
+  // As an older server left them: none of the new fields, on the entry or the call.
+  const old = { callId: call.id, userId: context.user.id, joinedWith: 'admin', at: context.clock.now, direction: 'outgoing', engine: 'gpt-realtime', turnMode: 'silence', assigned: 'random', recorded: true };
+  context.store.callLog.splice(0, context.store.callLog.length, old);
+  context.engine.markConnected(context.user, call.id);
+  context.engine.endCall(context.user, call.id, 'finished');
+  const [entry] = context.engine.callLog();
+  assert.deepEqual({ ...entry, seconds: undefined }, { ...old, endReason: 'finished', seconds: undefined });
+  assert.equal(entry.contactId, undefined, 'fields an older entry never had stay missing, not made up');
+});
+
+test('the configuration is read from what the engine was sent, with null for anything missing or not used', async () => {
+  const { callConfig } = await import('../server/experiment.js');
+  const empty = callConfig({ session: undefined });
+  assert.ok(Object.values(empty).every((value) => value === null));
+  const fields = Object.keys(empty).sort();
+  const openai = callConfig({ session: { type: 'realtime', model: 'gpt-realtime', audio: { input: { turn_detection: { type: 'semantic_vad', eagerness: 'low' } }, output: { voice: 'cedar', speed: 0.9 } } } });
+  assert.deepEqual(Object.keys(openai).sort(), fields);
+  assert.deepEqual(
+    [openai.realtimeModel, openai.voice, openai.voiceSpeed, openai.transcriptionModel, openai.turnDetection, openai.eagerness, openai.silenceMs, openai.thinkModel],
+    ['gpt-realtime', 'cedar', 0.9, null, 'semantic_vad', 'low', null, null],
+  );
+  const deepgram = callConfig({ session: { type: 'Settings', agent: { listen: { provider: { model: 'flux-general-multi' } } } } });
+  assert.deepEqual(Object.keys(deepgram).sort(), fields);
+  assert.deepEqual([deepgram.listenModel, deepgram.turnDetection, deepgram.eotThreshold, deepgram.thinkModel, deepgram.voice], ['flux-general-multi', 'flux', null, null, null]);
+});

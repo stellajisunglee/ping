@@ -1,8 +1,9 @@
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp } from '../server/index.js';
+import { buildCommit, createApp } from '../server/index.js';
 import { CallEngine } from '../server/calls.js';
 import { silenceMs } from '../server/settings.js';
+import { PROMPT_VERSION, QUESTIONS } from '../server/tutor.js';
 import { Store } from '../server/store.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -12,6 +13,7 @@ const SUBSCRIPTION = { endpoint: 'https://push.example/1', keys: { p256dh: 'a', 
 const INVITE_CODE = 'test-invite';
 const BETA_CODE = 'test-beta';
 const YC_CODE = 'YC-Demo';
+const COMMIT = 'CF8AD20032D586F90744E49814A515FA5FCB185F'; // as Render might send it; logged in lowercase
 
 let baseUrl;
 let server;
@@ -50,7 +52,7 @@ const join = async () => (await request('/api/register', { method: 'POST', body:
 
 before(async () => {
   engine = new CallEngine({ store: new Store(), sendPush: async () => ({ gone: false }) });
-  ({ server } = createApp({ engine, openai, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE, yc: YC_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null, recordingsDir: mkdtempSync(joinPath(tmpdir(), 'ping-recordings-')) } }));
+  ({ server } = createApp({ engine, openai, config: { buildCommit: COMMIT, inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE, yc: YC_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null, recordingsDir: mkdtempSync(joinPath(tmpdir(), 'ping-recordings-')) } }));
   await new Promise((resolve) => server.listen(0, resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
@@ -717,6 +719,15 @@ test('an admin can pick Deepgram: its session has a call token and agent setting
     assert.equal(changed.agent.listen.provider.eot_threshold, 0.9);
     const logged = engine.store.callLog.findLast((entry) => entry.callId === second.id);
     assert.deepEqual([logged.engine, logged.turnMode], ['deepgram-agent', null]);
+    // What Deepgram was actually sent, before the change to "long" above, and nothing from OpenAI.
+    assert.deepEqual(
+      [logged.assigned, logged.thinkModel, logged.voice, logged.voiceSpeed, logged.listenModel, logged.turnDetection, logged.eotThreshold, logged.eotTimeoutMs],
+      ['manual', 'gpt-4.1-mini', 'flux-ayumi-ja', 1, 'flux-general-multi', 'flux', 0.8, 4000],
+    );
+    assert.deepEqual([logged.realtimeModel, logged.transcriptionModel, logged.silenceMs, logged.eagerness], [null, null, null, null]);
+    assert.deepEqual([logged.buildCommit, logged.promptVersion], [null, PROMPT_VERSION], 'this server was given no commit, so it is unknown');
+    assert.ok(!JSON.stringify(logged).includes('jwt-for-the-phone'), 'never the call token');
+    assert.equal(engine.store.callLog.findLast((entry) => entry.callId === first.id).thinkModel, undefined, 'a call Deepgram refused never ran, so it has no configuration');
   } finally {
     withDeepgram.close();
   }
@@ -749,4 +760,70 @@ test("the phone says why a call ended, and a call that dropped straight away doe
   await start(third.id);
   const { data: after } = await request(`/api/calls/${third.id}/ended`, { method: 'POST', token });
   assert.deepEqual([after.calling.canCall, after.calling.retryAfterDrop], [false, false]);
+});
+
+// The call log's record of what each call ran on
+
+const loggedCall = (callId) => engine.store.callLog.findLast((entry) => entry.callId === callId);
+const CONFIG_FIELDS = ['buildCommit', 'promptVersion', 'realtimeModel', 'transcriptionModel', 'thinkModel', 'listenModel', 'voice', 'voiceSpeed', 'turnDetection', 'silenceMs', 'eagerness', 'smartTurnDoneAt', 'smartTurnBackupMs', 'eotThreshold', 'eotTimeoutMs'];
+
+test('every randomized call logs its ids, settings, build, prompt version, how it ended and what it actually ran on', async () => {
+  const token = await join(); // an admin, randomized like everyone else but with no daily limit
+  const entries = [];
+  for (let index = 0; index < 4; index += 1) {
+    const call = await connectedCall(token);
+    await request(`/api/calls/${call.id}/connected`, { method: 'POST', token });
+    await request(`/api/calls/${call.id}/ended`, { method: 'POST', token, body: { reason: 'hung-up' } });
+    entries.push(loggedCall(call.id));
+  }
+  for (const entry of entries) {
+    assert.ok(CONFIG_FIELDS.every((field) => field in entry), JSON.stringify(entry));
+    assert.deepEqual([entry.contactId, entry.proficiency, entry.formality, entry.thinkingTime, entry.speed, entry.endReason], ['ping', 'beginner', 'formal', 'normal', 1, 'hung-up']);
+    assert.ok(QUESTIONS.some((question) => question.id === entry.questionId));
+    assert.deepEqual([entry.buildCommit, entry.promptVersion], [COMMIT.toLowerCase(), PROMPT_VERSION]);
+    // This server has no Deepgram key, so all four ran on OpenAI.
+    assert.deepEqual(
+      [entry.engine, entry.realtimeModel, entry.voice, entry.voiceSpeed, entry.transcriptionModel, entry.thinkModel, entry.listenModel, entry.eotThreshold],
+      ['gpt-realtime', 'gpt-realtime', 'marin', 1, 'gpt-transcribe', null, null, null],
+    );
+  }
+  const byCombo = Object.fromEntries(entries.map((entry) => [entry.assigned === 'fallback' ? 'fallback' : entry.turnMode, entry]));
+  assert.deepEqual(Object.keys(byCombo).sort(), ['fallback', 'semantic', 'silence', 'smartTurn']);
+  const turns = (entry) => [entry.turnDetection, entry.silenceMs, entry.eagerness, entry.smartTurnDoneAt, entry.smartTurnBackupMs];
+  assert.deepEqual(turns(byCombo.silence), ['server_vad', silenceMs('normal', 1), null, null, null]);
+  assert.deepEqual(turns(byCombo.smartTurn), ['server_vad', silenceMs('normal', 1), null, 0.5, 2500]);
+  assert.deepEqual(turns(byCombo.semantic), ['semantic_vad', null, 'low', null, null]);
+  assert.deepEqual(turns(byCombo.fallback), ['server_vad', silenceMs('normal', 1), null, null, null]);
+  assert.deepEqual(
+    [byCombo.fallback.turnMode, byCombo.fallback.fallbackFromEngine, byCombo.fallback.fallbackFromTurnMode, byCombo.fallback.fallbackFromAssigned],
+    ['silence', 'deepgram-agent', null, 'random'],
+  );
+  assert.equal(byCombo.silence.fallbackFromEngine, undefined, 'only a fallback says what it fell back from');
+
+  // Ids, settings and model names only: no keys, codes, instructions or words from the call.
+  const logged = JSON.stringify(entries);
+  for (const secret of ['ek_test', INVITE_CODE, BETA_CODE, YC_CODE, token]) assert.ok(!logged.includes(secret), secret);
+  assert.ok(!/instructions|WHO YOU ARE|token|secret|もしもし/i.test(logged));
+});
+
+test("a mid-call settings change reaches the voice engine but doesn't rewrite the call's logged configuration", async () => {
+  const token = await join();
+  await request('/api/call-setup', { method: 'PUT', token, body: { manual: true, engine: 'gpt-realtime', turnMode: 'silence' } });
+  await request('/api/settings', { method: 'PATCH', token, body: { formality: 'casual' } });
+  const call = await connectedCall(token);
+  await request('/api/settings', { method: 'PATCH', token, body: { thinkingTime: 'long', speedChange: 'slower' } });
+  await request(`/api/calls/${call.id}/session`, { method: 'POST', token }); // a reconnect
+  assert.equal(minted.at(-1).session.audio.input.turn_detection.silence_duration_ms, silenceMs('long', 0.85), 'the reconnect uses the new settings');
+  const entry = loggedCall(call.id);
+  assert.deepEqual(
+    [entry.assigned, entry.turnMode, entry.formality, entry.thinkingTime, entry.speed, entry.silenceMs, entry.voiceSpeed],
+    ['manual', 'silence', 'casual', 'normal', 1, silenceMs('normal', 1), 1],
+  );
+  await request('/api/call-setup', { method: 'PUT', token, body: { manual: false } });
+});
+
+test('the build commit is logged only when it looks like one', () => {
+  assert.equal(buildCommit(COMMIT), COMMIT.toLowerCase());
+  assert.equal(buildCommit('cf8ad20'), 'cf8ad20');
+  for (const value of [undefined, null, '', 'main', 'cf8ad20; rm -rf', 'x'.repeat(41), 42]) assert.equal(buildCommit(value), null, String(value));
 });
