@@ -60,6 +60,35 @@ const CHECKS = {
     }
     return { ok: true, detail: 'no repeats' };
   },
+  // Ping said at least one of the given phrases in that turn (case doesn't matter), such as telling a learner a short answer is fine.
+  mentionsAny: ({ phrases, turn }, transcript) => {
+    const text = said(transcript, turn).map((line) => line.text).join('\n').toLowerCase();
+    const found = phrases.find((phrase) => text.includes(phrase.toLowerCase()));
+    return { ok: Boolean(found), detail: found ? `said "${found}"` : `said none of: ${phrases.join(', ')}` };
+  },
+  // Ping said none of the given phrases in that turn, such as restating a question the learner already understood.
+  mentionsNone: ({ phrases, turn }, transcript) => {
+    const text = said(transcript, turn).map((line) => line.text).join('\n').toLowerCase();
+    const found = phrases.find((phrase) => text.includes(phrase.toLowerCase()));
+    return { ok: !found, detail: found ? `said "${found}"` : 'said none of them' };
+  },
+  // A sentence Ping already said, said again inside a later reply: "I said: How are you lately? / 最近、どうですか？".
+  // Counts from `turn` on (every turn after the greeting if none is given), and sentences of 6 or more characters only.
+  noRepeatedSentence: ({ turn }, transcript) => {
+    const sentencesOf = (text) =>
+      text
+        .split(/[。！？!?\n]+/)
+        .map(normalize)
+        .filter((sentence) => sentence.length >= 6);
+    const lines = said(transcript);
+    for (const [index, line] of lines.entries()) {
+      if (line.turn < (turn ?? 1)) continue;
+      const before = new Set(lines.slice(0, index).flatMap((earlier) => sentencesOf(earlier.text)));
+      const repeated = sentencesOf(line.text).find((sentence) => before.has(sentence));
+      if (repeated) return { ok: false, detail: `said again: ${repeated.slice(0, 40)}` };
+    }
+    return { ok: true, detail: 'no sentence said twice' };
+  },
 };
 
 export const CHECK_TYPES = Object.keys(CHECKS);

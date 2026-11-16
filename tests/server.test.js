@@ -720,3 +720,26 @@ test('the page may connect to Deepgram, and nowhere else new', async () => {
   const response = await fetch(baseUrl + '/');
   assert.match(response.headers.get('content-security-policy'), /connect-src 'self' https:\/\/api\.openai\.com wss:\/\/agent\.deepgram\.com;/);
 });
+
+test("the phone says why a call ended, and a call that dropped straight away doesn't use up a Free user's call", async () => {
+  const { token } = await joinWith(BETA_CODE);
+  const call = async () => (await request('/api/calls', { method: 'POST', token })).data;
+  const start = async (id) => {
+    await request(`/api/calls/${id}/session`, { method: 'POST', token });
+    await request(`/api/calls/${id}/connected`, { method: 'POST', token });
+  };
+  // The first call is free, then the day's one call drops straight away.
+  const first = await call();
+  await start(first.id);
+  await request(`/api/calls/${first.id}/ended`, { method: 'POST', token, body: { reason: 'hung-up' } });
+  const second = await call();
+  await start(second.id);
+  const { data } = await request(`/api/calls/${second.id}/ended`, { method: 'POST', token, body: { reason: 'dropped' } });
+  assert.deepEqual([data.calling.canCall, data.calling.retryAfterDrop], [true, true]);
+
+  // The retry is used by the next call. Ending it with no reason, as an older app does, gives nothing back.
+  const third = await call();
+  await start(third.id);
+  const { data: after } = await request(`/api/calls/${third.id}/ended`, { method: 'POST', token });
+  assert.deepEqual([after.calling.canCall, after.calling.retryAfterDrop], [false, false]);
+});

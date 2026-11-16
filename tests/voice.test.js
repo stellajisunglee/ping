@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isOutOfCredit, startCall } from '../public/voice.js';
+import { cantTalkNotice, failedCallNotice, isOutOfCredit, OUT_OF_CREDIT_NOTICE, startCall } from '../public/voice.js';
 import { cleanMetrics } from '../public/turn-metrics.js';
 
 // A stand-in for the browser's WebRTC, so the call's event handling runs without a real connection.
@@ -528,21 +528,36 @@ test('running out of OpenAI credit is recognized, and other errors are not', () 
   assert.equal(isOutOfCredit(undefined), false);
 });
 
-test('a reply that fails for lack of credit is reported once, whether as an error or a failed reply', async (t) => {
-  const context = await connected();
-  t.after(() => finishCall(context));
-  await context.fire({ type: 'error', error: { type: 'invalid_request_error', code: 'invalid_value', message: 'bad' } });
-  assert.equal(context.events.outOfCredit, 0);
+// A call whose contact can't talk, with the notice shortened for the test, logging what the screen is told and when.
+async function cantTalkCall(options = {}) {
+  const log = [];
+  const context = await connected({
+    ...options,
+    options: {
+      cantTalkNoticeMs: 30,
+      onCantTalk: (info) => log.push(['cant-talk', info]),
+      onEnded: (reason) => log.push(['ended', reason]),
+    },
+  });
+  return { ...context, log };
+}
+
+test('a reply that fails for lack of credit is reported once, whether as an error or a failed reply, and the call then ends for everyone', async () => {
+  const context = await cantTalkCall();
   await context.fire({ type: 'response.done', response: { id: 'r1', status: 'failed', status_details: { type: 'failed', error: NO_CREDIT }, output: [] } });
   await context.fire({ type: 'error', error: NO_CREDIT });
-  assert.equal(context.events.outOfCredit, 1);
-  assert.deepEqual(context.events.ended, [], 'the screen decides whether to hang up');
+  assert.equal(context.events.outOfCredit, 1, 'reported once, so admins can be told why');
+  assert.deepEqual(context.log, [['cant-talk', { outOfCredit: true }]], 'the screen is told straight away, and the call is still on');
+  await pause(60);
+  assert.deepEqual(context.log, [['cant-talk', { outOfCredit: true }], ['ended', 'unavailable']]);
 });
 
-test('a call OpenAI refuses for lack of credit is reported, then ends as a failed call', async () => {
-  const context = await connected({ sdpResponse: { ok: false, status: 429, json: async () => ({ error: NO_CREDIT }) } });
+test('a call OpenAI refuses for lack of credit says so on the screen first, then ends as unavailable, not as a silent failure', async () => {
+  const context = await cantTalkCall({ sdpResponse: { ok: false, status: 429, json: async () => ({ error: NO_CREDIT }) } });
   assert.equal(context.events.outOfCredit, 1);
-  assert.deepEqual(context.events.ended, ['failed']);
+  assert.deepEqual(context.log, [['cant-talk', { outOfCredit: true }]]);
+  await pause(60);
+  assert.deepEqual(context.log, [['cant-talk', { outOfCredit: true }], ['ended', 'unavailable']]);
 });
 
 test('Smart Turn starts from the "time to answer" setting, and follows a change to it mid-call', async (t) => {
@@ -669,4 +684,67 @@ test('an empty recording is reported as nothing recorded', async () => {
   call.hangUp();
   await settle();
   assert.deepEqual(recordings, [[null, 'Nothing was recorded.']]);
+});
+
+// ---------- When the contact can't talk ----------
+
+test('the screen is told before the call ends, with the full notice time in between', async () => {
+  const context = await cantTalkCall();
+  const toldAt = performance.now();
+  await context.fire({ type: 'error', error: NO_CREDIT });
+  while (context.log.length < 2) await pause(5);
+  const [[told], [ended, reason]] = context.log;
+  assert.deepEqual([told, ended, reason], ['cant-talk', 'ended', 'unavailable']);
+  assert.ok(performance.now() - toldAt >= 25, 'the call stays up while the notice shows');
+});
+
+test('a reply that fails for another reason is asked for once more, and the call carries on if that works', async () => {
+  const context = await cantTalkCall();
+  const replies = () => context.sent.filter((event) => event.type === 'response.create').length;
+  const before = replies();
+  await context.fire({ type: 'response.done', response: { id: 'r1', status: 'failed', status_details: { error: { type: 'server_error' } }, output: [] } });
+  assert.equal(replies(), before + 1, 'asked again');
+  await context.fire({ type: 'response.done', response: { id: 'r2', status: 'completed', output: [] } });
+  // A success resets the count, so a later single failure is retried too.
+  await context.fire({ type: 'response.done', response: { id: 'r3', status: 'failed', status_details: { error: { type: 'server_error' } }, output: [] } });
+  assert.equal(replies(), before + 2);
+  await pause(60);
+  assert.deepEqual(context.log, [], 'never told the contact cannot talk, and the call is still on');
+  context.call.hangUp();
+});
+
+test('two failed replies in a row mean the contact cannot talk', async () => {
+  const context = await cantTalkCall();
+  for (const id of ['r1', 'r2']) await context.fire({ type: 'response.done', response: { id, status: 'failed', status_details: { error: { type: 'server_error' } }, output: [] } });
+  await pause(60);
+  assert.deepEqual(context.log, [['cant-talk', { outOfCredit: false }], ['ended', 'unavailable']]);
+  assert.equal(context.events.outOfCredit, 0, 'not a credit problem, so admins are not told it was');
+});
+
+test('other voice engine errors do not end the call', async () => {
+  const context = await cantTalkCall();
+  await context.fire({ type: 'error', error: { type: 'invalid_request_error', code: 'invalid_value', message: 'bad' } });
+  await pause(60);
+  assert.deepEqual(context.log, []);
+  context.call.hangUp();
+});
+
+test('hanging up while the notice shows ends the call once, as hung up', async () => {
+  const context = await cantTalkCall();
+  await context.fire({ type: 'error', error: NO_CREDIT });
+  context.call.hangUp();
+  await pause(60);
+  assert.deepEqual(context.log, [['cant-talk', { outOfCredit: true }], ['ended', 'hung-up']]);
+});
+
+test("everyone is told the contact can't talk; only admins also learn it was OpenAI credit", () => {
+  assert.equal(cantTalkNotice(), "Ping can't talk right now. Please try again later.");
+  assert.equal(failedCallNotice({ admin: false, outOfCredit: true }), "Ping can't talk right now. Please try again later.");
+  assert.equal(failedCallNotice({ admin: false, outOfCredit: true, contactName: 'Yuki' }), "Yuki can't talk right now. Please try again later.");
+  assert.equal(failedCallNotice({ admin: true, outOfCredit: true }), OUT_OF_CREDIT_NOTICE);
+  assert.equal(failedCallNotice({ admin: true, outOfCredit: false }), "Ping can't talk right now. Please try again later.");
+  // Nothing about billing, keys or errors reaches anyone but admins.
+  for (const text of [failedCallNotice({ admin: false, outOfCredit: true }), failedCallNotice({ admin: false, outOfCredit: false })]) {
+    assert.ok(!/openai|credit|billing|quota|error|admin/i.test(text), text);
+  }
 });

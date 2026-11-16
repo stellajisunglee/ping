@@ -1,5 +1,7 @@
 // Who can call the user, and which plan unlocks what.
 
+import { PING_IDENTITY } from './persona.js';
+
 export const PLANS = ['free', 'premium', 'platinum'];
 export const VOICES = ['marin', 'cedar', 'coral', 'sage', 'verse', 'ash'];
 export const MAX_CUSTOM_CONTACTS = 5;
@@ -20,7 +22,8 @@ export const planLimits = (plan) => PLAN_LIMITS[plan] ?? PLAN_LIMITS.free;
 
 export const isPaid = (plan) => plan === 'premium' || plan === 'platinum';
 
-export const PING = { id: 'ping', name: 'Ping', spokenName: 'ピン', topic: 'daily life, such as what they did today, food and plans', plan: 'free' };
+// Ping's name and topic come from persona.js. Shared by every user, so it's frozen.
+export const PING = Object.freeze({ id: 'ping', ...PING_IDENTITY, plan: 'free' });
 // Hidden until it has a topic. Remove `hidden` and fill in `topic` to bring it back.
 const MERO = { id: 'mero', name: 'Mero', spokenName: 'メロ', topic: '', plan: 'premium', hidden: true };
 const BUILT_IN = [PING, MERO].filter((contact) => !contact.hidden);

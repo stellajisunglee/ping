@@ -28,6 +28,15 @@ npm run eval -- --no-judge
 
 Each run is saved to `runs/<time>.json` with the transcripts, check results, verdicts and reasons, the git commit, and which models ran.
 
+## Compare with the baseline
+
+`baseline/` holds three runs from before the persona refactor, with the results in `baseline/README.md`. Runs vary, so after a change make three runs and compare the tallies:
+
+```bash
+node evals/summarize.js evals/baseline/*.json
+node evals/summarize.js evals/runs/<your three runs>.json
+```
+
 ## Check the judge (about 30 minutes, once)
 
 ```bash

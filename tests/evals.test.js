@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { CHECK_TYPES, runChecks, sentenceCount, usesEnglish } from '../evals/checks.js';
 import { agreement, parseLabels } from '../evals/agreement.js';
 import { cleanVerdicts, formatTranscript, judgeUserMessage, verdictSchema } from '../evals/judge-prompt.js';
 import { runScenario, scenarioSession } from '../evals/ping-engine.js';
+import { summarize, toMarkdown } from '../evals/summarize.js';
 import { QUESTIONS } from '../server/tutor.js';
 import { FORMALITY_LEVELS, PROFICIENCY_LEVELS } from '../server/settings.js';
 
@@ -182,4 +183,63 @@ test('a saved word that Ping already explained needs no second reply, and errors
   }
   const failed = await runScenario({ question: 'weekend', turns: [] }, { apiKey: 'test', WebSocketClass: FailingSocket });
   assert.match(failed.error, /invalid_value: bad session/);
+});
+
+test('several runs add up per scenario and rubric item, with errors counted', () => {
+  const ids = ['warmth', 'noLoop'];
+  const played = (warmth, ok, judgeError = null) => ({
+    commit: 'abc',
+    scenarios: [{ id: 'goodbye', checks: [{ ok }], error: null, judge: { error: judgeError, items: [{ id: 'warmth', verdict: warmth }, { id: 'noLoop', verdict: 'na' }] } }],
+  });
+  const summary = summarize([played('pass', true), played('fail', false), played(null, true, 'rate limited')], ids);
+  assert.deepEqual(summary.checks, { passed: 2, total: 3 });
+  assert.deepEqual(summary.scenarios[0].items.warmth, { pass: 1, fail: 1, runs: 3 });
+  assert.deepEqual(summary.totals.warmth, { pass: 1, fail: 1, na: 0, unscored: 1 });
+  assert.deepEqual(summary.errors, { play: 0, judge: 1 });
+  assert.match(toMarkdown(summary, ids), /\| goodbye \| 2\/3 \| \*\*1\/3 fail\*\* \| na \|/);
+});
+
+test('the baseline runs are complete and add up', () => {
+  const ids = rubric.map((item) => item.id);
+  const dir = new URL('../evals/baseline/', import.meta.url);
+  const runs = readdirSync(dir).filter((file) => file.endsWith('.json')).map((file) => JSON.parse(readFileSync(new URL(file, dir))));
+  assert.equal(runs.length, 3);
+  const summary = summarize(runs, ids);
+  // The baseline is a fixed record. New scenarios come later, but none it scored may disappear.
+  for (const run of runs) assert.equal(run.scenarios.length, summary.scenarios.length, 'every run played every scenario');
+  for (const { id } of summary.scenarios) assert.ok(scenarios.some((scenario) => scenario.id === id), id);
+  assert.deepEqual(summary.errors, { play: 0, judge: 0 });
+});
+
+test('a sentence said again inside a later reply is caught, but not a new one or the greeting turn', () => {
+  const repaired = (text) => [
+    { turn: 0, from: 'ping', text: 'もしもし、ピンです！最近、どうですか？', tools: [] },
+    { turn: 1, from: 'learner', text: 'Sorry, I don\'t understand.', tools: [] },
+    { turn: 1, from: 'ping', text, tools: [] },
+  ];
+  const check = (text, options = {}) => runChecks([{ type: 'noRepeatedSentence', ...options }], repaired(text))[0];
+  assert.equal(check('I asked how you have been.\n\n最近、どうですか？').ok, false);
+  assert.match(check('I asked how you have been.\n\n最近、どうですか？').detail, /最近どうですか/);
+  assert.equal(check('I asked how you have been.\n\n今週は忙しいですか？').ok, true);
+  // Short words like はい said twice aren't a repeated question.
+  assert.equal(check('はい！今週は忙しいですか？').ok, true);
+  assert.equal(check('最近、どうですか？', { turn: 2 }).ok, true, 'only from the given turn on');
+});
+
+test('mentionsAny passes when Ping says one of the phrases in that turn, whatever the case', () => {
+  const said = [
+    { turn: 1, from: 'ping', text: 'たとえば「散歩しました。」どうですか？', tools: [] },
+    { turn: 2, from: 'learner', text: 'Still nothing...', tools: [] },
+    { turn: 2, from: 'ping', text: '一言でも大丈夫ですよ。家ですか？外ですか？', tools: [] },
+  ];
+  assert.equal(runChecks([{ type: 'mentionsAny', turn: 2, phrases: ['一言', 'one word'] }], said)[0].ok, true);
+  assert.equal(runChecks([{ type: 'mentionsAny', turn: 1, phrases: ['一言', 'one word'] }], said)[0].ok, false);
+  assert.equal(runChecks([{ type: 'mentionsAny', turn: 2, phrases: ['ONE WORD'] }], [{ turn: 2, from: 'ping', text: 'Just one word is fine!', tools: [] }])[0].ok, true);
+});
+
+test('mentionsNone fails when Ping says one of the phrases in that turn', () => {
+  const said = [{ turn: 1, from: 'ping', text: '週末に何をするか、聞いていました。たとえば、「家で映画を見ます。」', tools: [] }];
+  assert.equal(runChecks([{ type: 'mentionsNone', turn: 1, phrases: ['聞いて', 'I was asking'] }], said)[0].ok, false);
+  assert.equal(runChecks([{ type: 'mentionsNone', turn: 1, phrases: ['I was asking'] }], said)[0].ok, true);
+  assert.equal(runChecks([{ type: 'mentionsNone', turn: 1, phrases: ['i was asking'] }], [{ turn: 1, from: 'ping', text: 'I was asking about food.', tools: [] }])[0].ok, false);
 });

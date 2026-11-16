@@ -65,6 +65,7 @@ function callingStatus(calling) {
   if (calling.callsLeft && calling.callBackMissed) return `You can make ${callsText(calling.callsLeft)} today${ping}, and call back for the call you missed.`;
   if (calling.callsLeft) return `You can make ${callsText(calling.callsLeft)} today${ping}.`;
   if (calling.callBackMissed) return "You can call back for the call you missed. It doesn't count toward today's calls.";
+  if (calling.retryAfterDrop) return "Your last call cut off early, so you can call again. It doesn't count toward today's calls.";
   return 'Try your first call now. It doesn\'t count toward today\'s calls.';
 }
 

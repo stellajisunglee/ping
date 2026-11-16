@@ -13,7 +13,7 @@ The live call goes from the phone straight to OpenAI. After each recorded call, 
             ┌───────────── Render (one instance, 1 GB disk) ─────────────┐
             │  server/index.js  HTTP API, no framework                    │
             │  calls.js  schedule.js  progress.js  stack.js  contacts.js  │
-            │  tutor.js (Ping's instructions + tools)   persona.js        │
+            │  prompt.js persona.js lines.js   tutor.js (session + tools) │
             │  openai.js (only file holding the key)    push.js           │
             │  store.js → data/ping.json                                  │
             └──────┬───────────────────────┬─────────────────────▲────────┘
@@ -65,7 +65,7 @@ Calling Ping from the app works the same from step 4, after a 3-second "Calling�
 | Job | Server | Phone |
 | --- | --- | --- |
 | Call lifecycle | `calls.js`, `schedule.js`, `push.js` | `sw.js`, `ringtone.js`, `app.js` |
-| The conversation | `tutor.js` (rules + tools), `persona.js` (Ping's life), `openai.js` | `voice.js`, `reveal.js`, `aizuchi.js` |
+| The conversation | `persona.js` (who Ping is), `prompt.js` (instructions, by section), `lines.js` (words said exactly), `tutor.js` (tools + session), `openai.js` | `voice.js`, `reveal.js`, `aizuchi.js` |
 | Turn-taking | `tutor.js` (`TURN_MODES`, `SMART_TURN_PATIENCE`), `settings.js` (`SLOW_SPEED_PATIENCE`) | `smart-turn.js`, `turn-machine.js`, `features.js`, `capture-worklet.js` |
 | Measurement | `index.js` (logs one `turn-metrics` line per call) | `turn-metrics.js` |
 | Progress & stack | `progress.js`, `stack.js` | `stack.js`, `app.js` (Home) |

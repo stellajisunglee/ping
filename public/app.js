@@ -4,7 +4,7 @@ import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdm
 import { initSettings, keepRecording, recordCallsOn } from './settings.js';
 import { audioUnlocked, startRingtone, unlockAudio } from './ringtone.js';
 import { initStack, renderStackTiles } from './stack.js';
-import { startCall } from './voice.js';
+import { failedCallNotice, startCall } from './voice.js';
 
 const RING_FALLBACK_MS = 12_000; // the server decides a call was missed. This only covers its message getting lost.
 // Calling a contact rings this long first, like a real phone call, before Ping picks up.
@@ -292,8 +292,6 @@ function endedNotice(reason) {
 function timeLimitNotice() {
   return `That was a good chat! Calls on your plan last up to ${state.me.calling.perCallMinutes} minutes.`;
 }
-// Only admins are told and the call hangs up. For everyone else the call behaves as it did before.
-const OUT_OF_CREDIT_NOTICE = "Admin: OpenAI is out of credit, so Ping can't talk. Add credit at platform.openai.com/settings/organization/billing, then call again.";
 
 function setPressed(id, pressed) {
   $(id).setAttribute('aria-pressed', String(pressed));
@@ -486,10 +484,14 @@ function beginCall(callId, contactName = 'Ping') {
       if (keepOnPhone) keepRecording({ recording, problem });
       if (forReview && recording) upload(`/api/calls/${callId}/recording`, recording.blob).catch((error) => console.warn('Could not upload the recording', error));
     },
+    // OpenAI credit ran out. Only admins are told that's the reason (failedCallNotice); the call itself is
+    // ended by onCantTalk's path below, the same way for everyone.
     onOutOfCredit: () => {
-      if (!isAdmin()) return;
       outOfCredit = true;
-      activeCall?.hangUp();
+    },
+    // The contact can't talk: say so on the call screen now. The call ends a few seconds later, as 'unavailable'.
+    onCantTalk: () => {
+      callHint(failedCallNotice({ admin: isAdmin(), outOfCredit, contactName }));
     },
     onWordAdded: (word, { alreadySaved = false } = {}) => {
       const note = alreadySaved ? '*already in your stack*' : '*added to stack*';
@@ -509,13 +511,16 @@ function beginCall(callId, contactName = 'Ping') {
       clearInterval(revealTimer);
       revealTimer = null;
       $('call-avatar').classList.remove('speaking');
-      // Tells the server the call is over, so it can't be reconnected.
-      await api(`/api/calls/${callId}/ended`, { method: 'POST' }).catch((error) => console.warn('Could not end the call', error));
+      // Tells the server the call is over, so it can't be reconnected, and why, so a call that broke straight away
+      // doesn't use up the day's call.
+      await api(`/api/calls/${callId}/ended`, { method: 'POST', body: { reason } }).catch((error) => console.warn('Could not end the call', error));
       await saveTranscript(callId, forReview);
       await refresh().catch(() => {});
-      const ended = outOfCredit ? OUT_OF_CREDIT_NOTICE : endedNotice(reason);
-      // A call that connected asks for a quick rating first. One that never connected has nothing to rate.
-      if (connected && !outOfCredit) askForRating(callId, ended);
+      const couldntTalk = reason === 'unavailable';
+      const ended = couldntTalk ? failedCallNotice({ admin: isAdmin(), outOfCredit, contactName }) : endedNotice(reason);
+      // A call that connected asks for a quick rating first. One that never connected, or where the contact
+      // couldn't talk, has nothing to rate.
+      if (connected && !couldntTalk) askForRating(callId, ended);
       else {
         goHome();
         notice(ended);
