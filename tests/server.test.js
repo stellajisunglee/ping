@@ -405,6 +405,7 @@ test('plans are checked', async () => {
   assert.equal((await request('/api/plan', { method: 'PUT', token, body: { plan: 'free-forever' } })).status, 400);
 });
 
+// What phones sent before talkOvers and Deepgram's latency were added: still accepted, with those saved as null.
 const METRICS = {
   replyLatencyMedianMs: 640,
   replyLatencyP90Ms: 910,
@@ -441,7 +442,8 @@ test('turn metrics are stored on the call with their settings, and logged once',
   }
   const stored = engine.store.calls[call.id].turnMetrics;
   // This call never connected, so it was never assigned a turn mode.
-  assert.deepEqual(stored, { callId: call.id, ...METRICS, engine: 'gpt-realtime', turnMode: null, actualTurnMode: null, thinkingTime: 'normal', speed: 1, proficiency: 'beginner' });
+  const notSent = { talkOvers: null, providerLatencyMedianMs: null, providerLatencyP90Ms: null, providerLatencyCount: null };
+  assert.deepEqual(stored, { callId: call.id, ...METRICS, ...notSent, engine: 'gpt-realtime', turnMode: null, actualTurnMode: null, thinkingTime: 'normal', speed: 1, proficiency: 'beginner' });
   assert.equal(lines.length, 1);
   assert.match(lines[0], /^turn-metrics \{/);
   assert.deepEqual(JSON.parse(lines[0].slice('turn-metrics '.length)), stored);
@@ -826,4 +828,31 @@ test('the build commit is logged only when it looks like one', () => {
   assert.equal(buildCommit(COMMIT), COMMIT.toLowerCase());
   assert.equal(buildCommit('cf8ad20'), 'cf8ad20');
   for (const value of [undefined, null, '', 'main', 'cf8ad20; rm -rf', 'x'.repeat(41), 42]) assert.equal(buildCommit(value), null, String(value));
+});
+
+test('the server keeps metrics from the oldest app version, with what it never sent as null, and Deepgram n/a values as null', async () => {
+  const token = await join();
+  await request('/api/call-setup', { method: 'PUT', token, body: { manual: true, engine: 'gpt-realtime', turnMode: 'smartTurn' } });
+  const call = await connectedCall(token);
+  const oldest = Object.fromEntries(['replyLatencyMedianMs', 'replyLatencyP90Ms', 'replyLatencyCount', 'suspectedCutoffs', 'bargeIns', 'ignoredAizuchi', 'userTurns', 'agentTurns', 'callSeconds'].map((field) => [field, METRICS[field]]));
+  const log = console.log;
+  console.log = () => {};
+  try {
+    assert.equal((await request(`/api/calls/${call.id}/metrics`, { method: 'POST', token, body: oldest })).status, 201);
+    const stored = engine.store.calls[call.id].turnMetrics;
+    assert.deepEqual([stored.callSeconds, stored.replyGapMedianMs, stored.smartTurnFallback, stored.talkOvers], [95, null, null, null]);
+    assert.equal(stored.actualTurnMode, null, "too old to say whether Smart Turn fell back, so it's unknown, not assumed");
+
+    const deepgramCall = await connectedCall(token);
+    const deepgramMetrics = { ...METRICS, bargeIns: null, ignoredAizuchi: null, turnEndWaitMedianMs: null, replyGapMedianMs: null, talkOvers: 2, providerLatencyMedianMs: 1100, providerLatencyP90Ms: 1640, providerLatencyCount: 6 };
+    assert.equal((await request(`/api/calls/${deepgramCall.id}/metrics`, { method: 'POST', token, body: deepgramMetrics })).status, 201);
+    const entry = loggedCall(deepgramCall.id);
+    assert.deepEqual(
+      [entry.bargeIns, entry.ignoredAizuchi, entry.replyGapMedianMs, entry.talkOvers, entry.providerLatencyMedianMs, entry.providerLatencyP90Ms],
+      [null, null, null, 2, 1100, 1640],
+    );
+  } finally {
+    console.log = log;
+    await request('/api/call-setup', { method: 'PUT', token, body: { manual: false } });
+  }
 });

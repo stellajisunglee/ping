@@ -5,7 +5,11 @@
 // while they were still thinking.
 export const SUSPECTED_CUTOFF_WINDOW_MS = 1500;
 
-const MAX_METRIC = 10_000_000; // far above any real call, so only broken or made-up numbers are rejected
+// The largest value each kind of number can take: far above any real call (the longest is 10 minutes),
+// so only broken or made-up numbers are rejected.
+const MAX_MS = 3_600_000; // an hour, for times in milliseconds
+const MAX_CALL_SECONDS = 86_400;
+const MAX_COUNT = 100_000;
 
 // The data channel events whose timing the call records.
 export const TIMED_EVENTS = new Set([
@@ -42,11 +46,35 @@ export const METRIC_FIELDS = [
   'modelLoadMs', // how long the runtime and models took to load
   'smartTurnFallback', // why the call went back to silence mode: 0 it didn't, 1 couldn't load, 2 too slow, 3 audio stopped
   'audioRestarts', // times the phone paused the microphone audio Smart Turn hears, and it was restarted
+  // Added after the fields above, so older phones don't send them.
+  'talkOvers', // times the contact's voice was cut off because the user started talking, aizuchi included
+  // Deepgram only, as Deepgram reports it: total_latency, from the end of the user's utterance (as Deepgram
+  // judged it) to its first audio byte. Not measured by the phone, so not the same thing as replyGap.
+  'providerLatencyMedianMs',
+  'providerLatencyP90Ms',
+  'providerLatencyCount',
 ];
+
+// What every phone has sent since metrics began. Fields added later are optional, so a phone still running an
+// older version of the app is accepted, and whatever it didn't send is saved as null (not reported), never 0.
+const CORE_FIELDS = METRIC_FIELDS.slice(0, METRIC_FIELDS.indexOf('callSeconds') + 1);
+
+// What each engine lets the phone measure. Deepgram decides turns itself and answers aizuchi like any other
+// turn, so the phone can't tell aizuchi from a real interruption there; it does report its own latency.
+const ENGINE_MEASURES = {
+  'gpt-realtime': { aizuchi: true, providerLatency: false },
+  'deepgram-agent': { aizuchi: false, providerLatency: true },
+};
 
 export const FALLBACK_CODES = { load: 1, slow: 2, 'no-audio': 3 };
 // A call with no replies has no latency or gap to report, and only Smart Turn calls have decision times.
+// The aizuchi counts don't apply on Deepgram, nor the provider's latency on OpenAI.
 const MAY_BE_EMPTY = new Set([
+  'bargeIns',
+  'ignoredAizuchi',
+  'providerLatencyMedianMs',
+  'providerLatencyP90Ms',
+  'providerLatencyCount',
   'replyLatencyMedianMs',
   'replyLatencyP90Ms',
   'turnEndWaitMedianMs',
@@ -77,8 +105,11 @@ function hiddenWait(start, stop, detection) {
   return Math.max(0, Math.round(wait));
 }
 
-export function summarizeTurns(events, { connectedAt = null, endedAt }) {
+// engine says what the call's engine lets the phone measure (ENGINE_MEASURES). What it can't measure is null.
+export function summarizeTurns(events, { connectedAt = null, endedAt, engine = 'gpt-realtime' }) {
+  const measures = ENGINE_MEASURES[engine] ?? ENGINE_MEASURES['gpt-realtime'];
   const latencies = [];
+  const providerLatencies = { LatencyReport: [], AgentStartedSpeaking: [] }; // by the Deepgram message they came in
   const waits = [];
   const gaps = [];
   let detection = { silenceMs: 0, paddingMs: 0 }; // the turn detection settings in use, from OpenAI
@@ -175,6 +206,10 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
       case 'aizuchi':
         ignoredAizuchi += 1;
         break;
+      // Deepgram's own latency for one reply, in milliseconds. Missing values were never added.
+      case 'provider-latency':
+        if (Number.isFinite(event.totalMs) && providerLatencies[event.source]) providerLatencies[event.source].push(event.totalMs);
+        break;
       default:
     }
   }
@@ -183,13 +218,17 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
   const wait = spread(waits);
   const gap = spread(gaps);
   const decision = spread(decisions);
+  // Deepgram documents LatencyReport and has also sent AgentStartedSpeaking with the same total_latency.
+  // If a call got both, only LatencyReport counts, so no reply is counted twice.
+  const reported = providerLatencies.LatencyReport.length ? providerLatencies.LatencyReport : providerLatencies.AgentStartedSpeaking;
+  const provider = spread(reported);
   return {
     replyLatencyMedianMs: percentile(sorted, 0.5),
     replyLatencyP90Ms: percentile(sorted, 0.9),
     replyLatencyCount: sorted.length,
     suspectedCutoffs,
-    bargeIns: Math.max(0, talkOvers - ignoredAizuchi), // real interruptions only
-    ignoredAizuchi,
+    bargeIns: measures.aizuchi ? Math.max(0, talkOvers - ignoredAizuchi) : null, // real interruptions only
+    ignoredAizuchi: measures.aizuchi ? ignoredAizuchi : null,
     userTurns,
     agentTurns,
     callSeconds: connectedAt === null ? 0 : Math.max(0, Math.round((endedAt - connectedAt) / 1000)),
@@ -204,28 +243,33 @@ export function summarizeTurns(events, { connectedAt = null, endedAt }) {
     modelLoadMs,
     smartTurnFallback,
     audioRestarts,
+    talkOvers,
+    providerLatencyMedianMs: measures.providerLatency ? provider.median : null,
+    providerLatencyP90Ms: measures.providerLatency ? provider.p90 : null,
+    providerLatencyCount: measures.providerLatency ? reported.length : null,
   };
 }
 
-// Why a set of metrics was rejected, for the server log: the names of known fields that are missing or
-// not whole numbers, and how many unknown fields came with them. Never the values themselves.
+const maxFor = (field) => (field === 'callSeconds' ? MAX_CALL_SECONDS : field === 'smartTurnFallback' ? Math.max(...Object.values(FALLBACK_CODES)) : field.endsWith('Ms') ? MAX_MS : MAX_COUNT);
+const validValue = (field, value) => (value === null ? MAY_BE_EMPTY.has(field) : Number.isInteger(value) && value >= 0 && value <= maxFor(field));
+const isObject = (body) => Boolean(body) && typeof body === 'object' && !Array.isArray(body);
+
+// Why a set of metrics was rejected, for the server log: the names of fields every phone sends that are missing,
+// fields that aren't whole numbers in range, and how many unknown fields came with them. Never the values themselves.
 export function metricsProblems(body) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return { notAnObject: true };
-  const missing = METRIC_FIELDS.filter((field) => !(field in body));
-  const invalid = METRIC_FIELDS.filter((field) => field in body && cleanMetrics({ ...Object.fromEntries(METRIC_FIELDS.map((name) => [name, 0])), [field]: body[field] }) === null);
+  if (!isObject(body)) return { notAnObject: true };
+  const missing = CORE_FIELDS.filter((field) => !Object.hasOwn(body, field));
+  const invalid = METRIC_FIELDS.filter((field) => Object.hasOwn(body, field) && !validValue(field, body[field]));
   const unknown = Object.keys(body).filter((key) => !METRIC_FIELDS.includes(key)).length;
   return { missing, invalid, unknown };
 }
 
-// Returns the metrics if every known field is there as a whole number, and nothing else is. Otherwise null.
+// Returns every known field, if the fields every phone sends are there, everything sent is a whole number in
+// range (or null where nothing can be measured), and nothing else came with them. Fields a phone on an older
+// version didn't send come back as null. Otherwise returns null.
 export function cleanMetrics(body) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
-  const keys = Object.keys(body);
-  if (keys.length !== METRIC_FIELDS.length || !METRIC_FIELDS.every((field) => keys.includes(field))) return null;
-  const valid = METRIC_FIELDS.every((field) => {
-    const value = body[field];
-    if (value === null) return MAY_BE_EMPTY.has(field);
-    return Number.isInteger(value) && value >= 0 && value <= MAX_METRIC;
-  });
-  return valid ? Object.fromEntries(METRIC_FIELDS.map((field) => [field, body[field]])) : null;
+  if (!isObject(body)) return null;
+  const { missing, invalid, unknown } = metricsProblems(body);
+  if (missing.length || invalid.length || unknown) return null;
+  return Object.fromEntries(METRIC_FIELDS.map((field) => [field, Object.hasOwn(body, field) ? body[field] : null]));
 }

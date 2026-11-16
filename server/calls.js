@@ -509,8 +509,10 @@ export class CallEngine {
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id) return null;
     const { thinkingTime, speed, proficiency } = user.settings;
-    // Smart Turn can fall back to silence mid-call, so the mode it actually ended in is kept too.
-    const actualTurnMode = call.turnMode === 'smartTurn' && metrics.smartTurnFallback ? 'silence' : (call.turnMode ?? null);
+    // Smart Turn can fall back to silence mid-call, so the mode it actually ended in is kept too. A phone too old
+    // to report that leaves it unknown.
+    const smartTurnUnknown = call.turnMode === 'smartTurn' && metrics.smartTurnFallback === null;
+    const actualTurnMode = smartTurnUnknown ? null : call.turnMode === 'smartTurn' && metrics.smartTurnFallback ? 'silence' : (call.turnMode ?? null);
     call.turnMetrics = { callId, ...metrics, engine: call.engine ?? 'gpt-realtime', turnMode: call.turnMode ?? null, actualTurnMode, thinkingTime, speed, proficiency };
     this.#log(call, {
       actualTurnMode,
@@ -519,7 +521,10 @@ export class CallEngine {
       suspectedCutoffs: metrics.suspectedCutoffs,
       bargeIns: metrics.bargeIns,
       ignoredAizuchi: metrics.ignoredAizuchi,
+      talkOvers: metrics.talkOvers,
       userTurns: metrics.userTurns,
+      providerLatencyMedianMs: metrics.providerLatencyMedianMs,
+      providerLatencyP90Ms: metrics.providerLatencyP90Ms,
     });
     this.store.save();
     return call.turnMetrics;

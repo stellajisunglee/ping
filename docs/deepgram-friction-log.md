@@ -66,7 +66,7 @@ Setup for the first tests (Nov 15, 2026): Node 22's built-in WebSocket to `wss:/
 
 - **Japanese worked first time** with `flux-general-multi` and `language_hints: ["ja"]`, and the transcript was accurate (`languages: ["ja"]` on the user message).
 - **Fast replies:** the turn ended about 0.8 s after the learner stopped (with `eot_threshold: 0.8`), and the agent started speaking about 0.6 s after that: 0.51 s to think, 0.06 s to start speaking. That's roughly 1.4 s from the learner stopping to Ping talking, inside the range Ping's Smart Turn mode gets (0.9–1.5 s) and faster than its silence mode (1.9–2.3 s).
-- **`AgentStartedSpeaking` breaks latency into parts** (`total_latency`, `ttt_latency`, `tts_latency`). That's exactly what a latency budget needs, though it requires `experimental: true` in `Settings`.
+- **`AgentStartedSpeaking` breaks latency into parts** (`total_latency`, `ttt_latency`, `tts_latency`). That's exactly what a latency budget needs, though it requires `experimental: true` in `Settings`. (Nov 16: the current docs describe the breakdown in a `LatencyReport` message instead, with `ttt_*` split by token type and every field optional. Ping reads `total_latency` from either, preferring `LatencyReport`.)
 - **`greeting`** makes "the agent speaks first", which every phone-call app needs, a one-line setting.
 - **`EndOfTurn` and `EndOfThought`** events make turn timing measurable without guessing.
 - **A full call worked in a real browser (Nov 16):** Ping's greeting, the learner's line transcribed correctly, Ping's reply about 1.1 s after the learner finished, and the transcript and voice in sync. The microphone was a recorded line fed in as a fake microphone, because the test browser blocks real ones; a phone test is still to come.

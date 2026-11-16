@@ -97,7 +97,7 @@ test('metrics are only accepted as the known fields, all whole numbers', () => {
     { ...good, bargeIns: '1' },
     { ...good, bargeIns: -1 },
     { ...good, bargeIns: 1.5 },
-    { ...good, bargeIns: null },
+    { ...good, userTurns: null }, // only what an engine can't measure may be null
     { ...good, callSeconds: 1e12 },
   ]) {
     assert.equal(cleanMetrics(bad), null, JSON.stringify(bad));
@@ -200,4 +200,88 @@ test('a rejected set of metrics is explained by field names only, never values',
   assert.deepEqual(metricsProblems({ ...missing, callSeconds: 1.5, transcript: 'こんにちは' }), { missing: ['bargeIns'], invalid: ['callSeconds'], unknown: 1 });
   assert.deepEqual(metricsProblems({ ...good, replyGapMedianMs: null }), { missing: [], invalid: [], unknown: 0 });
   assert.deepEqual(metricsProblems('words'), { notAnObject: true });
+});
+
+// Phones running older versions of the app, and engines that can't measure everything
+
+// METRIC_FIELDS as each earlier version of the app sent them, oldest first.
+const OLDER_SCHEMAS = [
+  METRIC_FIELDS.slice(0, METRIC_FIELDS.indexOf('callSeconds') + 1), // turn timing began
+  METRIC_FIELDS.slice(0, METRIC_FIELDS.indexOf('replyGapP90Ms') + 1), // + the hidden wait and the gap
+  METRIC_FIELDS.slice(0, METRIC_FIELDS.indexOf('smartTurnFallback') + 1), // + Smart Turn
+  METRIC_FIELDS.slice(0, METRIC_FIELDS.indexOf('audioRestarts') + 1), // + audio restarts: phones on 2f52ca9
+];
+
+test('metrics from phones still on an older version are accepted, with what they never sent saved as null, not 0', () => {
+  const current = summarize(timeline(['speechStopped', 1000], ['agentStarted', 1600], ['speechStarted', 2000], ['agentCleared', 2100]));
+  assert.deepEqual(cleanMetrics(current), current, 'the current app');
+  for (const fields of OLDER_SCHEMAS) {
+    const sent = Object.fromEntries(fields.map((field) => [field, current[field]]));
+    const saved = cleanMetrics(sent);
+    assert.ok(saved, `${fields.length} fields`);
+    assert.deepEqual(Object.keys(saved), METRIC_FIELDS);
+    for (const field of METRIC_FIELDS) assert.equal(saved[field], fields.includes(field) ? current[field] : null, field);
+  }
+  assert.equal(cleanMetrics(Object.fromEntries(OLDER_SCHEMAS[0].map((field) => [field, current[field]]))).talkOvers, null);
+  // Partly filled: the first fields plus a few later ones.
+  const partial = { ...Object.fromEntries(OLDER_SCHEMAS[0].map((field) => [field, current[field]])), talkOvers: 1, audioRestarts: 0 };
+  assert.deepEqual([cleanMetrics(partial).talkOvers, cleanMetrics(partial).audioRestarts, cleanMetrics(partial).replyGapMedianMs], [1, 0, null]);
+});
+
+test('malformed or unreasonable metrics are still rejected whole', () => {
+  const good = summarize(timeline(['speechStopped', 1000], ['agentStarted', 1600]));
+  const { callSeconds, ...noCallSeconds } = good;
+  for (const bad of [
+    noCallSeconds, // a field every version sends
+    {},
+    { ...good, extra: 1 },
+    JSON.parse(`{"__proto__":{"admin":true},${JSON.stringify(good).slice(1)}`),
+    { ...good, talkOvers: null }, // the phone always counts these, so null isn't a real value
+    { ...good, talkOvers: '1' },
+    { ...good, providerLatencyMedianMs: 1.5 },
+    { ...good, replyGapMedianMs: 3_600_001 }, // over an hour
+    { ...good, callSeconds: 86_401 },
+    { ...good, userTurns: 100_001 },
+    { ...good, smartTurnFallback: 4 },
+    { ...good, smartTurnFallback: null },
+  ]) {
+    assert.equal(cleanMetrics(bad), null, JSON.stringify(bad));
+  }
+  assert.deepEqual(metricsProblems({ ...good, talkOvers: null, extra: 2 }), { missing: [], invalid: ['talkOvers'], unknown: 1 });
+});
+
+test("OpenAI calls keep their aizuchi counts and report no provider latency; Deepgram's counts what it can and nothing it can't", () => {
+  const events = timeline(['agentStarted', 0], ['speechStarted', 3000], ['agentCleared', 3000], ['aizuchi', 3800], ['agentStarted', 4000], ['speechStarted', 7000], ['agentCleared', 7000]);
+  const openai = summarize(events);
+  assert.deepEqual([openai.talkOvers, openai.bargeIns, openai.ignoredAizuchi], [2, 1, 1]);
+  assert.deepEqual([openai.providerLatencyMedianMs, openai.providerLatencyP90Ms, openai.providerLatencyCount], [null, null, null]);
+
+  const latency = (source, totalMs, at) => ({ type: 'provider-latency', source, totalMs, at });
+  const deepgram = summarizeTurns([...events, latency('AgentStartedSpeaking', 800, 1), latency('AgentStartedSpeaking', null, 2), latency('AgentStartedSpeaking', 1500, 3)], {
+    connectedAt: 0,
+    endedAt: 60_000,
+    engine: 'deepgram-agent',
+  });
+  assert.deepEqual([deepgram.talkOvers, deepgram.bargeIns, deepgram.ignoredAizuchi], [2, null, null]);
+  assert.deepEqual([deepgram.providerLatencyMedianMs, deepgram.providerLatencyP90Ms, deepgram.providerLatencyCount], [800, 1500, 2]);
+  assert.deepEqual(cleanMetrics(deepgram), deepgram);
+
+  // A call that got both of Deepgram's messages counts each reply once, from LatencyReport.
+  const both = summarizeTurns([latency('AgentStartedSpeaking', 800, 1), latency('LatencyReport', 820, 1), latency('AgentStartedSpeaking', 1500, 2), latency('LatencyReport', 1490, 2)], { endedAt: 1, engine: 'deepgram-agent' });
+  assert.deepEqual([both.providerLatencyMedianMs, both.providerLatencyP90Ms, both.providerLatencyCount], [820, 1490, 2]);
+  const none = summarizeTurns([], { endedAt: 1, engine: 'deepgram-agent' });
+  assert.deepEqual([none.providerLatencyMedianMs, none.providerLatencyCount], [null, 0]);
+});
+
+test('the admin call log says n/a for what an engine cannot measure, and - for what was not reported', async () => {
+  const { turnFacts } = await import('../public/settings.js');
+  const facts = (entry) => Object.fromEntries(turnFacts(entry));
+  const openai = facts({ engine: 'gpt-realtime', replyGapMedianMs: 1900, talkOvers: 3, ignoredAizuchi: 1, suspectedCutoffs: 0 });
+  assert.deepEqual(openai, { 'Gap before reply': '1.9 s', 'Talked over Ping': '3 (1 aizuchi)', 'Suspected cut-offs': 0 });
+  const deepgram = facts({ engine: 'deepgram-agent', replyGapMedianMs: null, talkOvers: 3, ignoredAizuchi: null, providerLatencyMedianMs: 1100, providerLatencyP90Ms: 1640, suspectedCutoffs: 1 });
+  assert.deepEqual(deepgram, { 'Gap before reply': 'n/a', 'Deepgram-reported latency': '1.1 s, P90 1.6 s', 'Talked over Ping': '3 (aizuchi: n/a)', 'Suspected cut-offs': 1 });
+  // Entries from before this change, and a call that never sent its numbers.
+  assert.deepEqual(facts({ engine: 'gpt-realtime', replyGapMedianMs: 2100, bargeIns: 0, ignoredAizuchi: 0, suspectedCutoffs: 2 }), { 'Gap before reply': '2.1 s', 'Talked over Ping': '-', 'Suspected cut-offs': 2 });
+  assert.deepEqual(facts({ engine: 'deepgram-agent' }), { 'Gap before reply': 'n/a', 'Deepgram-reported latency': '-', 'Talked over Ping': '-', 'Suspected cut-offs': '-' });
+  assert.deepEqual(facts({}), { 'Gap before reply': '-', 'Talked over Ping': '-', 'Suspected cut-offs': '-' });
 });

@@ -246,6 +246,21 @@ function renderTurnMode() {
 const durationText = (seconds) => (seconds == null ? '' : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
 const secondsText = (ms) => (ms == null ? '-' : `${(ms / 1000).toFixed(1)} s`);
 
+// What the admin call log says about a call's turn-taking. What the engine doesn't let the phone measure says
+// n/a; what wasn't measured or reported (an older entry, or a call with no replies) says -.
+// Deepgram's latency is its own report, from where it judged the user stopped, so it's never shown as the gap.
+export function turnFacts(entry) {
+  const deepgram = entry.engine === 'deepgram-agent';
+  const talkOvers = entry.talkOvers == null ? '-' : `${entry.talkOvers} (${deepgram ? 'aizuchi: n/a' : `${entry.ignoredAizuchi ?? '-'} aizuchi`})`;
+  const providerLatency = entry.providerLatencyMedianMs == null ? '-' : `${secondsText(entry.providerLatencyMedianMs)}, P90 ${secondsText(entry.providerLatencyP90Ms)}`;
+  return [
+    ['Gap before reply', deepgram ? 'n/a' : secondsText(entry.replyGapMedianMs)],
+    ...(deepgram ? [['Deepgram-reported latency', providerLatency]] : []),
+    ['Talked over Ping', talkOvers],
+    ['Suspected cut-offs', entry.suspectedCutoffs ?? '-'],
+  ];
+}
+
 // One call in the admin call log. The turn mode is blank for engines that decide turns themselves.
 function callLogRow(entry) {
   const when = new Date(entry.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -257,8 +272,7 @@ function callLogRow(entry) {
     ['Turn detection', `${mode}${fellBack}`],
     ['Assigned', entry.assigned ?? ''],
     ['Length', durationText(entry.seconds)],
-    ['Gap before reply', secondsText(entry.replyGapMedianMs)],
-    ['Suspected cut-offs', entry.suspectedCutoffs ?? '-'],
+    ...turnFacts(entry),
     ['Rating', entry.cutOffs ? `cut-offs ${entry.cutOffs}/5, natural ${entry.naturalness}/5` : '-'],
   ];
   return el(

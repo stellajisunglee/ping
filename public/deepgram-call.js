@@ -14,6 +14,9 @@ const WRAP_UP_BEFORE_END_SECONDS = 20;
 
 const withoutPunctuation = (text) => text.replace(/[\s、。！？!?.,…・「」]/g, '');
 
+// Deepgram's total_latency for one reply, in seconds, as whole milliseconds, or null if it didn't send one.
+const latencyMs = (seconds) => (typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds * 1000) : null);
+
 export function toPcm16(samples) {
   const pcm = new Int16Array(samples.length);
   for (let i = 0; i < samples.length; i += 1) {
@@ -144,7 +147,7 @@ export function startDeepgramCall({
   function sendTurnMetrics() {
     const endedAt = now();
     Promise.resolve()
-      .then(() => api(`/api/calls/${callId}/metrics`, { method: 'POST', body: summarizeTurns(turnLog, { connectedAt, endedAt }) }))
+      .then(() => api(`/api/calls/${callId}/metrics`, { method: 'POST', body: summarizeTurns(turnLog, { connectedAt, endedAt, engine: 'deepgram-agent' }) }))
       .catch((error) => console.warn('Could not send turn metrics', error));
   }
 
@@ -317,8 +320,10 @@ export function startDeepgramCall({
         // Flux decided the learner's turn is over. It doesn't say when they actually went quiet.
         turnLog.push({ type: 'input_audio_buffer.speech_stopped', at }, { type: 'input_audio_buffer.committed', at });
         break;
+      // Deepgram's own latency for a reply. Its docs put it in LatencyReport; it has also come with AgentStartedSpeaking.
       case 'AgentStartedSpeaking':
-        turnLog.push({ type: 'deepgram-latency', at, totalMs: Math.round((event.total_latency ?? 0) * 1000) });
+      case 'LatencyReport':
+        turnLog.push({ type: 'provider-latency', at, source: event.type, totalMs: latencyMs(event.total_latency) });
         break;
       case 'AgentAudioDone':
         agentDone = true;

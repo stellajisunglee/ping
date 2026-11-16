@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { agentListen, agentSettings, agentSpeak, createDeepgram, FLUX_PATIENCE } from '../server/deepgram.js';
 import { startDeepgramCall, toPcm16 } from '../public/deepgram-call.js';
+import { cleanMetrics } from '../public/turn-metrics.js';
 import { questionById, TOOLS } from '../server/tutor.js';
 import { DEFAULT_SETTINGS } from '../server/settings.js';
 import { PING } from '../server/contacts.js';
@@ -229,4 +230,24 @@ test("a reply whose audio arrives before its words still starts on the new line,
     ['voice', 'start', 'deepgram-contact-2'],
   ]);
   call.hangUp();
+});
+
+test("a Deepgram call reports Deepgram's own latency, and n/a rather than 0 for what it can't measure", async () => {
+  const { receive, apiCalls, call } = harness();
+  receive({ type: 'Welcome' });
+  receive({ type: 'SettingsApplied' });
+  receive({ type: 'ConversationText', role: 'assistant', content: 'もしもし！' });
+  receive(new ArrayBuffer(4));
+  receive({ type: 'UserStartedSpeaking' }); // talks over the contact: aizuchi or not, the phone can't tell here
+  receive({ type: 'EndOfTurn' });
+  receive({ type: 'AgentStartedSpeaking', total_latency: 1.234 });
+  receive({ type: 'AgentStartedSpeaking' }); // no latency sent: skipped, not counted as 0
+  receive({ type: 'AgentStartedSpeaking', total_latency: 0.9 });
+  call.hangUp();
+  await tick();
+  const { body } = apiCalls.find((sent) => sent.path === '/api/calls/call-1/metrics').options;
+  assert.deepEqual([body.providerLatencyMedianMs, body.providerLatencyP90Ms, body.providerLatencyCount], [900, 1234, 2]);
+  assert.deepEqual([body.talkOvers, body.bargeIns, body.ignoredAizuchi], [1, null, null]);
+  assert.deepEqual([body.turnEndWaitMedianMs, body.replyGapMedianMs], [null, null], "Flux doesn't say when the learner went quiet");
+  assert.deepEqual(cleanMetrics(body), body, 'the server accepts them');
 });
