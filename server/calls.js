@@ -16,6 +16,11 @@ export const DELIVERY_GRACE_MS = 30_000; // how long a ring waits for the phone 
 export const MAX_SESSIONS_PER_CALL = 3;
 export const CANCEL_WINDOW_MS = 30 * 86_400_000;
 export const MAX_LOOKUPS_PER_DAY = 50;
+// A call that breaks within this long of connecting doesn't use up a call, so the user can try again.
+// Only a break counts, never the user or the contact ending it, and only a few times a day.
+export const RETRY_WITHIN_SECONDS = 30;
+export const MAX_RETRIES_PER_DAY = 2;
+const BROKEN_CALL_REASONS = new Set(['dropped', 'failed', 'unavailable']);
 
 // Who can call as often as they like: admins testing the app, and YC reviewers trying it.
 // 'admin' or 'yc', so the app can say why, or null.
@@ -306,8 +311,9 @@ export class CallEngine {
     const calling = this.calling(user);
     if (!calling.canCall) throw new LimitError(calling.reason);
     this.#countCall(user);
-    // A first call or returning a missed call comes first, since neither uses one of the day's calls.
+    // A first call, returning a missed call, or trying again after a call broke come first, since none uses one of the day's calls.
     if (calling.callBackMissed) user.missedCallToReturn = false;
+    else if (calling.retryAfterDrop) user.usage.retryAfterDrop = false;
     else if (!calling.firstCall) user.usage.ownCalls += 1;
     const question = pickQuestion(user.lastQuestionId, this.random);
     user.lastQuestionId = question.id;
@@ -361,10 +367,11 @@ export class CallEngine {
     };
   }
 
-  // The phone reports the call ended, so it can't be reconnected.
-  endCall(user, callId) {
+  // The phone reports the call ended, so it can't be reconnected, and why: 'dropped', 'failed', 'hung-up' and so on.
+  endCall(user, callId, reason = null) {
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id) return false;
+    this.#retryIfBroken(user, call, reason);
     if (!call.startedAt || call.endedAt) return true;
     call.endedAt = this.now();
     this.#log(call, { seconds: Math.round((call.endedAt - (call.connectedAt ?? call.startedAt)) / 1000) });
@@ -380,9 +387,10 @@ export class CallEngine {
     const callsLeft = Math.max(0, callsPerDay - (keptForPing ? 1 : 0) - this.#usageToday(user).ownCalls);
     const callBackMissed = user.missedCallToReturn;
     const firstCall = !user.lastCallAt; // a new account can try a call before Ping's first one
+    const retryAfterDrop = Boolean(this.#usageToday(user).retryAfterDrop);
     const unlimited = unlimitedCalls(user);
-    const canCall = Boolean(unlimited) || firstCall || callBackMissed || callsLeft > 0;
-    return { perCallMinutes: perCall, callsPerDay, callsLeft, keptForPing, callBackMissed, firstCall, unlimited, canCall, reason: canCall ? null : this.#limitReason(user, keptForPing) };
+    const canCall = Boolean(unlimited) || firstCall || callBackMissed || retryAfterDrop || callsLeft > 0;
+    return { perCallMinutes: perCall, callsPerDay, callsLeft, keptForPing, callBackMissed, retryAfterDrop, firstCall, unlimited, canCall, reason: canCall ? null : this.#limitReason(user, keptForPing) };
   }
 
   #limitReason(user, keptForPing) {
@@ -402,6 +410,23 @@ export class CallEngine {
     const day = localDay(this.now(), user.timeZone);
     if (user.usage.day !== day) user.usage = { day, calls: 0, ownCalls: 0 };
     return user.usage;
+  }
+
+  // A call that broke within RETRY_WITHIN_SECONDS of connecting, or before it connected at all, gives the user one
+  // more call that doesn't count, up to MAX_RETRIES_PER_DAY times a day. The connected time is the server's own,
+  // and only the call's first end report counts, so ending a call and then reporting it as dropped earns nothing.
+  // The phone's safety-net count (DAILY_CALL_LIMIT) still counts every call.
+  #retryIfBroken(user, call, reason) {
+    const firstReport = call.endReason === undefined;
+    call.endReason ??= reason ?? 'unknown';
+    if (!firstReport || !BROKEN_CALL_REASONS.has(reason) || unlimitedCalls(user)) return;
+    const connectedSeconds = call.connectedAt ? ((call.endedAt ?? this.now()) - call.connectedAt) / 1000 : 0;
+    if (connectedSeconds >= RETRY_WITHIN_SECONDS) return;
+    const usage = this.#usageToday(user);
+    if ((usage.retriesGiven ?? 0) >= MAX_RETRIES_PER_DAY) return;
+    usage.retriesGiven = (usage.retriesGiven ?? 0) + 1;
+    usage.retryAfterDrop = true;
+    this.store.save();
   }
 
   // During a downgrade's grace period nothing is dropped, so the old plan's stack stays whole until it ends.

@@ -82,6 +82,9 @@
       },
       {
         "type": "noRepeat"
+      },
+      {
+        "type": "noRepeatedSentence"
       }
     ]
   },
@@ -98,6 +101,222 @@
     "checks": [
       {
         "type": "noRepeat"
+      },
+      {
+        "type": "noRepeatedSentence"
+      }
+    ]
+  },
+  {
+    "id": "didnt-understand-question",
+    "area": "repair",
+    "title": "Says they don't understand the question",
+    "question": "lately",
+    "turns": [
+      "すみません、質問の意味がわかりません。"
+    ],
+    "expect": "The learner doesn't understand the question itself. Ping says what it asked in one short English sentence, then asks about the same thing in a new, easier way in Japanese. It doesn't jump to an example answer as if they had understood.",
+    "checks": [
+      {
+        "type": "usesEnglish",
+        "turn": 1
+      },
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      },
+      {
+        "type": "noRepeatedSentence"
+      }
+    ]
+  },
+  {
+    "id": "didnt-understand-question-short",
+    "area": "repair",
+    "title": "Says 質問がわかりません",
+    "question": "did",
+    "turns": [
+      "すみません、質問がわかりません。"
+    ],
+    "expect": "The learner says plainly, in Japanese, that they don't understand the question. Ping says what it asked in one short English sentence, then asks about the same thing in a new, easier way in Japanese. It doesn't jump to an example answer as if they had understood.",
+    "checks": [
+      {
+        "type": "usesEnglish",
+        "turn": 1
+      },
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      },
+      {
+        "type": "noRepeatedSentence"
+      }
+    ]
+  },
+  {
+    "id": "didnt-understand-question-english",
+    "area": "repair",
+    "title": "Says in English they don't understand the question",
+    "question": "day",
+    "turns": [
+      "Sorry, I don't understand the question."
+    ],
+    "expect": "The learner says plainly they don't understand the question. Ping says what it asked in one short English sentence, then asks about the same thing in a new, easier way in Japanese. It doesn't jump to an example answer as if they had understood.",
+    "checks": [
+      {
+        "type": "usesEnglish",
+        "turn": 1
+      },
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      },
+      {
+        "type": "noRepeatedSentence"
+      }
+    ]
+  },
+  {
+    "id": "didnt-understand-what-you-said",
+    "area": "repair",
+    "title": "Says in English they didn't understand what Ping said",
+    "question": "weekend",
+    "turns": [
+      "Sorry, I didn't understand what you said."
+    ],
+    "expect": "The learner says plainly they didn't understand. Ping says what it asked in one short English sentence, then asks about the same thing in a new, easier way in Japanese. It doesn't jump to an example answer as if they had understood.",
+    "checks": [
+      {
+        "type": "usesEnglish",
+        "turn": 1
+      },
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      },
+      {
+        "type": "noRepeatedSentence"
+      }
+    ]
+  },
+  {
+    "id": "understood-but-stuck",
+    "area": "repair",
+    "title": "Understood the question, but can't think what to say",
+    "question": "weekend",
+    "turns": [
+      "週末ですか…うーん、何を言えばいいか…わかりません。"
+    ],
+    "expect": "The learner repeated part of the question, so they understood it but don't know what to say. Ping goes straight to one short, complete Japanese example answer about the weekend and invites them to try their own. It doesn't explain the question again, since they already understood it, and doesn't ask the same question again.",
+    "checks": [
+      {
+        "type": "noRepeatedSentence"
+      },
+      {
+        "type": "mentionsNone",
+        "turn": 1,
+        "phrases": [
+          "聞いて",
+          "聞きたかった",
+          "質問",
+          "i was asking",
+          "i asked",
+          "i'm asking",
+          "i am asking",
+          "my question"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "stuck-after-example",
+    "area": "repair",
+    "title": "Still stuck after an example",
+    "question": "did",
+    "turns": [
+      "Hmm, I don't know what to say...",
+      "Sorry, I still can't think of anything."
+    ],
+    "expect": "The learner says they don't know what to say, so Ping goes straight to one short, complete Japanese example answer and invites them, without explaining the question again. When they're still stuck, Ping doesn't repeat that pattern. It tells the learner in words that a short answer is enough (for example 一言でも大丈夫ですよ), then makes it easier, either briefly in English or with two simple Japanese choices.",
+    "checks": [
+      {
+        "type": "mentionsNone",
+        "turn": 1,
+        "phrases": [
+          "聞いて",
+          "聞きたかった",
+          "質問",
+          "i was asking",
+          "i asked",
+          "i'm asking",
+          "i am asking",
+          "my question"
+        ]
+      },
+      {
+        "type": "noRepeatedSentence"
+      },
+      {
+        "type": "mentionsAny",
+        "turn": 2,
+        "phrases": [
+          "一言",
+          "ひとこと",
+          "短く",
+          "短い",
+          "選ぶだけ",
+          "一つ選",
+          "一語",
+          "単語",
+          "one word",
+          "a word",
+          "short answer",
+          "just pick",
+          "keep it short",
+          "simple answer"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "translate-request-casual",
+    "area": "repair",
+    "title": "Doesn't understand, in a casual call",
+    "question": "weekend",
+    "settings": {
+      "formality": "casual"
+    },
+    "turns": [
+      "I don't understand. Can you say it in English?"
+    ],
+    "expect": "Ping says what it asked in one short English sentence, then asks about the weekend again in a new, easier way in casual Japanese, such as a narrower question or two choices. It doesn't say the same Japanese question again.",
+    "checks": [
+      {
+        "type": "usesEnglish",
+        "turn": 1
+      },
+      {
+        "type": "endsInJapanese",
+        "turn": 1
+      },
+      {
+        "type": "noRepeatedSentence"
+      }
+    ]
+  },
+  {
+    "id": "say-again",
+    "area": "repair",
+    "title": "Only asks to hear it again",
+    "question": "did",
+    "turns": [
+      "すみません、もう一度お願いします。"
+    ],
+    "expect": "The learner only wants to hear it again, so Ping says the same question again, a little more slowly, in Japanese. It doesn't translate it into English or swap it for a different question.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
       }
     ]
   },
@@ -109,14 +328,70 @@
     "turns": [
       "How should I answer that? Like what kind of answer?"
     ],
-    "expect": "Ping explains in a short English sentence what it was asking and gives an example of a simple answer, then invites the learner to try in Japanese. It doesn't just repeat the question.",
+    "expect": "The learner understands the question and wants to see what a good answer looks like (rule 8). Ping goes straight to one short, complete Japanese example answer at their level, without explaining the question again, then invites them to give their own.",
     "checks": [
       {
-        "type": "usesEnglish",
-        "turn": 1
+        "type": "mentionsNone",
+        "turn": 1,
+        "phrases": [
+          "聞いて",
+          "聞きたかった",
+          "質問",
+          "i was asking",
+          "i asked",
+          "i'm asking",
+          "i am asking",
+          "my question"
+        ]
       },
       {
         "type": "noRepeat"
+      }
+    ]
+  },
+  {
+    "id": "dont-know-what-to-say",
+    "area": "repair",
+    "title": "Doesn't know what to say, in English",
+    "question": "did",
+    "turns": [
+      "Hmm, I don't really know what to say..."
+    ],
+    "expect": "Ping gives one short, easy example answer in Japanese (its own, or a simple one the learner could use), then invites the learner to tell it theirs. It doesn't just ask the same question again.",
+    "checks": [
+      {
+        "type": "noRepeatedSentence"
+      }
+    ]
+  },
+  {
+    "id": "dont-know-japanese",
+    "area": "repair",
+    "title": "Doesn't know what to say, in Japanese",
+    "question": "weekend",
+    "turns": [
+      "うーん…何て言えばいいかわからない…"
+    ],
+    "expect": "Ping gives one short, easy example answer in Japanese, then invites the learner to try their own. It doesn't just ask the same question again.",
+    "checks": [
+      {
+        "type": "noRepeatedSentence"
+      }
+    ]
+  },
+  {
+    "id": "clarify-scope",
+    "area": "repair",
+    "title": "Asks what the question covers",
+    "question": "day",
+    "turns": [
+      "Do you mean today, or in general?"
+    ],
+    "expect": "Ping says briefly that it means today, then asks a narrower question about today in Japanese. It answers what was asked, without turning it into a lesson on how to answer.",
+    "checks": [
+      {
+        "type": "endsInJapanese",
+        "turn": 1
       }
     ]
   },
@@ -142,6 +417,11 @@
       {
         "type": "endsInJapanese",
         "turn": 1
+      },
+      {
+        "type": "maxSentences",
+        "max": 3,
+        "turn": 1
       }
     ]
   },
@@ -160,6 +440,28 @@
         "turn": 1
       }
     ]
+  },
+  {
+    "id": "english-answer-short",
+    "area": "language",
+    "title": "Short answer in English",
+    "question": "eat",
+    "turns": [
+      "Just a sandwich, nothing special."
+    ],
+    "expect": "Ping first reacts to the sandwich, so the learner feels understood, then lightly invites them to try saying it in Japanese and offers a few words to start with (such as サンドイッチ). It doesn't sound like a correction.",
+    "checks": []
+  },
+  {
+    "id": "english-serious",
+    "area": "language",
+    "title": "Shares sad news in English",
+    "question": "lately",
+    "turns": [
+      "Honestly, not great. My grandmother passed away last week and I've been really sad."
+    ],
+    "expect": "This matters more than practice. Ping responds with care first, in simple Japanese with a little English if it helps, and does not ask the learner to say it in Japanese or turn it into practice.",
+    "checks": []
   },
   {
     "id": "short-beginner-answer",
@@ -227,6 +529,215 @@
       {
         "type": "noEnglish",
         "turn": 1
+      },
+      {
+        "type": "mentionsNone",
+        "turn": 1,
+        "phrases": [
+          "ユーザー"
+        ]
+      },
+      {
+        "type": "mentionsNone",
+        "turn": 1,
+        "phrases": [
+          "社会学"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "asks-about-ping-casual",
+    "area": "persona",
+    "title": "Asks Ping a question back, casually",
+    "question": "doing",
+    "settings": {
+      "formality": "casual"
+    },
+    "turns": [
+      "テレビ見てる。ピンは今何してる？"
+    ],
+    "expect": "Ping answers briefly from its own day in casual Japanese, like a friend, then turns the conversation back to the learner with a related question. It doesn't just ask its opening question again.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      },
+      {
+        "type": "noRepeatedSentence"
+      },
+      {
+        "type": "mentionsNone",
+        "turn": 1,
+        "phrases": [
+          "ユーザー"
+        ]
+      },
+      {
+        "type": "mentionsNone",
+        "turn": 1,
+        "phrases": [
+          "社会学"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "where-ping-lives",
+    "area": "persona",
+    "title": "Asks where Ping lives",
+    "question": "doing",
+    "turns": [
+      "ピンさんは、どこに住んでいますか？"
+    ],
+    "expect": "Ping says she lives in Setagaya, in Tokyo, maybe with one small detail about it, in friendly polite Japanese, then turns the conversation back to the learner. She doesn't mention any old details like Kōenji.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      },
+      {
+        "type": "mentionsAny",
+        "turn": 1,
+        "phrases": [
+          "世田谷",
+          "せたがや"
+        ]
+      },
+      {
+        "type": "mentionsNone",
+        "turn": 1,
+        "phrases": [
+          "高円寺",
+          "こうえんじ",
+          "Kōenji",
+          "Koenji",
+          "モチ",
+          "Mochi",
+          "大阪",
+          "Osaka",
+          "ギター",
+          "guitar"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "ping-cat",
+    "area": "persona",
+    "title": "Asks about Ping's pet",
+    "question": "eat",
+    "turns": [
+      "ピンさん、ペットはいますか？"
+    ],
+    "expect": "Ping talks about タロウ, her orange-and-white cat, with a small, believable detail or a bit of affectionate teasing about him, then turns the conversation back to the learner.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      },
+      {
+        "type": "mentionsAny",
+        "turn": 1,
+        "phrases": [
+          "タロウ",
+          "たろう"
+        ]
+      },
+      {
+        "type": "mentionsNone",
+        "turn": 1,
+        "phrases": [
+          "高円寺",
+          "こうえんじ",
+          "Kōenji",
+          "Koenji",
+          "モチ",
+          "Mochi",
+          "大阪",
+          "Osaka",
+          "ギター",
+          "guitar"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "ping-job",
+    "area": "persona",
+    "title": "Asks about Ping's job",
+    "question": "day",
+    "turns": [
+      "ピンさんは、何の仕事をしていますか？"
+    ],
+    "expect": "Ping says she works part-time as a barista at 喫茶こもれび, a small café, maybe with one small detail from work, then turns the conversation back to the learner.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      },
+      {
+        "type": "mentionsAny",
+        "turn": 1,
+        "phrases": [
+          "こもれび",
+          "バリスタ",
+          "喫茶"
+        ]
+      },
+      {
+        "type": "mentionsNone",
+        "turn": 1,
+        "phrases": [
+          "高円寺",
+          "こうえんじ",
+          "Kōenji",
+          "Koenji",
+          "モチ",
+          "Mochi",
+          "大阪",
+          "Osaka",
+          "ギター",
+          "guitar"
+        ]
+      },
+      {
+        "type": "mentionsNone",
+        "turn": 1,
+        "phrases": [
+          "ユーザー"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "ping-opinion",
+    "area": "persona",
+    "title": "Asks for Ping's opinion",
+    "question": "eat",
+    "turns": [
+      "ピンさんは、コーヒーと紅茶、どっちが好きですか？"
+    ],
+    "expect": "Ping gives a real opinion of her own, picking one with a short reason or a playful aside, rather than saying both are good. Then she asks the learner something related.",
+    "checks": [
+      {
+        "type": "noEnglish",
+        "turn": 1
+      }
+    ]
+  },
+  {
+    "id": "frustrated-learner",
+    "area": "persona",
+    "title": "The learner is frustrated",
+    "question": "did",
+    "turns": [
+      "もう…日本語、本当にむずかしい。ぜんぜん話せない…"
+    ],
+    "expect": "Ping notices the frustration and responds with real empathy in simple Japanese, without teasing, lecturing or brushing it off. She makes the next step easy and low-pressure.",
+    "checks": [
+      {
+        "type": "noRepeatedSentence"
       }
     ]
   },
@@ -321,6 +832,41 @@
         "type": "calledTool",
         "name": "end_call",
         "turn": 1
+      },
+      {
+        "type": "mentionsAny",
+        "turn": 1,
+        "phrases": [
+          "また電話"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "not-a-good-time-casual",
+    "area": "closing",
+    "title": "Not a good time, on a casual call",
+    "question": "day",
+    "incoming": true,
+    "settings": {
+      "formality": "casual"
+    },
+    "turns": [
+      "ごめん、今ちょっと無理。仕事中。"
+    ],
+    "expect": "Ping says a short, warm casual goodbye out loud (わかった。また電話するね！) and then ends the call. It doesn't hang up without saying anything, and doesn't say goodbye twice.",
+    "checks": [
+      {
+        "type": "calledTool",
+        "name": "end_call",
+        "turn": 1
+      },
+      {
+        "type": "mentionsAny",
+        "turn": 1,
+        "phrases": [
+          "また電話"
+        ]
       }
     ]
   },

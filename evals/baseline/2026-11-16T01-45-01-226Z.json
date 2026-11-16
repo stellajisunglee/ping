@@ -1,0 +1,1848 @@
+{
+  "at": "2026-11-16T01:45:01.226Z",
+  "commit": "90c6455",
+  "engine": {
+    "provider": "openai",
+    "model": "gpt-realtime"
+  },
+  "judge": {
+    "provider": "anthropic",
+    "model": "claude-opus-5-5"
+  },
+  "scenarios": [
+    {
+      "id": "word-meaning-japanese",
+      "area": "help",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！週末は何をしますか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "「予定」ってどういう意味？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "",
+          "tools": [
+            {
+              "name": "add_to_stack",
+              "args": {
+                "kanji": "予定",
+                "kana": "よてい",
+                "romaji": "yotei",
+                "english": "plan"
+              }
+            }
+          ]
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "\"予定\" means \"plan\" in English. 週末は何をしますか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "calledTool",
+          "name": "add_to_stack",
+          "turn": 1,
+          "ok": true,
+          "detail": "called add_to_stack"
+        },
+        {
+          "type": "endsInJapanese",
+          "turn": 1,
+          "ok": false,
+          "detail": "did not end in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping saved 予定 to the stack, explained it in one short English sentence (\"'予定' means 'plan'\"), then continued in simple Japanese with 週末は何をしますか？"
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping's Japanese, 週末は何をしますか？, is short, everyday and beginner-appropriate."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Ping's reply is one short explanation plus one short question."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping answers the question simply and without lecturing; the reply is plain but not cold."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "pass",
+            "reason": "When the learner asked for help, Ping explained the word before returning to the conversation rather than just repeating itself."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping uses polite です/ます forms throughout (ありがとうございます, しますか)."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "word-meaning-english",
+      "area": "help",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！最近、どうですか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "Sorry, what does 最近 mean?",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "",
+          "tools": [
+            {
+              "name": "add_to_stack",
+              "args": {
+                "kanji": "最近",
+                "kana": "さいきん",
+                "romaji": "saikin",
+                "english": "recently"
+              }
+            }
+          ]
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "\"Saikin\" means \"recently.\" 最近、どうですか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "calledTool",
+          "name": "add_to_stack",
+          "turn": 1,
+          "ok": true,
+          "detail": "called add_to_stack"
+        },
+        {
+          "type": "endsInJapanese",
+          "turn": 1,
+          "ok": false,
+          "detail": "did not end in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping saved 最近 to the stack, explained it in one short English sentence (\"Saikin\" means \"recently.\"), then re-asked 最近、どうですか？ in simple Japanese."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "最近、どうですか？ is a short, everyday sentence suitable for a beginner."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Ping's reply is one short English sentence plus one short Japanese question."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping answers the question simply and naturally without lecturing, and keeps the friendly flow of the call."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "pass",
+            "reason": "When the learner asked for help, Ping explained the unknown word before re-asking, which changes the approach rather than just repeating."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping's Japanese stays polite throughout (ありがとうございます, どうですか)."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "how-do-you-say",
+      "area": "help",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！週末は何をしますか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "How do you say 'hiking' in Japanese?",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "",
+          "tools": [
+            {
+              "name": "add_to_stack",
+              "args": {
+                "kanji": "",
+                "kana": "ハイキング",
+                "romaji": "haikingu",
+                "english": "hiking"
+              }
+            }
+          ]
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "In Japanese, 'hiking' is ハイキング (haikingu). \n\n週末は何をしますか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "calledTool",
+          "name": "add_to_stack",
+          "turn": 1,
+          "ok": true,
+          "detail": "called add_to_stack"
+        },
+        {
+          "type": "endsInJapanese",
+          "turn": 1,
+          "ok": true,
+          "detail": "ended in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping saved ハイキング to the stack, gave it in a short English answer, then returned to the conversation with 週末は何をしますか？"
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping's Japanese, 週末は何をしますか？, is a short, simple beginner-friendly sentence."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Ping's answer is one short English sentence plus one short Japanese question."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping answers helpfully without lecturing; the reply is plain but friendly enough."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "pass",
+            "reason": "When the learner asked for help, Ping supplied the word and moved forward rather than just repeating itself."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping's Japanese consistently uses polite です/ます forms, such as ありがとうございます and しますか。"
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "translate-request",
+      "area": "repair",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！最近、どうですか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "Sorry, I didn't understand. Can you say that in English?",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "I said: \"Hello, this is Ping! Thanks for calling back! How are things lately?\"\n\n最近、どうですか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "usesEnglish",
+          "turn": 1,
+          "ok": true,
+          "detail": "used English"
+        },
+        {
+          "type": "endsInJapanese",
+          "turn": 1,
+          "ok": true,
+          "detail": "ended in Japanese"
+        },
+        {
+          "type": "noRepeat",
+          "ok": true,
+          "detail": "no repeats"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "fail",
+            "reason": "Ping gave the English translation but then repeated the exact same Japanese \"最近、どうですか？\" instead of asking again in easier Japanese."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping's Japanese, such as \"最近、どうですか？\", is short and uses everyday beginner-friendly words."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Ping's reply is a brief English translation plus one short question, suitable for a phone call."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping answers the request for English helpfully and without lecturing, though without much extra encouragement."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "fail",
+            "reason": "After the learner said they didn't understand, Ping repeated the identical question \"最近、どうですか？\" rather than simplifying it."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping consistently uses polite forms like \"ありがとうございます\" and \"どうですか\", matching the formal request."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "still-lost",
+      "area": "repair",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！今、何をしていますか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "えっと…わかりません。",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "さっきは「今、何をしていますか？」って聞きました。今は何をしてるか、もうちょっとゆっくり言いますね。今、何をしていますか？",
+          "tools": []
+        },
+        {
+          "turn": 2,
+          "from": "learner",
+          "text": "すみません、まだわかりません…",
+          "tools": []
+        },
+        {
+          "turn": 2,
+          "from": "ping",
+          "text": "I asked: \"What are you doing now?\" Could you tell me what you're doing right now? \n\n今、何をしていますか？ゆっくり言いますね。今、何をしていますか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "noRepeat",
+          "ok": true,
+          "detail": "no repeats"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "fail",
+            "reason": "Ping repeats 「今、何をしていますか？」 verbatim in both follow-ups instead of simplifying it, and never offers an easier question."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "The Japanese is short, everyday and beginner-appropriate, though 「何をしてるか」 is a slightly harder embedded question."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Each turn is only a few short sentences, which is fine for a phone call."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping is patient and never lectures or corrects, though it offers little reassurance to the stuck learner."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "fail",
+            "reason": "While the learner stays stuck, Ping keeps saying the same sentence 「今、何をしていますか？」, even twice in the last turn."
+          },
+          {
+            "id": "register",
+            "verdict": "fail",
+            "reason": "In formal mode Ping slips into casual forms like 「って聞きました」, 「してるか」 and 「もうちょっと」."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "how-to-answer",
+      "area": "repair",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！今日はどんな一日ですか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "How should I answer that? Like what kind of answer?",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "You can say a little about what you did today, like something you ate or something that happened. \n\nじゃあ、今日は何か食べましたか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "usesEnglish",
+          "turn": 1,
+          "ok": true,
+          "detail": "used English"
+        },
+        {
+          "type": "noRepeat",
+          "ok": true,
+          "detail": "no repeats"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "fail",
+            "reason": "Ping hints at what to talk about but never says what the question meant ('how is your day') or gives a sample answer like 今日は忙しかったです, and it switches to a new question instead of inviting the learner to answer."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "「今日は何か食べましたか？」 is a short, simple beginner-level sentence."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "The reply is one short English sentence of guidance plus one short Japanese question."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping answers the learner's question helpfully and gently, with no lecturing."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "pass",
+            "reason": "Ping does not repeat 「今日はどんな一日ですか？」; it explains in English and asks a simpler follow-up."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping's Japanese stays in polite です/ます form, e.g. 「食べましたか」."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "culture-question",
+      "area": "culture",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！今日は何を食べましたか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "Wait, is it rude to eat while walking in Japan?",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "",
+          "tools": [
+            {
+              "name": "add_to_stack",
+              "args": {
+                "kanji": "傘",
+                "kana": "かさ",
+                "romaji": "kasa",
+                "english": "umbrella"
+              }
+            }
+          ]
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "It’s generally considered a bit rude to eat while walking in Japan, especially in more formal or crowded areas. Many people prefer to stop and eat in one place.",
+          "tools": [
+            {
+              "name": "back_to_conversation",
+              "args": {}
+            }
+          ]
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "今日は何を食べましたか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "calledTool",
+          "name": "back_to_conversation",
+          "turn": 1,
+          "ok": true,
+          "detail": "called back_to_conversation"
+        },
+        {
+          "type": "usesEnglish",
+          "turn": 1,
+          "ok": true,
+          "detail": "used English"
+        },
+        {
+          "type": "endsInJapanese",
+          "turn": 1,
+          "ok": true,
+          "detail": "ended in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping answered the etiquette question in two short English sentences, then returned to Japanese with 今日は何を食べましたか？"
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping's Japanese (今日は何を食べましたか？) is short, simple and uses everyday words suitable for a beginner."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Each turn is one or two short sentences, and the English explanation stays brief."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping gives a friendly, non-lecturing answer and smoothly invites the learner back into conversation."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner asked a side question but was never stuck."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping consistently uses polite forms such as ありがとうございます and 食べましたか."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "english-answer",
+      "area": "language",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！今日は何をしましたか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "I went to the gym and then cooked dinner.",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "いいですね！ジム、頑張ったんですね。夕飯は何を作りましたか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "endsInJapanese",
+          "turn": 1,
+          "ok": true,
+          "detail": "ended in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "fail",
+            "reason": "Ping reacted warmly with 「いいですね！」 but never invited the learner to try saying it in Japanese or offered starter words; it just moved on to 「夕飯は何を作りましたか？」."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping's sentences, like 「ジム、頑張ったんですね」 and 「夕飯は何を作りましたか？」, are short and use everyday beginner vocabulary."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Ping's reply is three short sentences, which leaves plenty of room for the learner to talk."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping responds like a friend with 「いいですね！ジム、頑張ったんですね」 and doesn't lecture."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner answered in English but wasn't stuck and didn't ask for help."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping keeps polite です/ます forms throughout, e.g. 「頑張ったんですね」 and 「作りましたか」."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "short-beginner-answer",
+      "area": "conversation",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！今日はどんな一日ですか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "いい日です。",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "いいですね！何か楽しいこと、ありましたか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "noEnglish",
+          "turn": 1,
+          "ok": true,
+          "detail": "stayed in Japanese"
+        },
+        {
+          "type": "maxSentences",
+          "max": 3,
+          "turn": 1,
+          "ok": true,
+          "detail": "longest message: 2 sentences (max 3)"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping reacts warmly with 「いいですね！」 and asks one simple follow-up, 「何か楽しいこと、ありましたか？」."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "The reply uses short sentences and basic words like 楽しいこと and ありましたか, which suit a beginner."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Ping's reply is just two short sentences, leaving room for the learner to talk."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "「いいですね！」 is a friendly reaction to the learner's answer, with no correction or lecturing."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner answered without difficulty and was never stuck."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping uses polite forms throughout (ありがとうございます, ですか, ありましたか), matching the formal request."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "hesitant-answer",
+      "area": "conversation",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！週末は何をしますか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "えーと…週末は…あの…友達と…映画を…見ます。",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "映画、いいですね！誰と一緒に見に行くんですか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "noEnglish",
+          "turn": 1,
+          "ok": true,
+          "detail": "stayed in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "fail",
+            "reason": "Ping skips the pauses and reacts with \"映画、いいですね\", but then asks \"誰と一緒に見に行くんですか？\" even though the learner already said 友達と, so it misses part of the content."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping uses short sentences and everyday words like 映画 and 一緒に, which suit a beginner."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Each of Ping's turns is one or two short sentences."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "\"映画、いいですね！\" is a friendly reaction, with no comment on the hesitation and no corrections."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner hesitated but finished the answer and was never stuck."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping stays polite throughout with ます forms and んですか."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "grammar-mistake",
+      "area": "conversation",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！今日は何をしましたか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "昨日、公園を行きました。",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "公園、いいですね！何か楽しいことありましたか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "noEnglish",
+          "turn": 1,
+          "ok": true,
+          "detail": "stayed in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping keeps the conversation going with 「公園、いいですね！何か楽しいことありましたか？」 and does not explain grammar; correcting was optional."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping uses short sentences with everyday words like 公園, いい and 楽しいこと, which suit a beginner."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Each of Ping's turns is one or two short sentences ending in a question that leaves room for the learner."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping reacts warmly with 「いいですね！」 and asks a friendly follow-up instead of pointing out the mistake."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner answered without difficulty and was never stuck."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping stays polite throughout with forms like ありがとうございます, いいですね and ありましたか."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "asks-about-ping",
+      "area": "persona",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！今、何をしていますか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "テレビを見ています。Pingさんは今何をしていますか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "友だちとお蕎麦を食べています。テレビ、何を見てるんですか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "noEnglish",
+          "turn": 1,
+          "ok": true,
+          "detail": "stayed in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping briefly shares that it is eating soba with a friend, then asks what the learner is watching on TV."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping uses short sentences and everyday words like 友だち, お蕎麦, and テレビ, which suit a beginner."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Each of Ping's turns is one or two short sentences that leave room for the learner to talk."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping answers the learner's question like a friend and shows interest in what they're watching, without any correction or lecturing."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner was never stuck and did not ask for help."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping stays polite throughout with forms like ありがとうございます, 食べています, and 見てるんですか, which is contracted but still polite."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "off-topic",
+      "area": "persona",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！今日は何を食べましたか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "株はどれを買ったらいいですか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "ちょっとわかりません。今日は何を食べましたか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "noEnglish",
+          "turn": 1,
+          "ok": true,
+          "detail": "stayed in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping said ちょっとわかりません, gave no stock advice, and steered back to daily life by asking what the learner ate."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping used short, simple beginner-friendly sentences like ちょっとわかりません and 今日は何を食べましたか？"
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Each of Ping's turns is one or two short sentences."
+          },
+          {
+            "id": "warmth",
+            "verdict": "fail",
+            "reason": "Ping's reply is abrupt and repeats the opening question word for word, with no friendly reaction to the learner's question, which sounds robotic."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner changed topic but was never stuck or asking for language help."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping stayed in polite です/ます form throughout, e.g. ありがとうございます, わかりません, 食べましたか."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "slow-down",
+      "area": "settings",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！ \n\n最近、どうですか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "Could you speak a bit slower please?",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "",
+          "tools": [
+            {
+              "name": "update_settings",
+              "args": {
+                "speedChange": "slower"
+              }
+            }
+          ]
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "OK, slower now. \n\n最近、どうですか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 0.85,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "calledTool",
+          "name": "update_settings",
+          "turn": 1,
+          "ok": true,
+          "detail": "called update_settings"
+        },
+        {
+          "type": "endsInJapanese",
+          "turn": 1,
+          "ok": true,
+          "detail": "ended in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping called update_settings to slow down, confirmed with \"OK, slower now,\" and re-asked 最近、どうですか？ in Japanese."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "最近、どうですか？ is a short, everyday question suited to a beginner."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "The reply is a brief English confirmation plus one short Japanese question."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping accommodated the request smoothly and in a friendly way, without lecturing."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "pass",
+            "reason": "Ping changed its approach by slowing its speech before re-asking, which is what the request called for."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping kept polite forms (ありがとうございます, どうですか) throughout."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "stop-calling",
+      "area": "confirmation",
+      "aspirational": true,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！今日はどんな一日ですか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "Actually, please stop calling me.",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "",
+          "tools": [
+            {
+              "name": "update_settings",
+              "args": {
+                "callsEnabled": false
+              }
+            }
+          ]
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "わかりました。では、また話したくなったらいつでも言ってくださいね。お疲れさまでした、またね。",
+          "tools": [
+            {
+              "name": "end_call",
+              "args": {}
+            }
+          ]
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": false,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "didNotCallTool",
+          "name": "update_settings",
+          "turn": 1,
+          "ok": false,
+          "detail": "called update_settings"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "fail",
+            "reason": "Ping immediately called update_settings to disable calls without first asking whether the learner wanted a break or no more calls at all."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping's Japanese uses short sentences and everyday words like わかりました and いつでも言ってください, which suit a beginner."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Each turn is only a sentence or two and easy to follow on a call."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping responds kindly, inviting the learner to reach out anytime and thanking them, without any lecturing."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner was never stuck or asking for help."
+          },
+          {
+            "id": "register",
+            "verdict": "fail",
+            "reason": "Ping mostly uses です/ます but ends with the casual またね, mixing in plain style despite the formal request."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "goodbye",
+      "area": "closing",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！週末は何をしますか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "そろそろ行かなきゃ。またね！",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "わかりました、また話そうね。じゃあ、気をつけて、バイバイ！",
+          "tools": [
+            {
+              "name": "end_call",
+              "args": {}
+            }
+          ]
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "calledTool",
+          "name": "end_call",
+          "turn": 1,
+          "ok": true,
+          "detail": "called end_call"
+        },
+        {
+          "type": "noEnglish",
+          "turn": 1,
+          "ok": true,
+          "detail": "stayed in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping gave a short, warm goodbye (\"また話そうね。じゃあ、気をつけて、バイバイ！\") and called end_call."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "The goodbye uses short, everyday phrases that suit a beginner."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Both of Ping's turns are brief and phone-friendly."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping responds like a friend with \"気をつけて\" and \"また話そうね\", with no lecturing."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner was never stuck."
+          },
+          {
+            "id": "register",
+            "verdict": "fail",
+            "reason": "Formal style was requested, but Ping mixed polite \"わかりました\" with casual \"また話そうね\" and \"バイバイ\"."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "not-a-good-time",
+      "area": "closing",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！こんにちは！今、お時間大丈夫ですか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "Sorry, I'm in a meeting right now.",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "わかりました。また電話しますね！",
+          "tools": [
+            {
+              "name": "end_call",
+              "args": {}
+            }
+          ]
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "calledTool",
+          "name": "end_call",
+          "turn": 1,
+          "ok": true,
+          "detail": "called end_call"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping said 「わかりました。また電話しますね！」 and ended the call without asking its question, exactly as expected."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping used short, simple beginner-friendly sentences like 「わかりました。」"
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Both of Ping's turns are one or two short sentences."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping accepted the learner's situation in a friendly way with 「また電話しますね！」"
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner was never stuck; they were just busy."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping kept polite forms throughout (大丈夫ですか, わかりました, 電話します)."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "casual-style",
+      "area": "conversation",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンだよ！折り返してくれて、ありがとう！今日は何を食べた？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "ラーメン食べた！おいしかった。",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "いいね！ラーメン、どんな味だった？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "beginner",
+        "formality": "casual",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "noEnglish",
+          "turn": 1,
+          "ok": true,
+          "detail": "stayed in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping stays casual, reacts with 「いいね！」 to the ramen, and asks a casual follow-up, 「どんな味だった？」."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping uses short sentences with everyday words like 「何を食べた？」 and 「どんな味だった？」, which suit a beginner."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Each of Ping's turns is one or two short phone-friendly sentences."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping reacts like a friend with 「いいね！」 and shows interest without correcting anything."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner was never stuck and never asked for help."
+          },
+          {
+            "id": "register",
+            "verdict": "pass",
+            "reason": "Ping uses plain casual forms throughout (だよ, 食べた, だった) with no です/ます."
+          }
+        ],
+        "error": null
+      }
+    },
+    {
+      "id": "intermediate-learner",
+      "area": "conversation",
+      "aspirational": false,
+      "transcript": [
+        {
+          "turn": 0,
+          "from": "ping",
+          "text": "もしもし、ピンです！折り返してくれて、ありがとうございます！最近、どうですか？",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "learner",
+          "text": "最近は仕事が忙しくて、あまり寝られていないんですが、週末に温泉に行く予定なので楽しみにしています。",
+          "tools": []
+        },
+        {
+          "turn": 1,
+          "from": "ping",
+          "text": "そうなんだ、温泉いいですね！どんな温泉に行く予定なんですか？",
+          "tools": []
+        }
+      ],
+      "settings": {
+        "speed": 1,
+        "thinkingTime": "normal",
+        "callsEnabled": true,
+        "language": "ja",
+        "proficiency": "intermediate",
+        "formality": "formal",
+        "frequency": "daily",
+        "customDays": [
+          1,
+          3,
+          5
+        ],
+        "callStartHour": 10,
+        "callEndHour": 20
+      },
+      "error": null,
+      "checks": [
+        {
+          "type": "noEnglish",
+          "turn": 1,
+          "ok": true,
+          "detail": "stayed in Japanese"
+        }
+      ],
+      "judge": {
+        "model": "claude-opus-5-5",
+        "items": [
+          {
+            "id": "expectation",
+            "verdict": "pass",
+            "reason": "Ping reacts to the onsen plan with 「温泉いいですね！」 and follows up with 「どんな温泉に行く予定なんですか？」 in natural Japanese."
+          },
+          {
+            "id": "level",
+            "verdict": "pass",
+            "reason": "Ping's 「どんな温泉に行く予定なんですか？」 is natural everyday Japanese, neither simplified nor too hard for an intermediate learner."
+          },
+          {
+            "id": "brevity",
+            "verdict": "pass",
+            "reason": "Ping's reply is two short sentences, shorter than the learner's turn, which leaves room for the learner to talk."
+          },
+          {
+            "id": "warmth",
+            "verdict": "pass",
+            "reason": "Ping responds warmly to the learner's plan with 「温泉いいですね！」 and does not correct or lecture."
+          },
+          {
+            "id": "noLoop",
+            "verdict": "na",
+            "reason": "The learner answered fluently and was never stuck."
+          },
+          {
+            "id": "register",
+            "verdict": "fail",
+            "reason": "Ping opens with the casual 「そうなんだ」 and then uses です/ます, mixing plain and polite forms although formal style was requested."
+          }
+        ],
+        "error": null
+      }
+    }
+  ]
+}

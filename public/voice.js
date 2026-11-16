@@ -18,6 +18,18 @@ const WRAP_UP_NOTE = 'Time is nearly up. Say a short warm goodbye in Japanese, t
 // type "insufficient_quota", code "credit_balance_exhausted", so any error mentioning quota or credit counts.
 export const isOutOfCredit = (error) => Boolean(error) && /quota|credit/i.test(`${error.type ?? ''} ${error.code ?? ''}`);
 
+// When the contact can't talk (OpenAI refused, ran out of credit, or replies keep failing), the call screen says so
+// for this long before the call ends, so it never just goes quiet or drops without a word.
+export const CANT_TALK_NOTICE_MS = 3000;
+// A reply can fail once and be asked for again; this many failures in a row means the contact can't talk.
+const MAX_FAILED_REPLIES = 2;
+
+// What the user is told. Admins also learn it was OpenAI credit, so they know what to fix; nobody else
+// sees billing or error details.
+export const cantTalkNotice = (contactName = 'Ping') => `${contactName} can't talk right now. Please try again later.`;
+export const OUT_OF_CREDIT_NOTICE = "Admin: OpenAI is out of credit, so Ping can't talk. Add credit at platform.openai.com/settings/organization/billing, then call again.";
+export const failedCallNotice = ({ admin = false, outOfCredit = false, contactName } = {}) => (admin && outOfCredit ? OUT_OF_CREDIT_NOTICE : cantTalkNotice(contactName));
+
 const withoutPunctuation = (text) => text.replace(/[\s、。！？!?.,…・「」]/g, '');
 
 export function startCall({
@@ -33,6 +45,8 @@ export function startCall({
   onNeedsTap,
   onContactAudio = () => {}, // when the contact's voice starts, finishes or is cut off, per line
   onOutOfCredit = () => {}, // OpenAI refused the call because the account has no credit left
+  onCantTalk = () => {}, // the contact can't talk: ({ outOfCredit }). The call ends CANT_TALK_NOTICE_MS later
+  cantTalkNoticeMs = CANT_TALK_NOTICE_MS,
   record = false, // record both voices: for review, and for admins' demo videos
   onRecording = () => {}, // once the call ends: { blob, fileName }, or null with the reason it couldn't record
   recorderEngine = { start: startRecording }, // swapped for a stand-in in tests
@@ -52,7 +66,8 @@ export function startCall({
     onRecording(recording, recording ? null : problem ?? 'Nothing was recorded.');
   };
   let ended = false;
-  let creditOut = false;
+  let cantTalkSaid = false;
+  let failedReplies = 0; // replies in a row that failed
   let greeted = false;
   let channelOpen = false;
   let audioPlaying = false;
@@ -101,10 +116,22 @@ export function startCall({
       .catch((error) => console.warn('Could not send turn metrics', error));
   }
 
-  function outOfCredit(error) {
-    if (!isOutOfCredit(error) || creditOut) return;
-    creditOut = true;
-    onOutOfCredit();
+  // The contact can't talk, so the screen says so, then the call ends: for every user, not only admins.
+  function cantTalk(error) {
+    if (cantTalkSaid || ended) return;
+    cantTalkSaid = true;
+    const outOfCredit = isOutOfCredit(error);
+    if (outOfCredit) onOutOfCredit(); // so admins can be told what to fix
+    onCantTalk({ outOfCredit });
+    timers.push(setTimeout(() => end('unavailable'), cantTalkNoticeMs));
+  }
+
+  // A failed reply means the contact said nothing. Out of credit can't be fixed by asking again; anything else
+  // gets one more try, so a passing hiccup doesn't end the call.
+  function replyFailed(error, { askAgain = true } = {}) {
+    failedReplies += 1;
+    if (isOutOfCredit(error) || failedReplies >= MAX_FAILED_REPLIES) cantTalk(error);
+    else if (askAgain) requestReply();
   }
 
   function end(reason) {
@@ -381,8 +408,9 @@ export function startCall({
         onSpeaking(false);
         if (hangingUp) timers.push(setTimeout(() => end('finished'), HANG_UP_AFTER_GOODBYE_MS));
         break;
-      case 'response.done':
+      case 'response.done': {
         responding = false;
+        const replyAlreadyQueued = Boolean(queuedReply); // sent just below, so a failed reply needn't ask again
         if (pendingVoiceUpdate) {
           if (smart.active) pendingVoiceUpdate.session.audio.input.turn_detection = null;
           send(pendingVoiceUpdate);
@@ -393,12 +421,15 @@ export function startCall({
           queuedReply = null;
           requestReply(note);
         }
-        if (event.response?.status === 'failed') outOfCredit(event.response.status_details?.error);
+        if (event.response?.status === 'failed') replyFailed(event.response.status_details?.error, { askAgain: !replyAlreadyQueued });
+        else if (event.response?.status === 'completed') failedReplies = 0;
         handleToolCalls(event.response?.output ?? []);
         break;
+      }
       case 'error':
         console.warn('Voice engine error', event.error);
-        outOfCredit(event.error);
+        // Other errors (a bad setting, say) don't stop the contact talking, so the call carries on.
+        if (isOutOfCredit(event.error)) cantTalk(event.error);
         break;
       default:
     }
@@ -459,7 +490,7 @@ export function startCall({
     });
     if (!response.ok) {
       const body = await response.json().catch(() => null);
-      outOfCredit(body?.error);
+      if (isOutOfCredit(body?.error)) return cantTalk(body.error);
       throw new Error(`Call could not connect (${response.status})`);
     }
     await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() });

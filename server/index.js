@@ -413,7 +413,9 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
 
     const ended = pathname.match(/^\/api\/calls\/([\w-]+)\/ended$/);
     if (method === 'POST' && ended) {
-      if (!engine.endCall(user, ended[1])) return json(res, 404, { error: 'Call not found.' });
+      // Why it ended, as the phone saw it. A call that broke straight away doesn't use up a call (see endCall).
+      const { reason } = await readJson(req);
+      if (!engine.endCall(user, ended[1], typeof reason === 'string' ? reason : null)) return json(res, 404, { error: 'Call not found.' });
       return json(res, 200, { calling: engine.calling(user) });
     }
 

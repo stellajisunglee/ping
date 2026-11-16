@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CallEngine, CANCEL_WINDOW_MS, DELIVERY_GRACE_MS, LimitError, MAX_SESSIONS_PER_CALL, PlanError, RING_MS } from '../server/calls.js';
+import { CallEngine, CANCEL_WINDOW_MS, DELIVERY_GRACE_MS, LimitError, MAX_RETRIES_PER_DAY, MAX_SESSIONS_PER_CALL, PlanError, RETRY_WITHIN_SECONDS, RING_MS } from '../server/calls.js';
 import { PLAN_LIMITS } from '../server/contacts.js';
 import { localDay, localParts } from '../server/schedule.js';
 import { Store } from '../server/store.js';
@@ -774,4 +774,144 @@ test("an engine that can't run here is left out of the random mix", async () => 
     engine.endCall(user, call.id);
   }
   assert.ok(engines.every((name) => name === 'gpt-realtime'));
+});
+
+// ---------- Trying again after a call breaks straight away ----------
+
+// A Free user who has had their first call and has one call left today (no scheduled call from Ping today).
+function freeUserWithOneCall(options) {
+  const context = setup(options);
+  context.user.subscription = null; // so no call today is kept for Ping
+  context.user.lastCallAt = context.clock.now - 86_400_000; // not their first call any more
+  assert.equal(context.user.plan, 'free');
+  assert.deepEqual([context.engine.calling(context.user).callsLeft, context.engine.calling(context.user).canCall], [1, true]);
+  return context;
+}
+
+// The user calls, the call connects (unless it never does), lasts `seconds`, then ends for `reason`.
+function placeCall({ clock, engine, user }, { seconds = 0, reason, connects = true, startsSession = true }) {
+  const call = engine.callBack(user);
+  if (startsSession) engine.sessionDetails(user, call.id);
+  if (connects) engine.markConnected(user, call.id);
+  clock.now += seconds * 1000;
+  engine.endCall(user, call.id, reason);
+  return call;
+}
+
+const canCallAgain = ({ engine, user }) => engine.calling(user).canCall;
+
+test('a call that drops after 10 seconds does not use up the day\'s call, and the retry is used by the next call', () => {
+  const context = freeUserWithOneCall();
+  placeCall(context, { seconds: 10, reason: 'dropped' });
+  assert.equal(canCallAgain(context), true);
+  assert.equal(context.engine.calling(context.user).retryAfterDrop, true);
+  placeCall(context, { seconds: 120, reason: 'hung-up' });
+  assert.equal(canCallAgain(context), false, 'the retry is spent, and the day\'s call was never refunded twice');
+});
+
+test('a call that drops after 29 seconds still does not count', () => {
+  const context = freeUserWithOneCall();
+  placeCall(context, { seconds: RETRY_WITHIN_SECONDS - 1, reason: 'dropped' });
+  assert.equal(canCallAgain(context), true);
+});
+
+test('a call that drops after 30 seconds or more counts as usual', () => {
+  for (const seconds of [RETRY_WITHIN_SECONDS, 95]) {
+    const context = freeUserWithOneCall();
+    placeCall(context, { seconds, reason: 'dropped' });
+    assert.equal(canCallAgain(context), false, `${seconds} seconds`);
+  }
+});
+
+test('a normal call counts, however short, when the contact ends it or time runs out', () => {
+  for (const [seconds, reason] of [[180, 'finished'], [10, 'finished'], [180, 'time-limit']]) {
+    const context = freeUserWithOneCall();
+    placeCall(context, { seconds, reason });
+    assert.equal(canCallAgain(context), false, `${reason} after ${seconds} seconds`);
+  }
+});
+
+test('hanging up straight after connecting counts, so ending calls on purpose earns nothing', () => {
+  const context = freeUserWithOneCall();
+  placeCall(context, { seconds: 3, reason: 'hung-up' });
+  assert.equal(canCallAgain(context), false);
+});
+
+test('a call that fails before it connects does not count, whether or not it got as far as a session', () => {
+  for (const startsSession of [true, false]) {
+    const context = freeUserWithOneCall();
+    placeCall(context, { reason: 'failed', connects: false, startsSession });
+    assert.equal(canCallAgain(context), true, startsSession ? 'after a session' : 'before a session');
+  }
+});
+
+test("a call where the contact couldn't talk does not count", () => {
+  const context = freeUserWithOneCall();
+  placeCall(context, { seconds: 4, reason: 'unavailable' });
+  assert.equal(canCallAgain(context), true);
+});
+
+test('only the first report of how a call ended counts, and an old app that sends no reason gets no retry', () => {
+  const ended = freeUserWithOneCall();
+  const call = placeCall(ended, { seconds: 5, reason: 'hung-up' });
+  ended.engine.endCall(ended.user, call.id, 'dropped');
+  assert.equal(canCallAgain(ended), false, 'hung up, then reported as dropped');
+  const old = freeUserWithOneCall();
+  placeCall(old, { seconds: 5, reason: undefined });
+  assert.equal(canCallAgain(old), false);
+});
+
+test(`at most ${MAX_RETRIES_PER_DAY} retries a day, and the safety-net daily limit still counts every call`, () => {
+  const context = freeUserWithOneCall({ dailyCallLimit: 10 });
+  for (let retry = 0; retry < MAX_RETRIES_PER_DAY; retry += 1) {
+    placeCall(context, { seconds: 5, reason: 'dropped' });
+    assert.equal(canCallAgain(context), true, `retry ${retry + 1}`);
+  }
+  placeCall(context, { seconds: 5, reason: 'dropped' });
+  assert.equal(canCallAgain(context), false, 'no more retries today');
+  assert.equal(context.user.usage.calls, MAX_RETRIES_PER_DAY + 1, 'every call still counts toward DAILY_CALL_LIMIT');
+  // A new day starts fresh.
+  context.clock.now += 86_400_000;
+  context.user.lastCallAt = context.clock.now - 1;
+  assert.equal(context.engine.calling(context.user).retryAfterDrop, false);
+});
+
+test("Ping's scheduled call dropping straight away lets a Free user call back, and missed calls work as before", async () => {
+  const dropped = setup();
+  await ringNow(dropped);
+  const call = callOf(dropped.store);
+  dropped.engine.answer(call.id);
+  dropped.engine.sessionDetails(dropped.user, call.id);
+  dropped.engine.markConnected(dropped.user, call.id);
+  assert.equal(canCallAgain(dropped), false, "a Free user's one call today was Ping's");
+  dropped.clock.now += 8000;
+  dropped.engine.endCall(dropped.user, call.id, 'dropped');
+  assert.equal(canCallAgain(dropped), true);
+  assert.equal(dropped.engine.calling(dropped.user).callBackMissed, false, 'not a missed call');
+
+  // A missed call still gives a call back, and a call back that drops early gives one retry, not the missed call again.
+  const missed = setup();
+  await ringNow(missed);
+  missed.engine.markDelivered(callOf(missed.store).id);
+  missed.clock.now += RING_MS + 1;
+  await missed.engine.tick();
+  assert.equal(missed.engine.calling(missed.user).callBackMissed, true);
+  placeCall(missed, { seconds: 120, reason: 'hung-up' });
+  assert.deepEqual([missed.engine.calling(missed.user).callBackMissed, canCallAgain(missed)], [false, false]);
+
+  const missedThenDropped = setup();
+  await ringNow(missedThenDropped);
+  missedThenDropped.engine.markDelivered(callOf(missedThenDropped.store).id);
+  missedThenDropped.clock.now += RING_MS + 1;
+  await missedThenDropped.engine.tick();
+  placeCall(missedThenDropped, { seconds: 6, reason: 'dropped' });
+  const calling = missedThenDropped.engine.calling(missedThenDropped.user);
+  assert.deepEqual([calling.callBackMissed, calling.retryAfterDrop, calling.canCall], [false, true, true]);
+});
+
+test('admins and YC reviewers are unlimited already, so a dropped call changes nothing for them', () => {
+  const context = freeUserWithOneCall();
+  context.user.role = 'admin';
+  placeCall(context, { seconds: 5, reason: 'dropped' });
+  assert.equal(context.user.usage.retriesGiven ?? 0, 0);
 });
