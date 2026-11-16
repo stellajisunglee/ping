@@ -12,11 +12,13 @@ export const ENGINES = {
   'deepgram-agent': { name: 'Deepgram Voice Agent', turnModes: [] },
 };
 
-// What every caller is randomized across. A new engine or mode joins only after a few admin test calls
-// and, for a new company, a Privacy Policy update. Semantic hasn't had its test calls yet.
+// What every caller is randomized across: the beta's four-way comparison. A new engine or mode joins only
+// after a few admin test calls and, for a new company, a Privacy Policy update. Deepgram is left out on a
+// server without its key (engineReady in calls.js).
 export const RANDOM_MIX = [
   { engine: 'gpt-realtime', turnMode: 'silence' },
   { engine: 'gpt-realtime', turnMode: 'smartTurn' },
+  { engine: 'gpt-realtime', turnMode: 'semantic' },
   { engine: 'deepgram-agent', turnMode: null },
 ];
 

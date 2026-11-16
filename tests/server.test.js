@@ -624,17 +624,17 @@ test('after a call, the user can rate cut-offs and naturalness from 1 to 5, as n
 test('every caller is randomized across the mix, balanced per person, and each call keeps its assignment', async () => {
   const tester = await joinWith(BETA_CODE);
   const assigned = [];
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 8; index += 1) {
     const call = await connectedCall(tester.token);
     const { data: again } = await request(`/api/calls/${call.id}/session`, { method: 'POST', token: tester.token }); // a reconnect
     const stored = engine.store.calls[call.id];
     assert.equal(again.turnMode, stored.turnMode, 'a reconnect keeps the same turn mode');
     assigned.push(stored.assigned);
   }
-  // Six calls split evenly across the three. This server has no Deepgram key, so its two Deepgram calls
+  // Eight calls split evenly across the four. This server has no Deepgram key, so its two Deepgram calls
   // fell back to OpenAI instead of failing.
-  assert.deepEqual(engine.userForToken(tester.token).comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'deepgram-agent|': 2 });
-  assert.deepEqual(assigned.toSorted(), ['fallback', 'fallback', 'random', 'random', 'random', 'random']);
+  assert.deepEqual(engine.userForToken(tester.token).comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'gpt-realtime|semantic': 2, 'deepgram-agent|': 2 });
+  assert.deepEqual(assigned.toSorted(), ['fallback', 'fallback', 'random', 'random', 'random', 'random', 'random', 'random']);
 });
 
 test('an admin can pick the engine and turn mode instead, and only real combinations', async () => {
@@ -644,6 +644,8 @@ test('an admin can pick the engine and turn mode instead, and only real combinat
   const { data } = await request('/api/call-setup', { method: 'PUT', token, body: { manual: true, engine: 'gpt-realtime', turnMode: 'semantic' } });
   assert.deepEqual([data.callSetup.manual, data.callSetup.engine, data.callSetup.turnMode], [true, 'gpt-realtime', 'semantic']);
   assert.ok(data.callSetup.randomMix.length >= 2);
+  // Semantic is also in the random mix now, and admins can still pick it themselves.
+  assert.ok(data.callSetup.randomMix.some((combo) => combo.engine === 'gpt-realtime' && combo.turnMode === 'semantic'));
   const call = await connectedCall(token);
   assert.deepEqual([engine.store.calls[call.id].turnMode, engine.store.calls[call.id].assigned], ['semantic', 'manual']);
   assert.deepEqual(engine.userForToken(token).comboCounts, {}, 'manual calls do not count toward the random balance');

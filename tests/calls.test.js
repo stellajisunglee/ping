@@ -752,8 +752,12 @@ test('an ended call cannot be reopened', () => {
 
 test('random assignment goes to the least-used combination, and only real combinations are valid', async () => {
   const { pickCombo, validCombo, comboKey, RANDOM_MIX } = await import('../server/experiment.js');
-  assert.deepEqual(pickCombo({ 'gpt-realtime|silence': 3, 'gpt-realtime|smartTurn': 1, 'deepgram-agent|': 2 }, () => 0), { engine: 'gpt-realtime', turnMode: 'smartTurn' });
-  assert.deepEqual(pickCombo({ 'gpt-realtime|silence': 1, 'gpt-realtime|smartTurn': 1 }, () => 0), { engine: 'deepgram-agent', turnMode: null });
+  assert.deepEqual(pickCombo({ 'gpt-realtime|silence': 3, 'gpt-realtime|smartTurn': 1, 'gpt-realtime|semantic': 2, 'deepgram-agent|': 2 }, () => 0), { engine: 'gpt-realtime', turnMode: 'smartTurn' });
+  assert.deepEqual(pickCombo({ 'gpt-realtime|silence': 1, 'gpt-realtime|smartTurn': 1, 'gpt-realtime|semantic': 1 }, () => 0), { engine: 'deepgram-agent', turnMode: null });
+  // A tie is broken at random: here semantic and Deepgram are both least used.
+  const tied = { 'gpt-realtime|silence': 1, 'gpt-realtime|smartTurn': 1 };
+  assert.deepEqual(pickCombo(tied, () => 0), { engine: 'gpt-realtime', turnMode: 'semantic' });
+  assert.deepEqual(pickCombo(tied, () => 0.99), { engine: 'deepgram-agent', turnMode: null });
   const first = RANDOM_MIX.map((combo) => comboKey(pickCombo({}, () => RANDOM_MIX.indexOf(combo) / RANDOM_MIX.length)));
   assert.deepEqual(first, RANDOM_MIX.map(comboKey), 'with no history, any combination can come first');
   assert.deepEqual(pickCombo({}, () => 0.9999), RANDOM_MIX.at(-1), 'a random number near 1 still picks a real combination');
@@ -774,6 +778,48 @@ test("an engine that can't run here is left out of the random mix", async () => 
     engine.endCall(user, call.id);
   }
   assert.ok(engines.every((name) => name === 'gpt-realtime'));
+});
+
+test('the random mix is the four beta configurations, and a new caller gets each of them once in their first four calls', async () => {
+  const { comboKey, RANDOM_MIX } = await import('../server/experiment.js');
+  assert.deepEqual(RANDOM_MIX.map(comboKey), ['gpt-realtime|silence', 'gpt-realtime|smartTurn', 'gpt-realtime|semantic', 'deepgram-agent|']);
+  const store = new Store();
+  const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO }); // every engine can run
+  const { user } = engine.register('Asia/Tokyo', 'beta', 'beta');
+  const combos = [];
+  for (let index = 0; index < 4; index += 1) {
+    const call = engine.callBack(user);
+    engine.sessionDetails(user, call.id);
+    combos.push(comboKey(store.calls[call.id]));
+    engine.endCall(user, call.id);
+  }
+  assert.deepEqual(combos.toSorted(), RANDOM_MIX.map(comboKey).toSorted());
+});
+
+test('with no Deepgram key, the three OpenAI configurations still each come up, and no call goes to Deepgram', () => {
+  const store = new Store();
+  const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO, engineReady: (name) => name !== 'deepgram-agent' });
+  const { user } = engine.register('Asia/Tokyo', 'beta', 'beta');
+  const modes = [];
+  for (let index = 0; index < 3; index += 1) {
+    const call = engine.callBack(user);
+    engine.sessionDetails(user, call.id);
+    modes.push(`${store.calls[call.id].engine}|${store.calls[call.id].turnMode}`);
+    engine.endCall(user, call.id);
+  }
+  assert.deepEqual(modes.toSorted(), ['gpt-realtime|semantic', 'gpt-realtime|silence', 'gpt-realtime|smartTurn']);
+  assert.ok(!('deepgram-agent|' in user.comboCounts));
+});
+
+test("an existing caller keeps their history, so semantic catches up first without resetting the others", () => {
+  const store = new Store();
+  const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO });
+  const { user } = engine.register('Asia/Tokyo', 'beta', 'beta');
+  user.comboCounts = { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'deepgram-agent|': 2 }; // from before semantic joined
+  const call = engine.callBack(user);
+  engine.sessionDetails(user, call.id);
+  assert.deepEqual([store.calls[call.id].engine, store.calls[call.id].turnMode], ['gpt-realtime', 'semantic']);
+  assert.deepEqual(user.comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'deepgram-agent|': 2, 'gpt-realtime|semantic': 1 });
 });
 
 // ---------- Trying again after a call breaks straight away ----------
