@@ -623,17 +623,18 @@ test('after a call, the user can rate cut-offs and naturalness from 1 to 5, as n
 
 test('every caller is randomized across the mix, balanced per person, and each call keeps its assignment', async () => {
   const tester = await joinWith(BETA_CODE);
-  const modes = [];
-  for (let index = 0; index < 4; index += 1) {
+  const assigned = [];
+  for (let index = 0; index < 6; index += 1) {
     const call = await connectedCall(tester.token);
     const { data: again } = await request(`/api/calls/${call.id}/session`, { method: 'POST', token: tester.token }); // a reconnect
     const stored = engine.store.calls[call.id];
-    assert.equal(stored.assigned, 'random');
     assert.equal(again.turnMode, stored.turnMode, 'a reconnect keeps the same turn mode');
-    modes.push(stored.turnMode);
+    assigned.push(stored.assigned);
   }
-  assert.deepEqual(modes.toSorted(), ['silence', 'silence', 'smartTurn', 'smartTurn'], 'four calls split evenly across the two');
-  assert.deepEqual(engine.userForToken(tester.token).comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2 });
+  // Six calls split evenly across the three. This server has no Deepgram key, so its two Deepgram calls
+  // fell back to OpenAI instead of failing.
+  assert.deepEqual(engine.userForToken(tester.token).comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'deepgram-agent|': 2 });
+  assert.deepEqual(assigned.toSorted(), ['fallback', 'fallback', 'random', 'random', 'random', 'random']);
 });
 
 test('an admin can pick the engine and turn mode instead, and only real combinations', async () => {
@@ -649,7 +650,7 @@ test('an admin can pick the engine and turn mode instead, and only real combinat
 
   await request('/api/call-setup', { method: 'PUT', token, body: { manual: false } });
   const random = await connectedCall(token);
-  assert.equal(engine.store.calls[random.id].assigned, 'random');
+  assert.ok(['random', 'fallback'].includes(engine.store.calls[random.id].assigned), 'randomized again (Deepgram falls back here, with no key)');
 });
 
 test('the call log shows each call’s engine and turn mode with how it went, for admins only, and is removed with the account', async () => {
@@ -671,7 +672,7 @@ test('the call log shows each call’s engine and turn mode with how it went, fo
   const assignedMode = engine.store.calls[call.id].turnMode;
   assert.deepEqual(
     [entry.joinedWith, entry.engine, entry.turnMode, entry.assigned, entry.cutOffs, entry.naturalness, entry.replyGapMedianMs, typeof entry.seconds],
-    ['beta', 'gpt-realtime', assignedMode, 'random', 3, 4, METRICS.replyGapMedianMs, 'number'],
+    ['beta', engine.store.calls[call.id].engine, assignedMode, engine.store.calls[call.id].assigned, 3, 4, METRICS.replyGapMedianMs, 'number'],
   );
   assert.equal(entry.recorded, true, 'beta testers are always recorded');
   assert.equal(entry.actualTurnMode, assignedMode === 'smartTurn' ? 'silence' : assignedMode, 'a Smart Turn call that fell back shows silence as what it ended in');

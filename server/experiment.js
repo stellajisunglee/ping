@@ -12,12 +12,16 @@ export const ENGINES = {
   'deepgram-agent': { name: 'Deepgram Voice Agent', turnModes: [] },
 };
 
-// What every caller is randomized across. A new engine or mode joins only after a few admin test calls.
-// Semantic hasn't had those yet.
+// What every caller is randomized across. A new engine or mode joins only after a few admin test calls
+// and, for a new company, a Privacy Policy update. Semantic hasn't had its test calls yet.
 export const RANDOM_MIX = [
   { engine: 'gpt-realtime', turnMode: 'silence' },
   { engine: 'gpt-realtime', turnMode: 'smartTurn' },
+  { engine: 'deepgram-agent', turnMode: null },
 ];
+
+// What a call falls back to when its engine can't start, so the caller still gets a call.
+export const FALLBACK_COMBO = { engine: 'gpt-realtime', turnMode: 'silence' };
 
 export const comboKey = ({ engine, turnMode }) => `${engine}|${turnMode ?? ''}`;
 

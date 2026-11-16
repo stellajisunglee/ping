@@ -493,11 +493,23 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       const details = engine.sessionDetails(user, session[1]);
       if (!details) return json(res, 409, { error: 'This call has ended.' });
       const hangUpLines = details.calledBack ? [] : Object.values(NOT_NOW_GOODBYES);
+      let agentToken = null;
       if (details.engine === 'deepgram-agent') {
-        if (!deepgram.hasKey) return json(res, 503, { error: 'Deepgram is not set up yet.' });
+        const manual = engine.store.calls[session[1]]?.assigned === 'manual';
+        try {
+          if (!deepgram.hasKey) throw new Error('Deepgram is not set up yet.');
+          agentToken = await deepgram.mintToken();
+        } catch (error) {
+          // An admin who picked Deepgram should see why. Anyone else just gets the call, on the fallback.
+          if (manual) return json(res, 503, { error: error.message });
+          console.warn(`Deepgram couldn't start a call, so it fell back to OpenAI: ${error.message}`);
+          Object.assign(details, engine.fallBack(user, session[1]));
+        }
+      }
+      if (details.engine === 'deepgram-agent') {
         return json(res, 200, {
           engine: details.engine,
-          token: await deepgram.mintToken(),
+          token: agentToken,
           agentUrl: AGENT_URL,
           settings: agentSettings({ ...details, thinkModel: deepgramThinkModel, voice: deepgramVoice }),
           timeUpLine: TIME_UP_LINES[details.settings.formality === 'casual' ? 'casual' : 'formal'],
@@ -604,7 +616,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     privateKey: VAPID_PRIVATE_KEY,
     subject: process.env.VAPID_SUBJECT ?? process.env.RENDER_EXTERNAL_URL ?? 'https://ping.example.com',
   });
-  const engine = new CallEngine({ store, sendPush, dailyCallLimit: Number(process.env.DAILY_CALL_LIMIT) || null });
+  const engine = new CallEngine({
+    store,
+    sendPush,
+    dailyCallLimit: Number(process.env.DAILY_CALL_LIMIT) || null,
+    engineReady: (name) => name !== 'deepgram-agent' || Boolean(process.env.DEEPGRAM_API_KEY),
+  });
   const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '', baseUrl: process.env.OPENAI_BASE_URL, textModel: process.env.TEXT_MODEL });
   const deepgram = createDeepgram({ apiKey: process.env.DEEPGRAM_API_KEY ?? '' });
   const { server, ensureVoiceMessage } = createApp({

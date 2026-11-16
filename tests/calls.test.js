@@ -752,11 +752,26 @@ test('an ended call cannot be reopened', () => {
 
 test('random assignment goes to the least-used combination, and only real combinations are valid', async () => {
   const { pickCombo, validCombo, comboKey, RANDOM_MIX } = await import('../server/experiment.js');
-  assert.deepEqual(pickCombo({ 'gpt-realtime|silence': 3, 'gpt-realtime|smartTurn': 1 }, () => 0), { engine: 'gpt-realtime', turnMode: 'smartTurn' });
+  assert.deepEqual(pickCombo({ 'gpt-realtime|silence': 3, 'gpt-realtime|smartTurn': 1, 'deepgram-agent|': 2 }, () => 0), { engine: 'gpt-realtime', turnMode: 'smartTurn' });
+  assert.deepEqual(pickCombo({ 'gpt-realtime|silence': 1, 'gpt-realtime|smartTurn': 1 }, () => 0), { engine: 'deepgram-agent', turnMode: null });
   const first = RANDOM_MIX.map((combo) => comboKey(pickCombo({}, () => RANDOM_MIX.indexOf(combo) / RANDOM_MIX.length)));
   assert.deepEqual(first, RANDOM_MIX.map(comboKey), 'with no history, any combination can come first');
-  assert.equal(pickCombo({}, () => 0.9999).engine, 'gpt-realtime');
+  assert.deepEqual(pickCombo({}, () => 0.9999), RANDOM_MIX.at(-1), 'a random number near 1 still picks a real combination');
   assert.equal(validCombo({ engine: 'gpt-realtime', turnMode: 'semantic' }), true);
   assert.equal(validCombo({ engine: 'gpt-realtime', turnMode: null }), false);
   assert.equal(validCombo({ engine: 'nope', turnMode: 'silence' }), false);
+});
+
+test("an engine that can't run here is left out of the random mix", async () => {
+  const store = new Store();
+  const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO, engineReady: (name) => name !== 'deepgram-agent' });
+  const { user } = engine.register('Asia/Tokyo', 'beta', 'beta');
+  const engines = [];
+  for (let index = 0; index < 4; index += 1) {
+    const call = engine.callBack(user);
+    engine.sessionDetails(user, call.id);
+    engines.push(store.calls[call.id].engine);
+    engine.endCall(user, call.id);
+  }
+  assert.ok(engines.every((name) => name === 'gpt-realtime'));
 });

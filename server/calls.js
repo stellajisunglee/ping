@@ -9,7 +9,7 @@ import { localDay, localDayNumber, localParts, nextCallTime } from './schedule.j
 import { applySettings, DEFAULT_SETTINGS } from './settings.js';
 import { addSentence, addStarterStack, addWord, applyDowngrade, cleanSentence, cleanSentenceWords, cleanWord } from './stack.js';
 import { pickQuestion, questionById, TURN_MODES } from './tutor.js';
-import { comboKey, ENGINES, pickCombo, validCombo } from './experiment.js';
+import { comboKey, ENGINES, FALLBACK_COMBO, pickCombo, RANDOM_MIX, validCombo } from './experiment.js';
 
 export const RING_MS = 10_000;
 export const DELIVERY_GRACE_MS = 30_000; // how long a ring waits for the phone to confirm it arrived
@@ -93,8 +93,10 @@ const newUserFields = () => ({
 
 export class CallEngine {
   // No dailyCallLimit means unlimited calls, which is for prototyping only. See "Before beta launch" in the README.
-  constructor({ store, sendPush, now = Date.now, random = Math.random, dailyCallLimit = null }) {
+  // engineReady says whether an engine can run here (Deepgram needs its key). Engines that can't are left out of the random mix.
+  constructor({ store, sendPush, now = Date.now, random = Math.random, dailyCallLimit = null, engineReady = () => true }) {
     this.dailyCallLimit = dailyCallLimit;
+    this.engineReady = engineReady;
     this.store = store;
     this.sendPush = sendPush;
     this.now = now;
@@ -417,6 +419,18 @@ export class CallEngine {
     if (usesTurnModes) user.turnMode = turnMode;
     this.store.save();
     return true;
+  }
+
+  // A randomly assigned engine couldn't start this call, so it runs on the fallback instead, and the log says so.
+  fallBack(user, callId) {
+    const call = this.store.calls[callId];
+    if (!call || call.userId !== user.id) return null;
+    call.engine = FALLBACK_COMBO.engine;
+    call.turnMode = FALLBACK_COMBO.turnMode;
+    call.assigned = 'fallback';
+    this.#log(call, { engine: call.engine, turnMode: call.turnMode, assigned: call.assigned });
+    this.store.save();
+    return { engine: call.engine, turnMode: call.turnMode };
   }
 
   // The turn mode of the user's call in progress, for settings changed mid-call.
@@ -746,7 +760,8 @@ export class CallEngine {
 
   #assignCombo(call, user) {
     const manual = user.role === 'admin' && user.callSetupManual;
-    const combo = manual ? { engine: user.engine, turnMode: ENGINES[user.engine]?.turnModes.length ? user.turnMode : null } : pickCombo(user.comboCounts, this.random);
+    const mix = RANDOM_MIX.filter((option) => this.engineReady(option.engine));
+    const combo = manual ? { engine: user.engine, turnMode: ENGINES[user.engine]?.turnModes.length ? user.turnMode : null } : pickCombo(user.comboCounts, this.random, mix);
     call.engine = combo.engine;
     call.turnMode = combo.turnMode ?? null;
     call.assigned = manual ? 'manual' : 'random';
