@@ -438,7 +438,8 @@ test('turn metrics are stored on the call with their settings, and logged once',
     console.log = log;
   }
   const stored = engine.store.calls[call.id].turnMetrics;
-  assert.deepEqual(stored, { callId: call.id, ...METRICS, turnMode: 'silence', thinkingTime: 'normal', speed: 1, proficiency: 'beginner' });
+  // This call never connected, so it was never assigned a turn mode.
+  assert.deepEqual(stored, { callId: call.id, ...METRICS, engine: 'gpt-realtime', turnMode: null, actualTurnMode: null, thinkingTime: 'normal', speed: 1, proficiency: 'beginner' });
   assert.equal(lines.length, 1);
   assert.match(lines[0], /^turn-metrics \{/);
   assert.deepEqual(JSON.parse(lines[0].slice('turn-metrics '.length)), stored);
@@ -463,8 +464,11 @@ test('only admins can change the turn mode, and it reaches the call, mid-call ch
   assert.equal(beta.turnMode, 'silence');
   assert.equal((await request('/api/turn-mode', { method: 'PUT', token: beta.token, body: { turnMode: 'semantic' } })).status, 403);
   assert.equal((await request('/api/me', { token: beta.token })).data.turnMode, 'silence');
+  assert.equal((await request('/api/call-setup', { method: 'PUT', token: beta.token, body: { manual: true } })).status, 403);
+  assert.equal(beta.callSetup, undefined);
 
   const { token } = await signUp(INVITE_CODE);
+  assert.equal((await request('/api/call-setup', { method: 'PUT', token, body: { manual: true } })).data.callSetup.manual, true);
   assert.equal((await request('/api/turn-mode', { method: 'PUT', token, body: { turnMode: 'psychic' } })).status, 400);
   const { status, data } = await request('/api/turn-mode', { method: 'PUT', token, body: { turnMode: 'semantic' } });
   assert.equal(status, 200);
@@ -490,6 +494,7 @@ test('only admins can change the turn mode, and it reaches the call, mid-call ch
 
 test('a Smart Turn call starts in silence mode, and the phone is told to take over', async () => {
   const { token } = (await request('/api/register', { method: 'POST', body: { inviteCode: INVITE_CODE, timeZone: 'Asia/Tokyo' } })).data;
+  await request('/api/call-setup', { method: 'PUT', token, body: { manual: true } });
   assert.equal((await request('/api/turn-mode', { method: 'PUT', token, body: { turnMode: 'smartTurn' } })).data.turnMode, 'smartTurn');
   const { data: call } = await request('/api/calls', { method: 'POST', token });
   const { data: session } = await request(`/api/calls/${call.id}/session`, { method: 'POST', token });
@@ -584,4 +589,89 @@ test('accounts from before calls were recorded see a one-time notice', async () 
   assert.equal((await request('/api/me', { token })).data.policyNotice, true);
   assert.equal((await request('/api/policy/seen', { method: 'POST', token })).status, 200);
   assert.equal((await request('/api/me', { token })).data.policyNotice, false);
+});
+
+test('after a call, the user can rate cut-offs and naturalness from 1 to 5, as numbers only', async () => {
+  const tester = await joinWith(BETA_CODE);
+  const { data: notConnected } = await request('/api/calls', { method: 'POST', token: tester.token });
+  const rate = (callId, body, token = tester.token) => request(`/api/calls/${callId}/rating`, { method: 'POST', token, body });
+  assert.equal((await rate(notConnected.id, { cutOffs: 2, naturalness: 4 })).status, 404); // never connected
+
+  const call = await connectedCall(tester.token);
+  await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: tester.token });
+  for (const bad of [{ cutOffs: 0, naturalness: 3 }, { cutOffs: 2, naturalness: 6 }, { cutOffs: 2.5, naturalness: 3 }, { cutOffs: '2', naturalness: 3 }, { cutOffs: 2 }]) {
+    assert.equal((await rate(call.id, bad)).status, 400, JSON.stringify(bad));
+  }
+  assert.equal((await rate(call.id, { cutOffs: 2, naturalness: 4 }, await join())).status, 404); // someone else's call
+  assert.equal((await rate(call.id, { cutOffs: 2, naturalness: 4, comment: 'words' })).status, 201);
+  assert.equal((await rate(call.id, { cutOffs: 1, naturalness: 5 })).status, 201); // a second rating replaces the first
+
+  const { ratings } = engine.userForToken(tester.token);
+  assert.equal(ratings.length, 1);
+  assert.deepEqual(Object.keys(ratings[0]).sort(), ['at', 'callId', 'cutOffs', 'engine', 'naturalness', 'turnMode']);
+  assert.deepEqual([ratings[0].cutOffs, ratings[0].naturalness, ratings[0].engine], [1, 5, 'gpt-realtime']);
+  assert.equal(ratings[0].turnMode, engine.store.calls[call.id].turnMode, 'the rating keeps the mode the call was assigned');
+  const listed = (await request('/api/admin/recordings', { token: await join() })).data.recordings.find((item) => item.callId === call.id);
+  assert.deepEqual(listed.rating, { cutOffs: 1, naturalness: 5 });
+});
+
+// Engines and turn modes
+
+test('every caller is randomized across the mix, balanced per person, and each call keeps its assignment', async () => {
+  const tester = await joinWith(BETA_CODE);
+  const modes = [];
+  for (let index = 0; index < 4; index += 1) {
+    const call = await connectedCall(tester.token);
+    const { data: again } = await request(`/api/calls/${call.id}/session`, { method: 'POST', token: tester.token }); // a reconnect
+    const stored = engine.store.calls[call.id];
+    assert.equal(stored.assigned, 'random');
+    assert.equal(again.turnMode, stored.turnMode, 'a reconnect keeps the same turn mode');
+    modes.push(stored.turnMode);
+  }
+  assert.deepEqual(modes.toSorted(), ['silence', 'silence', 'smartTurn', 'smartTurn'], 'four calls split evenly across the two');
+  assert.deepEqual(engine.userForToken(tester.token).comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2 });
+});
+
+test('an admin can pick the engine and turn mode instead, and only real combinations', async () => {
+  const token = await join();
+  assert.equal((await request('/api/call-setup', { method: 'PUT', token, body: { engine: 'made-up' } })).status, 400);
+  assert.equal((await request('/api/call-setup', { method: 'PUT', token, body: { turnMode: 'psychic' } })).status, 400);
+  const { data } = await request('/api/call-setup', { method: 'PUT', token, body: { manual: true, engine: 'gpt-realtime', turnMode: 'semantic' } });
+  assert.deepEqual([data.callSetup.manual, data.callSetup.engine, data.callSetup.turnMode], [true, 'gpt-realtime', 'semantic']);
+  assert.ok(data.callSetup.randomMix.length >= 2);
+  const call = await connectedCall(token);
+  assert.deepEqual([engine.store.calls[call.id].turnMode, engine.store.calls[call.id].assigned], ['semantic', 'manual']);
+  assert.deepEqual(engine.userForToken(token).comboCounts, {}, 'manual calls do not count toward the random balance');
+
+  await request('/api/call-setup', { method: 'PUT', token, body: { manual: false } });
+  const random = await connectedCall(token);
+  assert.equal(engine.store.calls[random.id].assigned, 'random');
+});
+
+test('the call log shows each call’s engine and turn mode with how it went, for admins only, and is removed with the account', async () => {
+  const tester = await joinWith(BETA_CODE);
+  const call = await connectedCall(tester.token);
+  await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: tester.token });
+  const log = console.log;
+  console.log = () => {};
+  try {
+    await request(`/api/calls/${call.id}/metrics`, { method: 'POST', token: tester.token, body: { ...METRICS, smartTurnFallback: 2 } });
+    await request(`/api/calls/${call.id}/rating`, { method: 'POST', token: tester.token, body: { cutOffs: 3, naturalness: 4 } });
+  } finally {
+    console.log = log;
+  }
+  await request(`/api/calls/${call.id}/ended`, { method: 'POST', token: tester.token });
+
+  assert.equal((await request('/api/admin/calls', { token: tester.token })).status, 403);
+  const entry = (await request('/api/admin/calls', { token: await join() })).data.calls.find((item) => item.callId === call.id);
+  const assignedMode = engine.store.calls[call.id].turnMode;
+  assert.deepEqual(
+    [entry.joinedWith, entry.engine, entry.turnMode, entry.assigned, entry.cutOffs, entry.naturalness, entry.replyGapMedianMs, typeof entry.seconds],
+    ['beta', 'gpt-realtime', assignedMode, 'random', 3, 4, METRICS.replyGapMedianMs, 'number'],
+  );
+  assert.equal(entry.actualTurnMode, assignedMode === 'smartTurn' ? 'silence' : assignedMode, 'a Smart Turn call that fell back shows silence as what it ended in');
+  assert.ok(Object.values(entry).every((value) => value === null || ['number', 'string', 'boolean'].includes(typeof value)));
+
+  await request('/api/me', { method: 'DELETE', token: tester.token });
+  assert.ok(!engine.store.callLog.some((item) => item.callId === call.id));
 });

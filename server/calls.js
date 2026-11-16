@@ -9,6 +9,7 @@ import { localDay, localDayNumber, localParts, nextCallTime } from './schedule.j
 import { applySettings, DEFAULT_SETTINGS } from './settings.js';
 import { addSentence, addStarterStack, addWord, applyDowngrade, cleanSentence, cleanSentenceWords, cleanWord } from './stack.js';
 import { pickQuestion, questionById, TURN_MODES } from './tutor.js';
+import { comboKey, ENGINES, pickCombo, validCombo } from './experiment.js';
 
 export const RING_MS = 10_000;
 export const DELIVERY_GRACE_MS = 30_000; // how long a ring waits for the phone to confirm it arrived
@@ -31,6 +32,8 @@ const MAX_TRANSCRIPT_LINES = 80;
 const MAX_LINE_LENGTH = 500;
 const KEEP_FEEDBACK = 1000;
 const MAX_ACCOUNTS_IN_REPORT = 20;
+const KEEP_RATINGS = 200;
+const KEEP_CALL_LOG = 5000;
 const MIN_SECONDS_TO_CONNECT = 10;
 const SCHEDULE_FIELDS = ['frequency', 'customDays', 'callStartHour', 'callEndHour'];
 const RENAMED_PLANS = { plus: 'premium', pro: 'platinum' };
@@ -47,6 +50,12 @@ export const POLICY_VERSION = 2;
 // can turn recording off in Manage Account, which stops future recordings only.
 export const recordingLocked = (user) => user.role === 'admin' || user.joinedWith === 'beta';
 export const recordsCalls = (user) => recordingLocked(user) || !user.recordingOff;
+
+// A call's rating is two whole numbers from 1 to 5, or nothing.
+export function cleanRating(body) {
+  const scale = (value) => Number.isInteger(value) && value >= 1 && value <= 5;
+  return scale(body?.cutOffs) && scale(body?.naturalness) ? { cutOffs: body.cutOffs, naturalness: body.naturalness } : null;
+}
 
 // A transcript as the phone sends it, kept to who said what: 'you' or 'contact'.
 export const cleanTranscript = (lines) =>
@@ -66,13 +75,17 @@ const newUserFields = () => ({
   lastCallOutcome: null,
   lastRingDay: null,
   lookups: { day: null, count: 0 },
-  turnMode: 'silence', // only an admin can change it, to compare turn detectors
+  turnMode: 'silence', // an admin's own pick, used only when callSetupManual is on
+  engine: 'gpt-realtime', // likewise
+  callSetupManual: false, // admins only: pick the engine and turn mode instead of being randomized
+  comboCounts: {}, // calls randomized to each engine and turn mode, so the next goes to the least used
   joinedWith: null, // which invite code: admin, beta or yc
   joinedAt: null,
   connectedCalls: 0, // kept on the account, since calls themselves are removed after 7 days
   lastCallAt: null,
   missedCallToReturn: false, // they missed or declined a call and haven't called back yet, which doesn't use a call
   recordingOff: false, // turned off in Manage Account, where the account allows it
+  ratings: [], // the 1-5 taps after each call: how often Ping cut them off, and how natural it felt
   policyVersion: 0, // the Privacy Policy version they've seen. 0: joined before calls were recorded
 });
 
@@ -160,6 +173,7 @@ export class CallEngine {
       if (call.userId === user.id) delete this.store.calls[call.id];
     }
     delete this.store.users[user.id];
+    this.store.callLog = this.store.callLog.filter((entry) => entry.userId !== user.id);
     this.store.save();
   }
 
@@ -324,7 +338,7 @@ export class CallEngine {
     if (secondsLeft < MIN_SECONDS_TO_CONNECT) throw new LimitError('This call has reached its time limit.');
     call.startedAt ??= this.now();
     call.sessions += 1;
-    call.turnMode = user.turnMode; // kept with the call, so its metrics report the mode it really used
+    if (!call.engine) this.#assignCombo(call, user); // decided once, at the first connection
     call.recorded ??= recordsCalls(user); // decided once, when the call first connects
     this.store.save();
     const contact = this.#contactOf(call, user);
@@ -337,7 +351,8 @@ export class CallEngine {
       calledBack: call.direction === 'outgoing',
       contact,
       memories: this.#memories(user, contact),
-      turnMode: user.turnMode,
+      engine: call.engine,
+      turnMode: call.turnMode,
       maxSeconds: secondsLeft,
     };
   }
@@ -348,6 +363,7 @@ export class CallEngine {
     if (!call || call.userId !== user.id) return false;
     if (!call.startedAt || call.endedAt) return true;
     call.endedAt = this.now();
+    this.#log(call, { seconds: Math.round((call.endedAt - (call.connectedAt ?? call.startedAt)) / 1000) });
     this.store.save();
     return true;
   }
@@ -389,6 +405,29 @@ export class CallEngine {
     return user.clearAt ? null : planLimits(user.plan).savedItems;
   }
 
+  // Admins only: pick the engine and turn mode for their own calls, or go back to being randomized.
+  setCallSetup(user, { manual, engine = user.engine, turnMode = user.turnMode }) {
+    if (!ENGINES[engine]) return false;
+    const usesTurnModes = ENGINES[engine].turnModes.length > 0;
+    if (!validCombo({ engine, turnMode: usesTurnModes ? turnMode : null })) return false;
+    if (typeof manual === 'boolean') user.callSetupManual = manual;
+    user.engine = engine;
+    if (usesTurnModes) user.turnMode = turnMode;
+    this.store.save();
+    return true;
+  }
+
+  // The turn mode of the user's call in progress, for settings changed mid-call.
+  liveTurnMode(user) {
+    const call = Object.values(this.store.calls).find((candidate) => candidate.userId === user.id && candidate.startedAt && !candidate.endedAt);
+    return call?.turnMode ?? null;
+  }
+
+  // Newest first. Numbers and ids only, for the admin call log.
+  callLog(limit = 300) {
+    return this.store.callLog.slice(-limit).reverse();
+  }
+
   setTurnMode(user, turnMode) {
     if (!TURN_MODES.includes(turnMode)) return false;
     user.turnMode = turnMode;
@@ -415,7 +454,18 @@ export class CallEngine {
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id) return null;
     const { thinkingTime, speed, proficiency } = user.settings;
-    call.turnMetrics = { callId, ...metrics, turnMode: call.turnMode ?? user.turnMode, thinkingTime, speed, proficiency };
+    // Smart Turn can fall back to silence mid-call, so the mode it actually ended in is kept too.
+    const actualTurnMode = call.turnMode === 'smartTurn' && metrics.smartTurnFallback ? 'silence' : (call.turnMode ?? null);
+    call.turnMetrics = { callId, ...metrics, engine: call.engine ?? 'gpt-realtime', turnMode: call.turnMode ?? null, actualTurnMode, thinkingTime, speed, proficiency };
+    this.#log(call, {
+      actualTurnMode,
+      replyGapMedianMs: metrics.replyGapMedianMs,
+      turnEndWaitMedianMs: metrics.turnEndWaitMedianMs,
+      suspectedCutoffs: metrics.suspectedCutoffs,
+      bargeIns: metrics.bargeIns,
+      ignoredAizuchi: metrics.ignoredAizuchi,
+      userTurns: metrics.userTurns,
+    });
     this.store.save();
     return call.turnMetrics;
   }
@@ -580,6 +630,18 @@ export class CallEngine {
     return true;
   }
 
+  // The two 1-5 taps after a call. Numbers only, kept with the account since calls are removed after 7 days.
+  saveRating(user, callId, rating) {
+    const call = this.store.calls[callId];
+    if (!call || call.userId !== user.id || !call.connectedAt) return null;
+    const record = { callId, at: this.now(), engine: call.engine ?? 'gpt-realtime', turnMode: call.turnMode ?? null, cutOffs: rating.cutOffs, naturalness: rating.naturalness };
+    call.rating = { cutOffs: rating.cutOffs, naturalness: rating.naturalness };
+    this.#log(call, { cutOffs: rating.cutOffs, naturalness: rating.naturalness });
+    user.ratings = [record, ...user.ratings.filter((saved) => saved.callId !== callId)].slice(0, KEEP_RATINGS);
+    this.store.save();
+    return record;
+  }
+
   // Returns false when the account can't turn recording off.
   setRecording(user, on) {
     if (recordingLocked(user)) return false;
@@ -608,6 +670,7 @@ export class CallEngine {
       plan: user.plan,
       contactName: this.#contactOf(call, user).name,
       direction: call.direction,
+      engine: call.engine ?? 'gpt-realtime',
       turnMode: call.turnMode ?? null,
       at: call.connectedAt ?? call.startedAt ?? call.createdAt,
       seconds: call.startedAt && call.endedAt ? Math.round((call.endedAt - call.startedAt) / 1000) : null,
@@ -677,6 +740,28 @@ export class CallEngine {
   #recordOutcome(call, outcome) {
     const user = this.store.users[call.userId];
     if (user) user.lastCallOutcome = outcome;
+  }
+
+  #assignCombo(call, user) {
+    const manual = user.role === 'admin' && user.callSetupManual;
+    const combo = manual ? { engine: user.engine, turnMode: ENGINES[user.engine]?.turnModes.length ? user.turnMode : null } : pickCombo(user.comboCounts, this.random);
+    call.engine = combo.engine;
+    call.turnMode = combo.turnMode ?? null;
+    call.assigned = manual ? 'manual' : 'random';
+    if (!manual) user.comboCounts[comboKey(combo)] = (user.comboCounts[comboKey(combo)] ?? 0) + 1;
+    this.#log(call, {});
+  }
+
+  // Adds to the call's entry in the call log, creating it the first time.
+  #log(call, change) {
+    let entry = this.store.callLog.findLast((candidate) => candidate.callId === call.id);
+    if (!entry) {
+      const user = this.store.users[call.userId];
+      entry = { callId: call.id, userId: call.userId, joinedWith: user?.joinedWith ?? null, at: call.startedAt ?? this.now(), direction: call.direction, engine: call.engine ?? 'gpt-realtime', turnMode: call.turnMode ?? null, assigned: call.assigned ?? null, recorded: Boolean(call.recorded) };
+      this.store.callLog.push(entry);
+      if (this.store.callLog.length > KEEP_CALL_LOG) this.store.callLog.splice(0, this.store.callLog.length - KEEP_CALL_LOG);
+    }
+    Object.assign(entry, change);
   }
 
   #activeCall(user) {

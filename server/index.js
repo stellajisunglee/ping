@@ -7,8 +7,9 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
-import { CallEngine, cleanTranscript, LimitError, PlanError, POLICY_VERSION, recordingLocked, recordsCalls } from './calls.js';
+import { CallEngine, cleanRating, cleanTranscript, LimitError, PlanError, POLICY_VERSION, recordingLocked, recordsCalls } from './calls.js';
 import { audioExtension, Recordings } from './recordings.js';
+import { ENGINES, RANDOM_MIX } from './experiment.js';
 import { PING, PLAN_LIMITS } from './contacts.js';
 import { createPushSender } from './push.js';
 import { createOpenAI } from './openai.js';
@@ -191,6 +192,7 @@ export function createApp({ engine, openai, config }) {
       planLimits: PLAN_LIMITS,
       recording: { on: recordsCalls(user), canTurnOff: !recordingLocked(user) },
       policyNotice: (user.policyVersion ?? 0) < POLICY_VERSION, // joined before calls were recorded, and hasn't seen the notice
+      ...(user.role === 'admin' ? { callSetup: { manual: user.callSetupManual, engine: user.engine, turnMode: user.turnMode, engines: ENGINES, randomMix: RANDOM_MIX } } : {}),
     };
   }
 
@@ -252,7 +254,8 @@ export function createApp({ engine, openai, config }) {
       const settings = engine.updateSettings(user, body);
       return json(res, 200, {
         settings,
-        turnDetection: turnDetection({ thinkingTime: settings.thinkingTime, speed: settings.speed, turnMode: user.turnMode }),
+        // A call keeps the turn mode it was assigned, so a mid-call change only adjusts its timing.
+        turnDetection: turnDetection({ thinkingTime: settings.thinkingTime, speed: settings.speed, turnMode: engine.liveTurnMode(user) ?? 'silence' }),
         smartTurn: smartTurnRules(settings.thinkingTime),
       });
     }
@@ -310,6 +313,18 @@ export function createApp({ engine, openai, config }) {
       const body = await readJson(req);
       if (!engine.setPlan(user, body.plan)) return json(res, 400, { error: 'That plan was not recognized.' });
       return json(res, 200, publicUser(user));
+    }
+
+    if (method === 'PUT' && pathname === '/api/call-setup') {
+      if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
+      const body = await readJson(req);
+      if (!engine.setCallSetup(user, body)) return json(res, 400, { error: 'That engine and turn mode were not recognized.' });
+      return json(res, 200, publicUser(user));
+    }
+
+    if (method === 'GET' && pathname === '/api/admin/calls') {
+      if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
+      return json(res, 200, { calls: engine.callLog() });
     }
 
     if (method === 'PUT' && pathname === '/api/turn-mode') {
@@ -431,6 +446,19 @@ export function createApp({ engine, openai, config }) {
       return json(res, 200, { saved: engine.saveConversation(user, transcript[1], lines), recorded });
     }
 
+    // The two 1-5 taps after a call. Numbers only, like the timing numbers.
+    const ratingRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/rating$/);
+    if (method === 'POST' && ratingRoute) {
+      const rating = cleanRating(await readJson(req));
+      if (!rating) return json(res, 400, { error: 'Ratings are whole numbers from 1 to 5.' });
+      const record = engine.saveRating(user, ratingRoute[1], rating);
+      if (!record) return json(res, 404, { error: 'Call not found.' });
+      const recordedCall = engine.recordedCall(user, ratingRoute[1]);
+      if (recordedCall) recordings.saveRating(engine.recordingInfo(user, recordedCall), rating);
+      console.log(`call-rating ${JSON.stringify(record)}`);
+      return json(res, 201, {});
+    }
+
     // The call's audio, both voices, uploaded by the phone after a recorded call.
     const recordingUpload = pathname.match(/^\/api\/calls\/([\w-]+)\/recording$/);
     if (method === 'POST' && recordingUpload) {
@@ -467,6 +495,7 @@ export function createApp({ engine, openai, config }) {
         maxSeconds: details.maxSeconds,
         hangUpLines: details.calledBack ? [] : Object.values(NOT_NOW_GOODBYES),
         question: details.question,
+        engine: details.engine,
         turnMode: details.turnMode,
         smartTurn: smartTurnRules(details.settings.thinkingTime),
       });

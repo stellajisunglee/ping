@@ -35,6 +35,8 @@ Pages are served "cross-origin isolated" (`Cross-Origin-Opener-Policy` and `Cros
 
 Tapping after the 10 seconds opens the voicemail, with the call-back button.
 
+After a call that connected, one page asks two quick questions, each answered with one tap from 1 to 5: how often Ping cut you off (1 never, 5 all the time), and how natural it felt (1 not at all, 5 like a real conversation). Done saves both; Skip saves nothing. They're stored as numbers with the account (`ratings`, the latest 200), logged as one `call-rating` line per call, and shown beside a recorded call on the admin Call recordings page.
+
 Calling a contact from Contacts or the voicemail rings for 3 seconds first ("Calling…", with Japan's ringback tone), then the call connects. Ending it while it rings cancels it before anything starts.
 
 On a call, the contact can explain a word in one short English sentence and save it to the user's stack, however the user asks ("what does X mean?", "what do you mean by X?", 「Xってどういう意味？」), even when the transcript misspells the word. Repeating the contact's word back as a question (「忙しい？」 right after it said 忙しい) counts as asking what it means, not as a question about the contact's day. If a word can't be saved, the contact is told why so it can try again with the word written properly. The contact never asks the same question more than twice in a row, and answers what the user asked first. It can also translate what it just said into English when the user didn't understand it (then ask again in simpler Japanese, never repeating the same sentence), and answer a question asked in English about Japanese language or culture in one or two short sentences. That includes "how do you say...?", which also saves the word, and it works even when the question is off the contact's topic. The answer comes as its own message, and the contact then picks the conversation back up in Japanese as a second message. The contact can also nudge the user back to Japanese when they say anything else in English, say 「ちょっとわかりません」 if they steer off topic, and change settings when asked in plain English. The screen shows a live transcript with `*added to stack*` for each new word (or `*already in your stack*` when it was saved before), and buttons for speaker, mute, speed and end call. The contact's words fade in as they're said, not when the text arrives. OpenAI writes a reply in about a second but takes several seconds to say it, and over WebRTC it sends no timing for single words, so the app paces the text from the speed setting and from how long earlier replies took to say. When the user cuts the contact off, OpenAI reports how much audio was heard, and the line is cut to about that point and ends with "…". A paid plan saves only what was heard.
@@ -43,7 +45,11 @@ Ping has a life of its own, so asking 「元気？」, 「今、何してる？�
 
 OpenAI stops the contact's audio as soon as the user makes a sound, and the app, not OpenAI, decides when the contact replies. If the user talked over the contact with only aizuchi, like うん or はい, the app waits for the transcript (usually under half a second), then has the contact carry on from where it was cut off instead of answering. Anything else, or a transcript that doesn't arrive within 1.5 seconds, gets a normal reply.
 
-**Smart Turn mode (admins only, for testing).** The phone, not OpenAI, decides when the user has finished talking:
+**Engines and turn detection, randomized per call.** Every call is assigned an engine and a turn detection mode when it first connects, at random but balanced per person: each call goes to the combination that person has had least (`comboCounts` on the account), so even a few calls each compare fairly. A reconnect keeps the same assignment. Today there's one engine, OpenAI `gpt-realtime`, and the random mix is silence and Smart Turn (`RANDOM_MIX` in `server/experiment.js`). Semantic stays out of the mix until it has had a few admin test calls. Admins can turn on "Choose them myself" in Manage Plan and pick an engine and turn mode for their own calls; those calls are marked `manual` and don't count toward the balance. Manage Calls tells everyone that conversations may feel different from call to call. New engines (Deepgram's Voice Agent, gpt-live-1, Pipecat) join `ENGINES` once built, and the mix only after a few admin test calls and a Privacy Policy update naming the new company. Engines that decide turns themselves have no turn mode, so theirs is blank.
+
+The **call log** keeps one entry per call that connected (`callLog` in the data file, the latest 5,000): the account's invite code and id, when, the engine, the turn mode it was assigned and the one it actually ended in (Smart Turn can fall back to silence), whether it was random or manual, and how it went: length, gap before replies, wait after the user stopped, suspected cut-offs, barge-ins, ignored aizuchi, turns, and the user's two ratings. Numbers and ids only. Admins see it under Settings, Admin tools, Call log. Deleting an account removes its entries.
+
+**Smart Turn mode.** The phone, not OpenAI, decides when the user has finished talking:
 - A call starts in silence mode while the phone loads Smart Turn, about 12 MB the first time and from the phone's cache after that. Once Smart Turn is loaded and hearing the microphone, the app switches OpenAI's own turn detection off.
 - Silero, a small voice detector, hears when the user starts and stops talking. After 0.2 seconds of quiet, Smart Turn v3.2 listens to the last 8 seconds and decides whether they've finished. If it says yes, the app ends the turn straight away. If it keeps saying "still thinking", the turn ends after 2.5 seconds of quiet anyway. On a `long` time to answer, Smart Turn has to be surer (a score of 0.7 instead of 0.5) and the backup waits 4 seconds.
 - When the user talks over the contact, the app stops the contact's audio itself, and OpenAI trims the reply to what was heard. The aizuchi rule above works the same way.
@@ -102,7 +108,8 @@ The invite code someone joins with decides which version they get. It can't be c
 | Calls recorded for review (see "Call recordings") | Always | Always. YC reviewers can turn it off |
 | Call recordings page (Settings, Admin tools) | Yes | No |
 | Calls a day | No limit | The plan's limit |
-| Turn detection | Can switch between silence, semantic and Smart Turn, on the plan page | Silence, the default |
+| Engine and turn detection | Randomized per call, or "Choose them myself" on the plan page | Randomized per call |
+| Call log (Settings, Admin tools) | Yes | No |
 | OpenAI out of credit | The call hangs up and says so, with where to add credit | The call behaves as before: it connects but the contact stays silent |
 
 The server enforces both limits. Accounts created before there were two codes are admins.
@@ -161,7 +168,8 @@ Other rules:
 | Cancellation window | 30 days | `CANCEL_WINDOW_MS` in `server/calls.js` |
 | Lookups per user per day (example sentences and a sentence's kanji words together) | 50 | `MAX_LOOKUPS_PER_DAY` in `server/calls.js` |
 | Extra pause time at slow speeds | | `SLOW_SPEED_PATIENCE` in `server/settings.js` |
-| `turnMode`: how Ping decides the user has finished talking | `silence` (OpenAI's `server_vad`) for everyone. Admins can switch their own to `semantic` (`semantic_vad`) or `smartTurn` (Smart Turn on the phone) | `TURN_MODES` and `SEMANTIC_EAGERNESS` in `server/tutor.js` |
+| Engines, and which engine and turn mode combinations calls are randomized across | `gpt-realtime` with silence or Smart Turn | `ENGINES` and `RANDOM_MIX` in `server/experiment.js` |
+| `turnMode`: how Ping decides the user has finished talking | `silence` (OpenAI's `server_vad`), `semantic` (`semantic_vad`) or `smartTurn` (Smart Turn on the phone) | `TURN_MODES` and `SEMANTIC_EAGERNESS` in `server/tutor.js` |
 | Smart Turn's timings: quiet before asking, the backup, and what counts as too slow | 0.2 s, 2.5 s, 0.6 s | `TURN` and `SLOW_DECISION_MS` in `public/turn-machine.js` |
 | Smart Turn's score and backup per time to answer | short 0.5 and 2 s, normal 0.5 and 2.5 s, long 0.7 and 4 s | `SMART_TURN_PATIENCE` in `server/tutor.js` |
 | Default speed and allowed range | 1.0, from 0.6 to 1.5 | `server/settings.js` |
@@ -196,7 +204,7 @@ Ping is for adults in the US, and the Privacy Policy and Terms in the app are dr
 
 - During a call, audio goes directly from the browser to OpenAI. Ping's server doesn't take part in the live call.
 - **Calls are recorded.** After each recorded call, the phone uploads the recording (both voices) and the transcript to Ping's server, where only admins can listen to them. They're kept until the user deletes their account. See "Call recordings". They're never sold, shared, or used to identify or copy anyone's voice.
-- At the end of a call, the app also sends timing numbers to the server to measure conversation quality.
+- At the end of a call, the app also sends timing numbers to the server to measure conversation quality, and the two 1-5 ratings if the user answers them. Both are numbers only.
 - In Smart Turn mode, the voice detector and Smart Turn run on the phone, and send no audio anywhere themselves. The call's recording is uploaded as above. Smart Turn adds only the same kind of timing numbers: how many turns Smart Turn or the backup ended, how long decisions and loading took, and whether the call fell back to silence mode.
 - Transcripts appear on the call screen. A recorded call's transcript is kept for review on any plan. On a paid plan, the text of the last 20 calls is also stored with the account to personalize later calls. A free-plan call that isn't recorded sends no transcript to the server.
 - The server stores each user's time zone, settings, plan, streak (with the day numbers of their last 14 practice days), contacts, stack, push subscription, voicemail list, recent call times, whether they've turned recording off, and which version of the Privacy Policy they've seen, in one JSON file. Calls are deleted from it after 7 days. Recordings are separate files (see "Call recordings").
@@ -217,6 +225,7 @@ Ping is for adults in the US, and the Privacy Policy and Terms in the app are dr
 - `server/push.js`: sends web pushes.
 - `server/store.js`: saves state to one JSON file.
 - `server/recordings.js`: call recordings and transcripts, as files outside the JSON store.
+- `server/experiment.js`: the engines, and the random mix each call's engine and turn mode come from.
 - `public/sw.js`: shows the ring and missed call notifications, and handles tapping them.
 - `public/voice.js`: the WebRTC call, including running the voice model's tools.
 - `public/aizuchi.js`: decides whether talking over the contact was only aizuchi, so the contact carries on instead of answering.
@@ -229,5 +238,6 @@ Ping is for adults in the US, and the Privacy Policy and Terms in the app are dr
 - `public/app.js`: signing up, Home, ringing and the call screen, with no framework or build step.
 - `public/stack.js`, `public/contacts.js`, `public/settings.js`: the other screens.
 - `public/lib.js`: what the screens share.
+- `evals/`: conversation evals. Scripted learner situations played against Ping's real instructions on OpenAI's Realtime model in text, scored by exact checks and a Claude judge, with tools to check the judge against your own labels. Runs only on a developer's computer and needs `ANTHROPIC_API_KEY` in `.env` for the judge. See `evals/README.md`.
 - `bench/`: a Python benchmark of end-of-turn detectors on Japanese learner speech. It runs only on a developer's computer and is never deployed. See `bench/README.md`.
 - `scripts/build-icons.js`: draws the "ping" logo into `public/icons`.

@@ -463,6 +463,7 @@ function beginCall(callId, contactName = 'Ping') {
   setMuted(false);
   show('call');
   let outOfCredit = false;
+  let connected = false;
   // Admins can keep a copy on the phone for demo videos. Accounts with recording on upload it for review.
   const keepOnPhone = recordCallsOn();
   const forReview = Boolean(state.me.recording?.on);
@@ -473,6 +474,7 @@ function beginCall(callId, contactName = 'Ping') {
     audio: $('remote-audio'),
     onStatus: (status, maxSeconds) => {
       if (status !== 'connected') return;
+      connected = true;
       $('tap-to-hear').hidden = true;
       startCountdown(maxSeconds);
       api(`/api/calls/${callId}/connected`, { method: 'POST' }).catch((error) => console.warn('Could not count the call', error));
@@ -511,10 +513,50 @@ function beginCall(callId, contactName = 'Ping') {
       await api(`/api/calls/${callId}/ended`, { method: 'POST' }).catch((error) => console.warn('Could not end the call', error));
       await saveTranscript(callId, forReview);
       await refresh().catch(() => {});
-      goHome();
-      notice(outOfCredit ? OUT_OF_CREDIT_NOTICE : endedNotice(reason));
+      const ended = outOfCredit ? OUT_OF_CREDIT_NOTICE : endedNotice(reason);
+      // A call that connected asks for a quick rating first. One that never connected has nothing to rate.
+      if (connected && !outOfCredit) askForRating(callId, ended);
+      else {
+        goHome();
+        notice(ended);
+      }
     },
   });
+}
+
+// After a call: two 1-5 taps on one page, sent to the server as numbers only.
+const RATING_QUESTIONS = { cutOffs: 'rate-cutoffs', naturalness: 'rate-natural' };
+let rating = null; // { callId, endedNotice, cutOffs, naturalness } while the page is open
+
+function askForRating(callId, endedNotice) {
+  rating = { callId, endedNotice, cutOffs: null, naturalness: null };
+  for (const [field, id] of Object.entries(RATING_QUESTIONS)) {
+    $(id).replaceChildren(
+      ...[1, 2, 3, 4, 5].map((value) => {
+        const button = el('button', { type: 'button', className: 'rating-choice', textContent: String(value) });
+        button.setAttribute('aria-pressed', 'false');
+        button.addEventListener('click', () => chooseRating(field, value));
+        return button;
+      }),
+    );
+  }
+  $('rate-done').disabled = true;
+  show('rate');
+}
+
+function chooseRating(field, value) {
+  rating[field] = value;
+  for (const button of $(RATING_QUESTIONS[field]).children) button.setAttribute('aria-pressed', String(Number(button.textContent) === value));
+  $('rate-done').disabled = !(rating.cutOffs && rating.naturalness);
+}
+
+function finishRating(send) {
+  if (!rating) return;
+  const { callId, endedNotice, cutOffs, naturalness } = rating;
+  rating = null;
+  if (send) api(`/api/calls/${callId}/rating`, { method: 'POST', body: { cutOffs, naturalness } }).catch((error) => console.warn('Could not save the rating', error));
+  goHome();
+  notice(endedNotice);
 }
 
 // What the caller hears while the phone rings: Japan's ringback, a low tone for 1 second in every 3.
@@ -582,6 +624,8 @@ function bindEvents() {
   $('answer-button').addEventListener('click', () => answer(ringingCallId));
   $('outgoing-cancel').addEventListener('click', cancelOutgoing);
   $('policy-notice-ok').addEventListener('click', dismissPolicyNotice);
+  $('rate-done').addEventListener('click', () => finishRating(true));
+  $('rate-skip').addEventListener('click', () => finishRating(false));
   $('home-call-button').addEventListener('click', () => callContact(homeContact()?.id ?? 'ping'));
   $('decline-button').addEventListener('click', decline);
   $('hangup-button').addEventListener('click', () => activeCall?.hangUp());

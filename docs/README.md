@@ -24,6 +24,8 @@ Ping phones Japanese learners for short speaking practice. It's a web app instal
 | [../README.md](../README.md) | The operating manual: behavior, plans, settings, privacy, deploy. Kept up to date with every behavior change. |
 | [turn-taking-plan.md](turn-taking-plan.md) | The six-session turn-taking build plan (Sessions 0–6), with what happened in each. |
 | [../bench/README.md](../bench/README.md), [../bench/RESULTS.md](../bench/RESULTS.md) | The end-of-turn benchmark: how to run it, and the results. |
+| [learning-metrics.md](learning-metrics.md) | Proposal: how to measure language learning in Ping, and why it's the moat. |
+| [../evals/README.md](../evals/README.md) | Conversation evals: scenarios, code checks, the Claude judge, and checking the judge against your labels. |
 | [spec-changes-and-suggestions.md](spec-changes-and-suggestions.md) | How the build differs from the original product spec, and UX and naturalness ideas. |
 
 ## Where everything lives
@@ -36,6 +38,7 @@ ping/
 │   └── vendor/    onnxruntime-web, which runs those models                           (deployed)
 ├── tests/         node --test, 226 tests
 ├── bench/         Python end-of-turn benchmark + labeled pauses              (in git, never deployed)
+├── evals/         Conversation evals with a Claude judge                     (in git, never deployed)
 ├── docs/          This folder: plans, decisions, roadmap
 ├── scripts/       Setup and icon drawing
 ├── lab/           Smart Turn browser spike + pasted call metrics              (local only, not in git)

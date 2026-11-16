@@ -1211,3 +1211,112 @@ textarea {
 .recording-lines .contact {
   color: var(--muted);
 }
+
+/* After a call: two 1-5 ratings */
+.rate-screen {
+  gap: 20px;
+}
+
+.rating {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 360px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.rating legend {
+  padding: 0;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.rating-choices {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+.rating-choice {
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rating-choice[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.rating-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.text-link {
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.recording-rating {
+  color: var(--text);
+}
+
+/* Admin: call log */
+.call-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.call-log-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.call-log-entry p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.call-log-entry dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.call-log-entry dt {
+  color: var(--muted);
+}
+
+.call-log-entry dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

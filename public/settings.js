@@ -218,21 +218,68 @@ async function renderInvites() {
 }
 
 // Admins only: which turn detector their own calls use, to compare the two.
+const comboName = ({ engine, turnMode }) => [state.me.callSetup?.engines[engine]?.name ?? engine, TURN_MODE_NAMES[turnMode]].filter(Boolean).join(' + ');
+
+async function changeCallSetup(change) {
+  try {
+    state.me = await api('/api/call-setup', { method: 'PUT', body: change });
+  } catch (error) {
+    setError('plan-clear', error.message);
+  }
+  renderTurnMode();
+}
+
+// Admins only: every caller is randomized across the mix, unless an admin picks for their own calls.
 function renderTurnMode() {
   $('turn-mode-section').hidden = !isAdmin();
-  if (!isAdmin()) return;
-  $('turn-mode-choices').replaceChildren(
-    ...Object.entries(TURN_MODE_NAMES).map(([turnMode, name]) =>
-      choiceButton(name, state.me.turnMode === turnMode, async () => {
-        try {
-          state.me = await api('/api/turn-mode', { method: 'PUT', body: { turnMode } });
-          renderTurnMode();
-        } catch (error) {
-          setError('plan-clear', error.message);
-        }
-      }),
-    ),
+  if (!isAdmin() || !state.me.callSetup) return;
+  const { manual, engine, turnMode, engines, randomMix } = state.me.callSetup;
+  $('call-setup-random').textContent = `Every caller's calls are randomized, balanced per person, across: ${randomMix.map(comboName).join(', ')}.`;
+  $('call-setup-manual').checked = manual;
+  $('call-setup-choices').hidden = !manual;
+  $('engine-choices').replaceChildren(...Object.entries(engines).map(([id, spec]) => choiceButton(spec.name, engine === id, () => changeCallSetup({ engine: id }))));
+  const modes = engines[engine]?.turnModes ?? [];
+  $('turn-mode-group').hidden = !modes.length;
+  $('turn-mode-choices').replaceChildren(...modes.map((mode) => choiceButton(TURN_MODE_NAMES[mode] ?? mode, turnMode === mode, () => changeCallSetup({ turnMode: mode }))));
+}
+
+const durationText = (seconds) => (seconds == null ? '' : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
+const secondsText = (ms) => (ms == null ? '-' : `${(ms / 1000).toFixed(1)} s`);
+
+// One call in the admin call log. The turn mode is blank for engines that decide turns themselves.
+function callLogRow(entry) {
+  const when = new Date(entry.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const who = `${ACCOUNT_KINDS[entry.joinedWith] ?? entry.joinedWith ?? ''} ${entry.userId.slice(0, 6)}`;
+  const mode = TURN_MODE_NAMES[entry.turnMode] ?? '';
+  const fellBack = entry.actualTurnMode && entry.actualTurnMode !== entry.turnMode ? ` → ${TURN_MODE_NAMES[entry.actualTurnMode] ?? entry.actualTurnMode}` : '';
+  const facts = [
+    ['Engine', state.me.callSetup?.engines[entry.engine]?.name ?? entry.engine],
+    ['Turn detection', `${mode}${fellBack}`],
+    ['Assigned', entry.assigned ?? ''],
+    ['Length', durationText(entry.seconds)],
+    ['Gap before reply', secondsText(entry.replyGapMedianMs)],
+    ['Suspected cut-offs', entry.suspectedCutoffs ?? '-'],
+    ['Rating', entry.cutOffs ? `cut-offs ${entry.cutOffs}/5, natural ${entry.naturalness}/5` : '-'],
+  ];
+  return el(
+    'li',
+    { className: 'call-log-entry' },
+    el('p', {}, el('strong', { textContent: when }), el('span', { className: 'muted', textContent: ` ${who}${entry.recorded ? ' · recorded' : ''}` })),
+    el('dl', {}, ...facts.flatMap(([term, value]) => [el('dt', { textContent: term }), el('dd', { textContent: String(value) })])),
   );
+}
+
+async function renderCallLog() {
+  setError('call-log-error', null);
+  const list = $('call-log-list');
+  list.replaceChildren(el('li', { className: 'muted', textContent: 'Loading…' }));
+  try {
+    const { calls } = await api('/api/admin/calls');
+    list.replaceChildren(...(calls.length ? calls.map(callLogRow) : [el('li', { className: 'muted', textContent: 'No calls yet.' })]));
+  } catch (error) {
+    list.replaceChildren();
+    setError('call-log-error', error.message);
+  }
 }
 
 async function deleteAccount() {
@@ -304,7 +351,13 @@ function recordingRow(call) {
   const details = el(
     'details',
     { className: 'recording' },
-    el('summary', {}, el('strong', { textContent: `${when}${callLength(call.seconds)}` }), el('span', { className: 'muted', textContent: ` ${who} · ${call.contactName} · ${call.turnMode ?? 'silence'}` })),
+    el(
+      'summary',
+      {},
+      el('strong', { textContent: `${when}${callLength(call.seconds)}` }),
+      el('span', { className: 'muted', textContent: ` ${who} · ${call.contactName} · ${[call.engine ?? 'gpt-realtime', TURN_MODE_NAMES[call.turnMode]].filter(Boolean).join(' + ')}` }),
+      call.rating ? el('span', { className: 'recording-rating', textContent: ` · cut-offs ${call.rating.cutOffs}/5, natural ${call.rating.naturalness}/5` }) : '',
+    ),
   );
   let loaded = false;
   details.addEventListener('toggle', async () => {
@@ -349,6 +402,7 @@ export function initSettings() {
   onShow('settings', renderSettings);
   onShow('account', renderAccount);
   onShow('recordings', renderRecordings);
+  onShow('call-log', renderCallLog);
   onShow('manage-calls', renderManageCalls);
   onShow('plan', renderPlan);
   onShow('feedback', () => {
@@ -375,6 +429,7 @@ export function initSettings() {
   $('save-recording-button').addEventListener('click', saveRecording);
   $('delete-button').addEventListener('click', deleteAccount);
   $('recording-input').addEventListener('change', (event) => changeRecording(event.target.checked));
+  $('call-setup-manual').addEventListener('change', (event) => changeCallSetup({ manual: event.target.checked }));
   $('feedback-form').addEventListener('submit', sendFeedback);
   $('plan-button').addEventListener('click', () => go('plan'));
 }

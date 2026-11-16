@@ -9,6 +9,7 @@ export class Store {
     this.users = {};
     this.calls = {};
     this.feedback = [];
+    this.callLog = []; // one entry per call that connected: which engine and turn mode, and how it went (numbers only)
     if (!file) return;
     mkdirSync(dirname(file), { recursive: true });
     try {
@@ -16,6 +17,7 @@ export class Store {
       this.users = saved.users ?? {};
       this.calls = saved.calls ?? {};
       this.feedback = saved.feedback ?? [];
+      this.callLog = saved.callLog ?? [];
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
@@ -25,7 +27,7 @@ export class Store {
   save() {
     if (!this.file) return;
     const temp = `${this.file}.tmp`;
-    writeFileSync(temp, JSON.stringify({ users: this.users, calls: this.calls, feedback: this.feedback }));
+    writeFileSync(temp, JSON.stringify({ users: this.users, calls: this.calls, feedback: this.feedback, callLog: this.callLog }));
     renameSync(temp, this.file);
   }
 }

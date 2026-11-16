@@ -72,6 +72,13 @@ export class Recordings {
     return true;
   }
 
+  // Adds the user's after-call rating to a recorded call, so reviews can start with the worst-rated.
+  saveRating(info, rating) {
+    if (!this.#valid(info)) return false;
+    this.#saveInfo(info, { rating });
+    return true;
+  }
+
   // Every recorded call, newest first, without the transcripts.
   list() {
     if (!existsSync(this.dir)) return [];

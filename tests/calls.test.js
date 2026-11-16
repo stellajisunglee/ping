@@ -749,3 +749,14 @@ test('an ended call cannot be reopened', () => {
   assert.equal(context.engine.endCall(context.user, call.id), true);
   assert.throws(() => context.engine.sessionDetails(context.user, call.id), LimitError);
 });
+
+test('random assignment goes to the least-used combination, and only real combinations are valid', async () => {
+  const { pickCombo, validCombo, comboKey, RANDOM_MIX } = await import('../server/experiment.js');
+  assert.deepEqual(pickCombo({ 'gpt-realtime|silence': 3, 'gpt-realtime|smartTurn': 1 }, () => 0), { engine: 'gpt-realtime', turnMode: 'smartTurn' });
+  const first = RANDOM_MIX.map((combo) => comboKey(pickCombo({}, () => RANDOM_MIX.indexOf(combo) / RANDOM_MIX.length)));
+  assert.deepEqual(first, RANDOM_MIX.map(comboKey), 'with no history, any combination can come first');
+  assert.equal(pickCombo({}, () => 0.9999).engine, 'gpt-realtime');
+  assert.equal(validCombo({ engine: 'gpt-realtime', turnMode: 'semantic' }), true);
+  assert.equal(validCombo({ engine: 'gpt-realtime', turnMode: null }), false);
+  assert.equal(validCombo({ engine: 'nope', turnMode: 'silence' }), false);
+});

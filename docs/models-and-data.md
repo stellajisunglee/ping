@@ -9,6 +9,7 @@
 | **OpenAI `gpt-realtime`** | The call itself: hears audio, replies in audio | OpenAI, over WebRTC from the phone | `REALTIME_MODEL` | Speech-to-speech hears tone and hesitation directly, and gives natural rhythm in one hop |
 | Voice `marin` | Ping's voice | OpenAI | `REALTIME_VOICE`, or per contact in `server/contacts.js` | Chosen by ear |
 | **`gpt-transcribe`** | Writes down what the user said, for the screen and saved words. The model doesn't read it | OpenAI | `TRANSCRIPTION_MODEL` in `server/tutor.js` | Japanese and English in one stream |
+| **Claude `claude-opus-5-5`** | Eval judge: scores scripted conversations against `evals/rubric.json` | Anthropic, from your computer only | `evals/judge.js` | A different family from Ping's model, so it isn't grading its own family's writing |
 | **OpenAI `server_vad` / `semantic_vad`** | Deciding the user has finished (silence and semantic modes) | OpenAI | `TURN_MODES` in `server/tutor.js` | Silence is the demo default: predictable |
 | **Silero VAD** | Hears speech start and stop (Smart Turn mode) | The phone (onnxruntime-web) | `public/models/` | Small and fast |
 | **Smart Turn v3.2** | "Still thinking or done?" from the last 8 s of audio | The phone, about 230 ms per decision on an iPhone | `public/models/`, `SMART_TURN_PATIENCE` | Fewest cut-offs on the benchmark, free, and audio stays on the phone |
@@ -36,7 +37,7 @@ These are for the Deepgram interview work and the engine comparison. See [roadma
 | 2 | **Call recordings and transcripts** | Both voices and the heard transcript of every recorded call, from testers and admins (and YC reviewers who leave it on) | `DATA_DIR/recordings/` on the Render disk. Admin page: Settings, Admin tools, Call recordings | 🟡 **New (Nov 14).** This is the raw material for transcript review, quality labels, evals and more labeled pauses. Disk space is limited |
 | 3 | **Per-call timing numbers** | Reply gap, wait after the user stops, cut-offs, barge-ins, ignored aizuchi, Smart Turn and backup counts, fallbacks | Render logs (`turn-metrics` lines). A local copy is in `lab/call-metrics.log` | 🟡 About 10 real calls, all yours. Log retention on Render is short, so copy lines out regularly |
 | 4 | **Conversation rules and persona** | Ping's ten call rules, the four tools, Ping's week | `server/tutor.js`, `server/persona.js` | 🟢 Versioned in git and tested. They're the product's conversation design, written as code |
-| 5 | **Quality labels** | Whether a call was good: cut off? did repair work? stayed at the learner's level? | Doesn't exist yet | 🔴 **Missing.** Needed for evals and for revisiting adaptive patience |
+| 5 | **Quality labels** | Whether a call was good: the user's two 1-5 ratings after each call (cut-offs, naturalness), and judge verdicts on scripted scenarios | `ratings` on each account, `call-rating` log lines, `evals/runs/` | 🟡 **Started (Nov 15).** Ratings come from testers. Judge verdicts need checking against your own labels before they're trusted |
 | 6 | User state | Settings, plan, streak with 14 practice days, stack, voicemails, paid-plan memories | `data/ping.json` on the Render disk | 🟢 Works. Privacy rules apply (below) |
 | 7 | Benchmark results | Cut-off rate, catch rate and time per detector | `bench/results.csv`, `bench/RESULTS.md` | 🟢 Reproducible with `bench/run.py` |
 

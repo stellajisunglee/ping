@@ -196,6 +196,7 @@
         <button id="save-recording-button" class="secondary wide" type="button" hidden>Save last call's recording</button>
         <p id="recording-status" class="muted" role="status" hidden></p>
         <button class="secondary wide" type="button" data-go="recordings">Call recordings</button>
+        <button class="secondary wide" type="button" data-go="call-log">Call log</button>
       </section>
     </main>
 
@@ -216,6 +217,7 @@
       <button class="back" type="button" data-back>‹ Contacts</button>
       <h1>Manage Calls</h1>
       <p class="muted">On a call, you can also just ask: "can you slow down?" or "give me more time to answer."</p>
+      <p class="muted">Conversations may feel different from call to call.</p>
       <p id="calls-error" class="error" role="alert" hidden></p>
       <div class="setting">
         <label for="language-input">Target language</label>
@@ -279,9 +281,22 @@
       <div id="plan-choices" class="plan-choices"></div>
       <p id="plan-cancel-note" class="muted">If you move to a smaller plan, your stack keeps everything for 30 days. After that it keeps your newest words and sentences, up to the new plan's limit.</p>
       <section id="turn-mode-section" class="stack full" aria-labelledby="turn-mode-title" hidden>
-        <h2 id="turn-mode-title">Turn detection (admin testing)</h2>
-        <p class="muted">How Ping decides you've finished talking: after a set silence, from what you said, or with Smart Turn listening on this phone (downloads about 12 MB once). Applies from your next call.</p>
-        <div id="turn-mode-choices" class="choices"></div>
+        <h2 id="turn-mode-title">Engine and turn detection (admin testing)</h2>
+        <p id="call-setup-random" class="muted"></p>
+        <div class="setting row">
+          <label for="call-setup-manual">Choose them myself</label>
+          <input id="call-setup-manual" type="checkbox" role="switch" />
+        </div>
+        <div id="call-setup-choices" class="stack" hidden>
+          <span class="label">Engine</span>
+          <div id="engine-choices" class="choices"></div>
+          <div id="turn-mode-group" class="stack">
+            <span class="label">Turn detection</span>
+            <p class="muted">How Ping decides you've finished talking: after a set silence, from what you said, or with Smart Turn listening on this phone (downloads about 12 MB once).</p>
+            <div id="turn-mode-choices" class="choices"></div>
+          </div>
+        </div>
+        <p class="muted">Applies from your next call. The Call log in Settings shows what each call used.</p>
       </section>
       <section id="invites-section" class="stack full" aria-labelledby="invites-title" hidden>
         <h2 id="invites-title">Invite codes (admins only)</h2>
@@ -334,6 +349,14 @@
       <p>Paid plans are in test mode, and nothing is charged.</p>
     </main>
 
+    <main id="screen-call-log" class="screen tabbed" hidden>
+      <button class="back" type="button" data-back>‹ Settings</button>
+      <h1>Call log</h1>
+      <p class="muted">Every call that connected, newest first: the engine and turn detection it used, and how it went. Turn detection is blank for engines that decide turns themselves. Only admins can see this page.</p>
+      <p id="call-log-error" class="error" role="alert" hidden></p>
+      <ol id="call-log-list" class="call-log"></ol>
+    </main>
+
     <main id="screen-recordings" class="screen tabbed" hidden>
       <button class="back" type="button" data-back>‹ Settings</button>
       <h1>Call recordings</h1>
@@ -352,6 +375,22 @@
         <p id="feedback-error" class="error" role="alert" hidden></p>
         <p id="feedback-sent" role="status" hidden>Thanks, that's been sent.</p>
       </form>
+    </main>
+
+    <main id="screen-rate" class="screen centered rate-screen" hidden>
+      <h1>How was the call?</h1>
+      <fieldset class="rating" aria-describedby="rate-cutoffs-scale">
+        <legend>How often did Ping cut you off?</legend>
+        <div id="rate-cutoffs" class="rating-choices"></div>
+        <p id="rate-cutoffs-scale" class="rating-scale"><span>1 Never</span><span>5 All the time</span></p>
+      </fieldset>
+      <fieldset class="rating" aria-describedby="rate-natural-scale">
+        <legend>How natural did it feel?</legend>
+        <div id="rate-natural" class="rating-choices"></div>
+        <p id="rate-natural-scale" class="rating-scale"><span>1 Not at all</span><span>5 Like a real conversation</span></p>
+      </fieldset>
+      <button id="rate-done" class="primary wide" type="button" disabled>Done</button>
+      <button id="rate-skip" class="text-link" type="button">Skip</button>
     </main>
 
     <main id="screen-ringing" class="screen centered phone" hidden>
