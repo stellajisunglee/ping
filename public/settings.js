@@ -278,19 +278,15 @@ export function showScenarioPanel(callId, scenarioId) {
   $('scenario-panel-title').textContent = `Test: ${scenario.name}`;
   const results = {};
   const checkpointRow = (checkpoint) => {
-    const buttons = el('div', { className: 'choices' });
-    const render = () =>
-      buttons.replaceChildren(
-        ...['pass', 'fail', 'unclear'].map((result) =>
-          choiceButton(result, results[checkpoint.id] === result, () => {
-            results[checkpoint.id] = results[checkpoint.id] === result ? null : result;
-            render();
-            api(`/api/admin/calls/${callId}/checks`, { method: 'PUT', body: { checkpointId: checkpoint.id, result: results[checkpoint.id] } }).catch((error) => console.warn('Could not save the check', error));
-          }),
-        ),
-      );
-    render();
-    return el('li', {}, el('p', { textContent: checkpoint.text }), buttons);
+    // Nothing pressed means not answered yet. Tapping the pressed result again clears it.
+    const buttons = ['pass', 'fail', 'unclear'].map((result) =>
+      choiceButton(result, false, () => {
+        results[checkpoint.id] = results[checkpoint.id] === result ? null : result;
+        for (const button of buttons) button.setAttribute('aria-pressed', String(button.textContent === results[checkpoint.id]));
+        api(`/api/admin/calls/${callId}/checks`, { method: 'PUT', body: { checkpointId: checkpoint.id, result: results[checkpoint.id] } }).catch((error) => console.warn('Could not save the check', error));
+      }),
+    );
+    return el('li', {}, el('p', { textContent: checkpoint.text }), el('div', { className: 'choices' }, ...buttons));
   };
   $('scenario-panel-body').replaceChildren(
     el('p', { className: 'scenario-example', lang: 'ja', textContent: scenario.example }),

@@ -12,13 +12,13 @@ export const SCENARIOS = [
     name: 'Weekend Plans',
     questionId: 'weekend',
     focus: 'Thinking pauses, turn completion and follow-up questions that use what you said.',
-    example: '週末は……えーっと……友達と……鎌倉に行ったんだ。',
+    example: '今週末は……えーっと……友達と……鎌倉に行く予定なんだ。',
     actions: [
-      'Mention a trip to Kamakura.',
+      'Mention a planned trip to Kamakura.',
       'Pause for about three seconds mid-sentence, then finish the sentence.',
       'Carry on naturally for two or three exchanges.',
     ],
-    note: 'Ping asks about this coming weekend. Talking about a past outing still works, as above, or say 行くんだ for a plan.',
+    note: 'Ping asks about this coming weekend, so answer with a plan.',
     checkpoints: [
       { id: 'no-interrupt', text: "Ping didn't interrupt the unfinished sentence." },
       { id: 'uses-answer', text: 'Ping responded to what you actually said.' },
