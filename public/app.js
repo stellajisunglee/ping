@@ -1,7 +1,7 @@
 import { initContacts } from './contacts.js';
 import { charsSaid, createPace } from './reveal.js';
 import { $, api, clearWarning, el, enableSwipeBack, go, goBack, initialOf, isAdmin, isPaid, onShow, readToken, refresh, setError, show, showCallingNote, showPlanBadge, state, upload, writeToken } from './lib.js';
-import { initSettings, keepRecording, recordCallsOn } from './settings.js';
+import { initSettings, keepRecording, recordCallsOn, showScenarioPanel } from './settings.js';
 import { audioUnlocked, startRingtone, unlockAudio } from './ringtone.js';
 import { initStack, renderStackTiles } from './stack.js';
 import { failedCallNotice, startCall } from './voice.js';
@@ -262,8 +262,8 @@ async function answer(callId) {
   stopRinging();
   closeNotifications();
   try {
-    const { state: callState, contactName } = await api(`/api/calls/${callId}/answer`, { method: 'POST' });
-    if (callState === 'answered') return beginCall(callId, contactName);
+    const { state: callState, contactName, scenarioId } = await api(`/api/calls/${callId}/answer`, { method: 'POST' });
+    if (callState === 'answered') return beginCall(callId, contactName, scenarioId);
     await refresh();
     goHome();
     notice(callState === 'missed' ? `You just missed ${contactName}, who left a voice message.` : 'That call has ended.');
@@ -458,13 +458,15 @@ async function saveTranscript(callId, recorded) {
   await api(`/api/calls/${callId}/transcript`, { method: 'POST', body: { lines } }).catch((error) => console.warn('Could not save the conversation', error));
 }
 
-function beginCall(callId, contactName = 'Ping') {
+// scenarioId: an admin's controlled test call, which shows its checklist above the transcript.
+function beginCall(callId, contactName = 'Ping', scenarioId = null) {
   transcript = new Map();
   pace = createPace();
   clearInterval(revealTimer);
   revealTimer = null;
   activeCallId = callId;
   $('call-transcript').replaceChildren();
+  showScenarioPanel(callId, scenarioId);
   $('tap-to-hear').hidden = true;
   $('call-name').textContent = contactName;
   $('call-avatar').textContent = initialOf(contactName);
@@ -608,8 +610,8 @@ function callContact(contactId) {
     stopTone();
     outgoing = null;
     try {
-      const { id, contactName: name } = await api('/api/calls', { method: 'POST', body: { contactId } });
-      beginCall(id, name);
+      const { id, contactName: name, scenarioId } = await api('/api/calls', { method: 'POST', body: { contactId } });
+      beginCall(id, name, scenarioId);
     } catch (error) {
       goHome();
       notice(error.message);

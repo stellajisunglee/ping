@@ -10,6 +10,7 @@ export class Store {
     this.calls = {};
     this.feedback = [];
     this.callLog = []; // one entry per call that connected: which engine and turn mode, and how it went (numbers only)
+    this.scenarioChecks = []; // admins' pass, fail or unclear for each checkpoint of a controlled test call
     if (!file) return;
     mkdirSync(dirname(file), { recursive: true });
     try {
@@ -18,6 +19,7 @@ export class Store {
       this.calls = saved.calls ?? {};
       this.feedback = saved.feedback ?? [];
       this.callLog = saved.callLog ?? [];
+      this.scenarioChecks = saved.scenarioChecks ?? [];
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
@@ -27,7 +29,7 @@ export class Store {
   save() {
     if (!this.file) return;
     const temp = `${this.file}.tmp`;
-    writeFileSync(temp, JSON.stringify({ users: this.users, calls: this.calls, feedback: this.feedback, callLog: this.callLog }));
+    writeFileSync(temp, JSON.stringify({ users: this.users, calls: this.calls, feedback: this.feedback, callLog: this.callLog, scenarioChecks: this.scenarioChecks }));
     renameSync(temp, this.file);
   }
 }

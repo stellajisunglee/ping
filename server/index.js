@@ -10,6 +10,7 @@ import { Store } from './store.js';
 import { CallEngine, cleanRating, cleanTranscript, LimitError, PlanError, policyNoticeFor, recordingLocked, recordsCalls } from './calls.js';
 import { audioExtension, Recordings } from './recordings.js';
 import { callConfig, ENGINES, RANDOM_MIX } from './experiment.js';
+import { SCENARIOS } from './scenarios.js';
 import { AGENT_URL, agentListen, agentSettings, agentSpeak, createDeepgram } from './deepgram.js';
 import { PING, PLAN_LIMITS } from './contacts.js';
 import { createPushSender } from './push.js';
@@ -204,11 +205,12 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       planLimits: PLAN_LIMITS,
       recording: { on: recordsCalls(user), canTurnOff: !recordingLocked(user) },
       policyNotice: policyNoticeFor(user.policyVersion), // null, or what changed since the policy they last saw
-      ...(user.role === 'admin' ? { callSetup: { manual: user.callSetupManual, engine: user.engine, turnMode: user.turnMode, engines: ENGINES, randomMix: RANDOM_MIX } } : {}),
+      ...(user.role === 'admin' ? { callSetup: { manual: user.callSetupManual, engine: user.engine, turnMode: user.turnMode, engines: ENGINES, randomMix: RANDOM_MIX, topicMode: user.topicMode, scenarioId: user.scenarioId, scenarios: SCENARIOS } } : {}),
     };
   }
 
-  const callState = (call) => ({ id: call.id, state: call.state, contactName: engine.contactNameOf(call) });
+  // scenarioId is set only on an admin's controlled test call, so the phone can show its checklist.
+  const callState = (call) => ({ id: call.id, state: call.state, contactName: engine.contactNameOf(call), ...(call.scenarioId ? { scenarioId: call.scenarioId } : {}) });
 
   async function handleApi(req, res, pathname) {
     const { method } = req;
@@ -336,9 +338,26 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       return json(res, 200, publicUser(user));
     }
 
+    if (method === 'PUT' && pathname === '/api/topic-setup') {
+      if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
+      const body = await readJson(req);
+      if (!engine.setTopicSetup(user, body)) return json(res, 400, { error: 'That topic mode and scenario were not recognized.' });
+      return json(res, 200, publicUser(user));
+    }
+
     if (method === 'GET' && pathname === '/api/admin/calls') {
       if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
-      return json(res, 200, { calls: engine.callLog() });
+      return json(res, 200, { calls: engine.callLog(), scenarioChecks: engine.scenarioChecks() });
+    }
+
+    const checkRoute = pathname.match(/^\/api\/admin\/calls\/([\w-]+)\/checks$/);
+    if (method === 'PUT' && checkRoute) {
+      if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
+      const body = await readJson(req);
+      const saved = engine.saveScenarioCheck(user, checkRoute[1], { checkpointId: body.checkpointId, result: body.result ?? null });
+      if (saved === null) return json(res, 404, { error: 'No test scenario call found.' });
+      if (!saved) return json(res, 400, { error: 'That checkpoint and result were not recognized.' });
+      return json(res, 200, { ok: true });
     }
 
     if (method === 'PUT' && pathname === '/api/turn-mode') {

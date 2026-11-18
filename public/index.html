@@ -296,6 +296,14 @@
             <div id="turn-mode-choices" class="choices"></div>
           </div>
         </div>
+        <span class="label">Call topic mode</span>
+        <div id="topic-mode-choices" class="choices"></div>
+        <div id="scenario-group" class="stack" hidden>
+          <label for="scenario-input">Test scenario</label>
+          <select id="scenario-input"></select>
+          <p id="scenario-focus" class="muted"></p>
+          <p class="muted">Every call opens with this scenario's question, on whichever engine and turn detection above. A checklist shows on the call screen. Ping is never told about the test.</p>
+        </div>
         <p class="muted">Applies from your next call. The Call log in Settings shows what each call used.</p>
       </section>
       <section id="invites-section" class="stack full" aria-labelledby="invites-title" hidden>
@@ -420,6 +428,10 @@
           <p id="call-status" class="muted" role="status"></p>
         </div>
       </header>
+      <details id="scenario-panel" class="scenario-panel" hidden>
+        <summary id="scenario-panel-title"></summary>
+        <div id="scenario-panel-body" class="stack"></div>
+      </details>
       <div id="call-transcript" class="transcript" aria-live="polite"></div>
       <button id="tap-to-hear" class="primary" type="button" hidden>Tap to hear Ping</button>
       <p id="call-hint" class="call-hint" role="status" hidden></p>

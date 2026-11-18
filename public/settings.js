@@ -180,6 +180,7 @@ function renderPlan() {
     }),
   );
   renderTurnMode();
+  renderTopicSetup();
   renderInvites();
 }
 
@@ -243,6 +244,63 @@ function renderTurnMode() {
   $('turn-mode-choices').replaceChildren(...modes.map((mode) => choiceButton(TURN_MODE_NAMES[mode] ?? mode, turnMode === mode, () => changeCallSetup({ turnMode: mode }))));
 }
 
+async function changeTopicSetup(change) {
+  try {
+    state.me = await api('/api/topic-setup', { method: 'PUT', body: change });
+  } catch (error) {
+    setError('plan-clear', error.message);
+  }
+  renderTopicSetup();
+}
+
+// Admins only: random opening questions, as everyone gets, or one test scenario's question on every call.
+function renderTopicSetup() {
+  if (!isAdmin() || !state.me.callSetup?.scenarios) return;
+  const { topicMode, scenarioId, scenarios } = state.me.callSetup;
+  const controlled = topicMode === 'controlled';
+  $('topic-mode-choices').replaceChildren(
+    choiceButton('Randomized call topics', !controlled, () => changeTopicSetup({ topicMode: 'randomized' })),
+    choiceButton('Controlled call topics', controlled, () => changeTopicSetup({ topicMode: 'controlled' })),
+  );
+  $('scenario-group').hidden = !controlled;
+  const selected = scenarios.find((scenario) => scenario.id === scenarioId) ?? scenarios[0];
+  $('scenario-input').replaceChildren(...scenarios.map((scenario) => el('option', { value: scenario.id, textContent: scenario.name, selected: scenario.id === selected.id })));
+  $('scenario-focus').textContent = selected.focus;
+}
+
+// The checklist on an admin's controlled test call. Each tap is saved straight away, apart from the call's rating.
+// Collapsed to one line until opened, and never touches the call itself.
+export function showScenarioPanel(callId, scenarioId) {
+  const scenario = isAdmin() && scenarioId ? state.me.callSetup?.scenarios?.find((candidate) => candidate.id === scenarioId) : null;
+  $('scenario-panel').hidden = !scenario;
+  $('scenario-panel').open = false;
+  if (!scenario) return;
+  $('scenario-panel-title').textContent = `Test: ${scenario.name}`;
+  const results = {};
+  const checkpointRow = (checkpoint) => {
+    const buttons = el('div', { className: 'choices' });
+    const render = () =>
+      buttons.replaceChildren(
+        ...['pass', 'fail', 'unclear'].map((result) =>
+          choiceButton(result, results[checkpoint.id] === result, () => {
+            results[checkpoint.id] = results[checkpoint.id] === result ? null : result;
+            render();
+            api(`/api/admin/calls/${callId}/checks`, { method: 'PUT', body: { checkpointId: checkpoint.id, result: results[checkpoint.id] } }).catch((error) => console.warn('Could not save the check', error));
+          }),
+        ),
+      );
+    render();
+    return el('li', {}, el('p', { textContent: checkpoint.text }), buttons);
+  };
+  $('scenario-panel-body').replaceChildren(
+    el('p', { className: 'scenario-example', lang: 'ja', textContent: scenario.example }),
+    el('ul', {}, ...scenario.actions.map((action) => el('li', { textContent: action }))),
+    ...(scenario.note ? [el('p', { className: 'muted', textContent: scenario.note })] : []),
+    el('span', { className: 'label', textContent: 'Expected' }),
+    el('ol', { className: 'scenario-checks' }, ...scenario.checkpoints.map(checkpointRow)),
+  );
+}
+
 const durationText = (seconds) => (seconds == null ? '' : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`);
 const secondsText = (ms) => (ms == null ? '-' : `${(ms / 1000).toFixed(1)} s`);
 
@@ -261,8 +319,17 @@ export function turnFacts(entry) {
   ];
 }
 
+// Which opening question a call got: at random, or a test scenario's, with the admin's checklist results.
+// Entries from before topic modes say -.
+export function topicText(entry, checks = [], scenarios = []) {
+  if (entry.topicMode !== 'controlled') return entry.topicMode === 'randomized' ? 'Randomized' : '-';
+  const name = scenarios.find((scenario) => scenario.id === entry.scenarioId)?.name ?? entry.scenarioId;
+  const counts = ['pass', 'fail', 'unclear'].map((result) => [result, checks.filter((check) => check.result === result).length]).filter(([, count]) => count);
+  return `Controlled: ${name}${counts.length ? ` (${counts.map(([result, count]) => `${count} ${result}`).join(', ')})` : ''}`;
+}
+
 // One call in the admin call log. The turn mode is blank for engines that decide turns themselves.
-function callLogRow(entry) {
+function callLogRow(entry, checks = []) {
   const when = new Date(entry.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const who = `${ACCOUNT_KINDS[entry.joinedWith] ?? entry.joinedWith ?? ''} ${entry.userId.slice(0, 6)}`;
   const mode = TURN_MODE_NAMES[entry.turnMode] ?? '';
@@ -271,6 +338,7 @@ function callLogRow(entry) {
     ['Engine', state.me.callSetup?.engines[entry.engine]?.name ?? entry.engine],
     ['Turn detection', `${mode}${fellBack}`],
     ['Assigned', entry.assigned ?? ''],
+    ['Topic', topicText(entry, checks, state.me.callSetup?.scenarios)],
     ['Length', durationText(entry.seconds)],
     ...turnFacts(entry),
     ['Rating', entry.cutOffs ? `cut-offs ${entry.cutOffs}/5, natural ${entry.naturalness}/5` : '-'],
@@ -288,8 +356,9 @@ async function renderCallLog() {
   const list = $('call-log-list');
   list.replaceChildren(el('li', { className: 'muted', textContent: 'Loading…' }));
   try {
-    const { calls } = await api('/api/admin/calls');
-    list.replaceChildren(...(calls.length ? calls.map(callLogRow) : [el('li', { className: 'muted', textContent: 'No calls yet.' })]));
+    const { calls, scenarioChecks = [] } = await api('/api/admin/calls');
+    const checksFor = (entry) => scenarioChecks.filter((check) => check.callId === entry.callId);
+    list.replaceChildren(...(calls.length ? calls.map((entry) => callLogRow(entry, checksFor(entry))) : [el('li', { className: 'muted', textContent: 'No calls yet.' })]));
   } catch (error) {
     list.replaceChildren();
     setError('call-log-error', error.message);
@@ -444,6 +513,7 @@ export function initSettings() {
   $('delete-button').addEventListener('click', deleteAccount);
   $('recording-input').addEventListener('change', (event) => changeRecording(event.target.checked));
   $('call-setup-manual').addEventListener('change', (event) => changeCallSetup({ manual: event.target.checked }));
+  $('scenario-input').addEventListener('change', (event) => changeTopicSetup({ scenarioId: event.target.value }));
   $('feedback-form').addEventListener('submit', sendFeedback);
   $('plan-button').addEventListener('click', () => go('plan'));
 }

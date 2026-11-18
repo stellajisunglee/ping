@@ -10,6 +10,7 @@ import { applySettings, DEFAULT_SETTINGS } from './settings.js';
 import { addSentence, addStarterStack, addWord, applyDowngrade, cleanSentence, cleanSentenceWords, cleanWord } from './stack.js';
 import { pickQuestion, questionById, TURN_MODES } from './tutor.js';
 import { comboKey, ENGINES, FALLBACK_COMBO, pickCombo, RANDOM_MIX, validCombo } from './experiment.js';
+import { CHECK_RESULTS, scenarioById, SCENARIOS, TOPIC_MODES } from './scenarios.js';
 
 export const RING_MS = 10_000;
 export const DELIVERY_GRACE_MS = 30_000; // how long a ring waits for the phone to confirm it arrived
@@ -39,6 +40,7 @@ const KEEP_FEEDBACK = 1000;
 const MAX_ACCOUNTS_IN_REPORT = 20;
 const KEEP_RATINGS = 200;
 const KEEP_CALL_LOG = 5000;
+const KEEP_SCENARIO_CHECKS = 5000;
 const MIN_SECONDS_TO_CONNECT = 10;
 const SCHEDULE_FIELDS = ['frequency', 'customDays', 'callStartHour', 'callEndHour'];
 const RENAMED_PLANS = { plus: 'premium', pro: 'platinum' };
@@ -85,6 +87,8 @@ const newUserFields = () => ({
   turnMode: 'silence', // an admin's own pick, used only when callSetupManual is on
   engine: 'gpt-realtime', // likewise
   callSetupManual: false, // admins only: pick the engine and turn mode instead of being randomized
+  topicMode: 'randomized', // admins only: 'controlled' starts every call with scenarioId's opening question
+  scenarioId: null,
   comboCounts: {}, // calls randomized to each engine and turn mode, so the next goes to the least used
   joinedWith: null, // which invite code: admin, beta or yc
   joinedAt: null,
@@ -223,13 +227,11 @@ export class CallEngine {
     if (this.#activeCall(user)) return;
     const now = this.now();
     const contact = selectedContact(user);
-    const question = pickQuestion(user.lastQuestionId, this.random);
-    user.lastQuestionId = question.id;
     const call = {
       id: randomUUID(),
       userId: user.id,
       contactId: contact.id,
-      questionId: question.id,
+      ...this.#pickTopic(user),
       direction: 'incoming',
       state: 'ringing',
       createdAt: now,
@@ -315,15 +317,14 @@ export class CallEngine {
     if (calling.callBackMissed) user.missedCallToReturn = false;
     else if (calling.retryAfterDrop) user.usage.retryAfterDrop = false;
     else if (!calling.firstCall) user.usage.ownCalls += 1;
-    const question = pickQuestion(user.lastQuestionId, this.random);
-    user.lastQuestionId = question.id;
+    const topic = this.#pickTopic(user);
     user.lastCallOutcome = 'answered';
     const now = this.now();
     const call = {
       id: randomUUID(),
       userId: user.id,
       contactId: contact.id,
-      questionId: question.id,
+      ...topic,
       direction: 'outgoing',
       state: 'answered',
       createdAt: now,
@@ -447,6 +448,30 @@ export class CallEngine {
     return true;
   }
 
+  // Admins only: start every call with a test scenario's opening question, or go back to random questions.
+  // Separate from the engine and turn mode, so one scenario can be run on each of them.
+  setTopicSetup(user, { topicMode = user.topicMode, scenarioId = user.scenarioId ?? SCENARIOS[0].id }) {
+    if (!TOPIC_MODES.includes(topicMode) || !scenarioById(scenarioId)) return false;
+    user.topicMode = topicMode;
+    user.scenarioId = scenarioId;
+    this.store.save();
+    return true;
+  }
+
+  // An admin's pass, fail or unclear for one checkpoint of the scenario their call ran, or null to clear it.
+  // Kept apart from the ratings, one record per checkpoint, so manual test scores never mix with how users rate calls.
+  saveScenarioCheck(user, callId, { checkpointId, result }) {
+    const call = this.store.calls[callId];
+    const scenario = scenarioById(call?.scenarioId);
+    if (!call || call.userId !== user.id || user.role !== 'admin' || !scenario) return null;
+    if (!scenario.checkpoints.some((checkpoint) => checkpoint.id === checkpointId) || !(result === null || CHECK_RESULTS.includes(result))) return false;
+    const checks = this.store.scenarioChecks.filter((check) => !(check.callId === callId && check.checkpointId === checkpointId));
+    if (result) checks.push({ callId, scenarioId: scenario.id, checkpointId, result, at: this.now() });
+    this.store.scenarioChecks = checks.slice(-KEEP_SCENARIO_CHECKS);
+    this.store.save();
+    return true;
+  }
+
   // A randomly assigned engine couldn't start this call, so it runs on the fallback instead, and the log says so.
   fallBack(user, callId) {
     const call = this.store.calls[callId];
@@ -481,6 +506,11 @@ export class CallEngine {
   // Newest first. Numbers and ids only, for the admin call log.
   callLog(limit = 300) {
     return this.store.callLog.slice(-limit).reverse();
+  }
+
+  // Admins' checklist results for controlled test calls, newest first. Join them to the call log by callId.
+  scenarioChecks(limit = 1000) {
+    return this.store.scenarioChecks.slice(-limit).reverse();
   }
 
   setTurnMode(user, turnMode) {
@@ -802,6 +832,16 @@ export class CallEngine {
     if (user) user.lastCallOutcome = outcome;
   }
 
+  // A call's opening question. An admin testing a scenario gets its question every time, leaving the random
+  // questions as they were. Everyone else, and admins on randomized topics, gets one at random, never the last one.
+  #pickTopic(user) {
+    const scenario = user.role === 'admin' && user.topicMode === 'controlled' ? scenarioById(user.scenarioId) : null;
+    if (scenario) return { questionId: scenario.questionId, topicMode: 'controlled', scenarioId: scenario.id };
+    const question = pickQuestion(user.lastQuestionId, this.random);
+    user.lastQuestionId = question.id;
+    return { questionId: question.id, topicMode: 'randomized', scenarioId: null };
+  }
+
   #assignCombo(call, user) {
     const manual = user.role === 'admin' && user.callSetupManual;
     const mix = RANDOM_MIX.filter((option) => this.engineReady(option.engine));
@@ -812,7 +852,8 @@ export class CallEngine {
     if (!manual) user.comboCounts[comboKey(combo)] = (user.comboCounts[comboKey(combo)] ?? 0) + 1;
     // The settings as the call starts. Ids and setting values only: never a custom contact's name or topic.
     const { proficiency, formality, thinkingTime, speed } = user.settings;
-    this.#log(call, { contactId: call.contactId ?? null, questionId: call.questionId ?? null, proficiency, formality, thinkingTime, speed });
+    const topic = { topicMode: call.topicMode ?? 'randomized', scenarioId: call.scenarioId ?? null };
+    this.#log(call, { contactId: call.contactId ?? null, questionId: call.questionId ?? null, ...topic, proficiency, formality, thinkingTime, speed });
   }
 
   // Adds to the call's entry in the call log, creating it the first time.

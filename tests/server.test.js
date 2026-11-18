@@ -736,6 +736,87 @@ test('an admin can pick Deepgram: its session has a call token and agent setting
   await request('/api/call-setup', { method: 'PUT', token, body: { manual: false } });
 });
 
+test('only admins can switch to controlled topics, see the scenarios, or save checklist results', async () => {
+  const tester = await joinWith(BETA_CODE);
+  assert.equal((await request('/api/topic-setup', { method: 'PUT', token: tester.token, body: { topicMode: 'controlled', scenarioId: 'daily-life' } })).status, 403);
+  assert.equal((await request('/api/me', { token: tester.token })).data.callSetup, undefined, 'no scenarios for testers');
+  const call = await connectedCall(tester.token);
+  assert.deepEqual([engine.store.calls[call.id].topicMode, engine.store.calls[call.id].scenarioId], ['randomized', null]);
+  assert.equal(call.scenarioId, undefined);
+  assert.equal((await request(`/api/admin/calls/${call.id}/checks`, { method: 'PUT', token: tester.token, body: { checkpointId: 'aizuchi-kept', result: 'pass' } })).status, 403);
+
+  const token = await join();
+  const { data: me } = await request('/api/me', { token });
+  assert.deepEqual([me.callSetup.topicMode, me.callSetup.scenarioId], ['randomized', null]);
+  assert.deepEqual(me.callSetup.scenarios.map((scenario) => scenario.id), ['weekend-plans', 'daily-life', 'vocabulary-help', 'recent-activities']);
+  assert.equal((await request('/api/topic-setup', { method: 'PUT', token, body: { topicMode: 'scripted' } })).status, 400);
+  assert.equal((await request('/api/topic-setup', { method: 'PUT', token, body: { topicMode: 'controlled', scenarioId: 'made-up' } })).status, 400);
+  const { data } = await request('/api/topic-setup', { method: 'PUT', token, body: { topicMode: 'controlled', scenarioId: 'daily-life' } });
+  assert.deepEqual([data.callSetup.topicMode, data.callSetup.scenarioId, data.callSetup.manual], ['controlled', 'daily-life', false]);
+
+  const controlled = await connectedCall(token);
+  assert.equal(controlled.scenarioId, 'daily-life', 'the phone is told which checklist to show');
+  assert.equal(engine.store.calls[controlled.id].questionId, 'did');
+  const check = (callId, body) => request(`/api/admin/calls/${callId}/checks`, { method: 'PUT', token, body });
+  assert.equal((await check(controlled.id, { checkpointId: 'interrupt-handled', result: 'pass' })).status, 200);
+  assert.equal((await check(controlled.id, { checkpointId: 'interrupt-handled', result: 'maybe' })).status, 400);
+  assert.equal((await check(call.id, { checkpointId: 'interrupt-handled', result: 'pass' })).status, 404, "not the admin's call");
+
+  const log = (await request('/api/admin/calls', { token })).data;
+  const entry = log.calls.find((item) => item.callId === controlled.id);
+  assert.deepEqual([entry.topicMode, entry.scenarioId, entry.questionId, entry.joinedWith], ['controlled', 'daily-life', 'did', 'admin']);
+  assert.deepEqual(
+    log.scenarioChecks.filter((item) => item.callId === controlled.id).map(({ scenarioId, checkpointId, result }) => [scenarioId, checkpointId, result]),
+    [['daily-life', 'interrupt-handled', 'pass']],
+  );
+  assert.equal(entry.cutOffs, undefined, 'checklist results are not ratings');
+  assert.deepEqual([log.calls.find((item) => item.callId === call.id).topicMode, log.calls.find((item) => item.callId === call.id).scenarioId], ['randomized', null]);
+  await request('/api/topic-setup', { method: 'PUT', token, body: { topicMode: 'randomized' } });
+});
+
+test('a controlled scenario opens with the same question on OpenAI and Deepgram, and neither is told about the test', async () => {
+  const token = await join();
+  await request('/api/topic-setup', { method: 'PUT', token, body: { topicMode: 'controlled', scenarioId: 'weekend-plans' } });
+  const { data: me } = await request('/api/me', { token });
+  const scenario = me.callSetup.scenarios.find((item) => item.id === 'weekend-plans');
+  const guidance = [scenario.name, scenario.focus, scenario.example, scenario.note, ...scenario.actions, ...scenario.checkpoints.map((item) => item.text)].filter(Boolean);
+  const question = QUESTIONS.find((item) => item.id === 'weekend');
+
+  await request('/api/call-setup', { method: 'PUT', token, body: { manual: true, engine: 'gpt-realtime', turnMode: 'silence' } });
+  const openaiCall = (await request('/api/calls', { method: 'POST', token })).data;
+  const { data: openaiSession } = await request(`/api/calls/${openaiCall.id}/session`, { method: 'POST', token });
+  const instructions = minted.at(-1).session.instructions;
+  assert.ok([question.japanese, question.casual].some((text) => instructions.includes(text)));
+
+  const deepgram = { hasKey: true, mintToken: async () => 'jwt-for-the-phone' };
+  const { server: withDeepgram } = createApp({ engine, openai, deepgram, config: { inviteCodes: { admin: INVITE_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null, recordingsDir: mkdtempSync(joinPath(tmpdir(), 'ping-recordings-')) } });
+  await new Promise((resolve) => withDeepgram.listen(0, resolve));
+  const base = `http://127.0.0.1:${withDeepgram.address().port}`;
+  const call = async (path) => (await fetch(base + path, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })).json();
+  try {
+    await request('/api/call-setup', { method: 'PUT', token, body: { manual: true, engine: 'deepgram-agent' } });
+    const deepgramCall = await call('/api/calls');
+    const deepgramSession = await call(`/api/calls/${deepgramCall.id}/session`);
+    assert.equal(deepgramSession.engine, 'deepgram-agent');
+    assert.equal(deepgramSession.settings.agent.think.prompt.startsWith(instructions), true, 'the same instructions as OpenAI, then the greeting it already said');
+    assert.ok([question.japanese, question.casual].some((text) => deepgramSession.settings.agent.greeting.includes(text)), 'called back, so Deepgram asks it straight after its greeting');
+
+    const sent = JSON.stringify([minted.at(-1).session, openaiSession, deepgramSession]);
+    for (const text of guidance) assert.ok(!sent.includes(text), `"${text}" never reaches the voice engine`);
+    assert.ok(!sent.includes('weekend-plans'));
+    const entries = [openaiCall, deepgramCall].map((item) => engine.store.callLog.findLast((entry) => entry.callId === item.id));
+    assert.deepEqual(entries.map((entry) => [entry.engine, entry.assigned, entry.topicMode, entry.scenarioId, entry.questionId]), [
+      ['gpt-realtime', 'manual', 'controlled', 'weekend-plans', 'weekend'],
+      ['deepgram-agent', 'manual', 'controlled', 'weekend-plans', 'weekend'],
+    ]);
+    assert.ok(entries.every((entry) => entry.promptVersion === PROMPT_VERSION));
+  } finally {
+    withDeepgram.close();
+  }
+  await request('/api/call-setup', { method: 'PUT', token, body: { manual: false } });
+  await request('/api/topic-setup', { method: 'PUT', token, body: { topicMode: 'randomized' } });
+});
+
 test('the page may connect to Deepgram, and nowhere else new', async () => {
   const response = await fetch(baseUrl + '/');
   assert.match(response.headers.get('content-security-policy'), /connect-src 'self' https:\/\/api\.openai\.com wss:\/\/agent\.deepgram\.com;/);
