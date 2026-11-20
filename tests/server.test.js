@@ -28,6 +28,14 @@ const openai = {
   },
   speak: async () => Buffer.from('audio'),
   exampleSentences: async () => [{ japanese: '元気です。', romaji: 'genki desu.', english: "I'm well." }],
+  // Speaking-level estimates, in order, for the graded calls; each call takes the next one.
+  levels: [],
+  graded: [],
+  async gradeLevel(lines) {
+    this.graded.push(lines);
+    const level = this.levels.shift() ?? 'N4';
+    return { level, vocabulary: level, grammar: level, confidence: 'medium', reason: 'Complete past-tense sentences.' };
+  },
   sentenceWordLookups: 0,
   async sentenceWords() {
     this.sentenceWordLookups += 1;
@@ -442,7 +450,7 @@ test('turn metrics are stored on the call with their settings, and logged once',
   }
   const stored = engine.store.calls[call.id].turnMetrics;
   // This call never connected, so it was never assigned a turn mode.
-  const notSent = { talkOvers: null, providerLatencyMedianMs: null, providerLatencyP90Ms: null, providerLatencyCount: null };
+  const notSent = { talkOvers: null, providerLatencyMedianMs: null, providerLatencyP90Ms: null, providerLatencyCount: null, userSpeechMs: null, agentSpeechMs: null, answerStartMedianMs: null };
   assert.deepEqual(stored, { callId: call.id, ...METRICS, ...notSent, engine: 'gpt-realtime', turnMode: null, actualTurnMode: null, thinkingTime: 'normal', speed: 1, proficiency: 'N5' });
   assert.equal(lines.length, 1);
   assert.match(lines[0], /^turn-metrics \{/);
@@ -994,4 +1002,77 @@ test('an admin can delete one call, recording included, and see how full the dis
   assert.equal(data.comments.some((saved) => saved.callId === call.id), false);
   assert.equal((await request(`/api/admin/calls/${call.id}`, { method: 'DELETE', token: admin })).status, 404);
   assert.ok((await request('/api/admin/storage', { token: admin })).data.recordingsBytes < before.recordingsBytes);
+});
+
+// Learning progress
+
+const LEARNING = {
+  learnerTurns: 4, japaneseChars: 60, avgTurnChars: 15, englishTurnPercent: 25, newWords: 1, stackWordsUsed: 2, helpRequests: 1, distinctWords: 12,
+  jlptN5Words: 6, jlptN4Words: 3, jlptN3Words: 1, jlptN2Words: 0, jlptN1Words: 0, offListWords: 2,
+};
+const GRADED_LINES = [{ from: 'contact', text: '今日は何をしましたか？' }, { from: 'you', text: '映画を見ました。' }, { from: 'contact', text: 'どうでしたか？' }, { from: 'you', text: '面白かったです。' }, { from: 'you', text: 'そのあとラーメンを食べました。' }];
+const waitForGrading = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+test('learning numbers from the phone go in the call log, beside the speaking time worked out from the timing', async () => {
+  const tester = await joinWith(BETA_CODE);
+  const call = await connectedCall(tester.token);
+  await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: tester.token });
+  const path = `/api/calls/${call.id}/learning`;
+  assert.equal((await request(path, { method: 'POST', token: tester.token, body: { ...LEARNING, transcript: '映画' } })).status, 400);
+  assert.equal((await request(path, { method: 'POST', token: await join(), body: LEARNING })).status, 404, "someone else's call");
+  assert.equal((await request(path, { method: 'POST', token: tester.token, body: LEARNING })).status, 201);
+  assert.equal((await request(`/api/calls/${call.id}/metrics`, { method: 'POST', token: tester.token, body: { ...METRICS, userTurns: 4, userSpeechMs: 40_000, agentSpeechMs: 60_000, answerStartMedianMs: 1500 } })).status, 201);
+
+  const entry = (await request('/api/admin/calls', { token: await join() })).data.calls.find((logged) => logged.callId === call.id);
+  assert.deepEqual([entry.japaneseChars, entry.englishTurnPercent, entry.stackWordsUsed, entry.jlptN5Words], [60, 25, 2, 6]);
+  assert.deepEqual([entry.userCallSharePercent, entry.avgTurnMs, entry.answerStartMedianMs, entry.replyGapP90Ms], [40, 10_000, 1500, METRICS.replyGapP90Ms], 'every timing number is kept, P90s included');
+
+  const { progress } = (await request('/api/me', { token: tester.token })).data;
+  assert.equal(progress.totalMinutes, 0.5, '40 s of speech, a quarter of it mostly English: 30 s of Japanese');
+  assert.deepEqual(progress.points.map((point) => point.minutes), [0.5]);
+});
+
+test("a recorded call with 3 or more of the learner's lines gets a speaking-level estimate; the learner sees a level after 5", async () => {
+  const tester = { token: await join() }; // an admin, who has no daily call limit
+  const admin = await join();
+  openai.levels = ['N4', 'N3', 'N5', 'N4', 'N4'];
+  const before = openai.graded.length;
+
+  const short = await connectedCall(tester.token);
+  await request(`/api/calls/${short.id}/connected`, { method: 'POST', token: tester.token });
+  await request(`/api/calls/${short.id}/transcript`, { method: 'POST', token: tester.token, body: { lines: GRADED_LINES.slice(0, 4) } });
+  await waitForGrading();
+  await request(`/api/calls/${short.id}/ended`, { method: 'POST', token: tester.token, body: { reason: 'hung-up' } });
+  assert.equal(openai.graded.length, before, 'two learner lines is too little to judge');
+
+  for (let index = 0; index < 5; index += 1) {
+    const call = await connectedCall(tester.token);
+    await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: tester.token });
+    await request(`/api/calls/${call.id}/transcript`, { method: 'POST', token: tester.token, body: { lines: GRADED_LINES } });
+    await waitForGrading();
+    await request(`/api/calls/${call.id}/transcript`, { method: 'POST', token: tester.token, body: { lines: GRADED_LINES } }); // sent again
+    await waitForGrading();
+    await request(`/api/calls/${call.id}/ended`, { method: 'POST', token: tester.token, body: { reason: 'hung-up' } });
+    const { progress } = (await request('/api/me', { token: tester.token })).data;
+    if (index < 4) assert.deepEqual([progress.speakingLevel, progress.callsUntilLevel], [null, 4 - index]);
+    else assert.deepEqual([progress.speakingLevel, progress.callsUntilLevel], ['N4', 0], 'the middle of N4, N3, N5, N4, N4');
+  }
+  assert.equal(openai.graded.length, before + 5, 'each call is graded once');
+
+  const { calls } = (await request('/api/admin/calls', { token: admin })).data;
+  const latest = calls.find((entry) => entry.userId === engine.userForToken(tester.token).id && entry.estimatedLevel);
+  assert.deepEqual([latest.estimatedLevel, latest.levelConfidence, latest.reason], ['N4', 'medium', undefined], "the call log keeps the level, not the model's words");
+  const listed = (await request('/api/admin/recordings', { token: admin })).data.recordings.find((item) => item.callId === latest.callId);
+  assert.equal(listed.levelEstimate.reason, 'Complete past-tense sentences.');
+});
+
+test('a call that is not recorded is never graded', async () => {
+  const reviewer = await joinWith(YC_CODE);
+  await request('/api/recording', { method: 'PUT', token: reviewer.token, body: { on: false } });
+  const before = openai.graded.length;
+  const call = await connectedCall(reviewer.token);
+  await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: reviewer.token });
+  await request(`/api/calls/${call.id}/transcript`, { method: 'POST', token: reviewer.token, body: { lines: GRADED_LINES } });
+  await waitForGrading();
+  assert.equal(openai.graded.length, before);
 });

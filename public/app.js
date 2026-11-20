@@ -5,6 +5,7 @@ import { initSettings, keepRecording, recordCallsOn, showScenarioPanel } from '.
 import { audioUnlocked, startRingtone, unlockAudio } from './ringtone.js';
 import { initStack, renderStackTiles } from './stack.js';
 import { failedCallNotice, startCall } from './voice.js';
+import { summarizeLearning, wordLevels } from './learning-metrics.js';
 
 const RING_FALLBACK_MS = 12_000; // the server decides a call was missed. This only covers its message getting lost.
 // Calling a contact rings this long first, like a real phone call, before Ping picks up.
@@ -208,7 +209,7 @@ const POLICY_NOTICES = {
   },
   update: {
     title: 'Privacy Policy updated',
-    text: 'You can now leave a comment after a call. Comments are kept with that call so the Ping team can read them. The Privacy Policy has the details.',
+    text: 'Ping now tracks your speaking progress, including an estimate of your level from recorded calls, and you can leave a comment after a call. The Privacy Policy has the details.',
   },
 };
 
@@ -468,10 +469,30 @@ function startCountdown(seconds) {
 }
 
 // Paid plans keep the transcript to personalize later calls, and recorded calls keep it for review.
+// What was said on the call, as heard: a line Ping was cut off in ends where it stopped.
+const heardLines = () => [...transcript.values()].map((line) => ({ from: line.from, text: heardText(line) })).filter((line) => line.text.trim());
+
 async function saveTranscript(callId, recorded) {
   if (!isPaid() && !recorded) return;
-  const lines = [...transcript.values()].map((line) => ({ from: line.from, text: heardText(line) })).filter((line) => line.text.trim());
-  await api(`/api/calls/${callId}/transcript`, { method: 'POST', body: { lines } }).catch((error) => console.warn('Could not save the conversation', error));
+  await api(`/api/calls/${callId}/transcript`, { method: 'POST', body: { lines: heardLines() } }).catch((error) => console.warn('Could not save the conversation', error));
+}
+
+// The JLPT word list, loaded the first time a call ends. Without it the word counts are just zero.
+let jlptLevels = null;
+async function loadWordLevels() {
+  jlptLevels ??= fetch('/jlpt-words.json')
+    .then((response) => (response.ok ? response.json() : null))
+    .then((list) => wordLevels(list))
+    .catch(() => new Map());
+  return jlptLevels;
+}
+
+// Numbers about the learner's Japanese on this call, worked out here from the transcript. Only the numbers are
+// sent, on every call that connected, whether or not it was recorded.
+async function sendLearning(callId, { stackWords, newWords }) {
+  const segmenter = 'Segmenter' in Intl ? new Intl.Segmenter('ja', { granularity: 'word' }) : null;
+  const learning = summarizeLearning({ lines: heardLines(), stackWords, newWords, levels: await loadWordLevels(), segmenter });
+  await api(`/api/calls/${callId}/learning`, { method: 'POST', body: learning }).catch((error) => console.warn('Could not save the learning numbers', error));
 }
 
 // scenarioId: an admin's controlled test call, which shows its checklist above the transcript.
@@ -495,6 +516,8 @@ function beginCall(callId, contactName = 'Ping', scenarioId = null) {
   show('call');
   let outOfCredit = false;
   let connected = false;
+  const stackWords = [...(state.me.words ?? [])]; // the stack as the call starts, to count which saved words get used
+  let newWords = 0;
   // Admins can keep a copy on the phone for demo videos. Accounts with recording on upload it for review.
   const keepOnPhone = recordCallsOn();
   const forReview = Boolean(state.me.recording?.on);
@@ -527,6 +550,7 @@ function beginCall(callId, contactName = 'Ping', scenarioId = null) {
       callHint(failedCallNotice({ admin: isAdmin(), outOfCredit, contactName }));
     },
     onWordAdded: (word, { alreadySaved = false } = {}) => {
+      if (!alreadySaved) newWords += 1;
       const note = alreadySaved ? '*already in your stack*' : '*added to stack*';
       addTranscriptNode(el('p', { className: 'line note', textContent: `${word.kanji || word.kana} ${note}` }));
     },
@@ -548,6 +572,7 @@ function beginCall(callId, contactName = 'Ping', scenarioId = null) {
       // doesn't use up the day's call.
       await api(`/api/calls/${callId}/ended`, { method: 'POST', body: { reason } }).catch((error) => console.warn('Could not end the call', error));
       await saveTranscript(callId, forReview);
+      if (connected) await sendLearning(callId, { stackWords, newWords });
       await refresh().catch(() => {});
       const couldntTalk = reason === 'unavailable';
       const ended = couldntTalk ? failedCallNotice({ admin: isAdmin(), outOfCredit, contactName }) : endedNotice(reason);

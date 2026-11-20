@@ -53,6 +53,11 @@ export const METRIC_FIELDS = [
   'providerLatencyMedianMs',
   'providerLatencyP90Ms',
   'providerLatencyCount',
+  // Added for learning progress. Estimates from the same events: how long the user and the contact each spoke,
+  // and how long the user took to start answering after the contact finished a turn.
+  'userSpeechMs',
+  'agentSpeechMs',
+  'answerStartMedianMs',
 ];
 
 // What every phone has sent since metrics began. Fields added later are optional, so a phone still running an
@@ -84,6 +89,7 @@ const MAY_BE_EMPTY = new Set([
   'smartTurnMedianMs',
   'smartTurnP90Ms',
   'modelLoadMs',
+  'answerStartMedianMs',
 ]);
 
 // Nearest rank: the smallest value with at least that share of all values at or below it.
@@ -131,6 +137,21 @@ export function summarizeTurns(events, { connectedAt = null, endedAt, engine = '
   let modelLoadMs = null;
   let smartTurnFallback = 0;
   let audioRestarts = 0;
+  let userSpeechMs = 0;
+  let agentSpeechMs = 0;
+  let userSpeakingSince = null; // when the user's current stretch of speech started
+  let agentSpeakingSince = null;
+  let contactFinishedAt = null; // when the contact last finished a turn, until the user starts answering
+  const answerStarts = [];
+  // A stretch of the user's speech ends when they went quiet: the estimate where there is one, else when it was noticed.
+  const userStopped = (quietAt) => {
+    if (userSpeakingSince !== null) userSpeechMs += Math.max(0, Math.round(quietAt - userSpeakingSince));
+    userSpeakingSince = null;
+  };
+  const agentStopped = (at) => {
+    if (agentSpeakingSince !== null) agentSpeechMs += Math.max(0, Math.round(at - agentSpeakingSince));
+    agentSpeakingSince = null;
+  };
 
   for (const event of events) {
     const { type, at } = event;
@@ -140,6 +161,9 @@ export function summarizeTurns(events, { connectedAt = null, endedAt, engine = '
         break;
       case 'input_audio_buffer.speech_started':
         speechStart = event;
+        if (userSpeakingSince === null) userSpeakingSince = at;
+        if (contactFinishedAt !== null && !agentPlaying) answerStarts.push(Math.max(0, Math.round(at - contactFinishedAt)));
+        contactFinishedAt = null;
         // Talking again before Ping replies means the earlier stop wasn't the end of their turn.
         userStoppedAt = null;
         userStoppedTalkingAt = null;
@@ -158,6 +182,7 @@ export function summarizeTurns(events, { connectedAt = null, endedAt, engine = '
           waits.push(wait);
           userStoppedTalkingAt = at - wait;
         }
+        userStopped(userStoppedTalkingAt ?? at);
         break;
       }
       // In Smart Turn mode the phone knows exactly when the user went quiet, so nothing is estimated.
@@ -165,6 +190,7 @@ export function summarizeTurns(events, { connectedAt = null, endedAt, engine = '
         userStoppedAt = at;
         userStoppedTalkingAt = event.quietSince;
         waits.push(Math.max(0, Math.round(at - event.quietSince)));
+        userStopped(event.quietSince);
         if (event.reason === 'backup') backupEnds += 1;
         else smartTurnEnds += 1;
         break;
@@ -187,6 +213,8 @@ export function summarizeTurns(events, { connectedAt = null, endedAt, engine = '
         agentTurns += 1;
         agentPlaying = true;
         agentStartedAt = at;
+        agentSpeakingSince ??= at;
+        contactFinishedAt = null;
         cutoffCounted = false;
         userSpokeOver = false;
         if (userStoppedAt !== null) latencies.push(Math.round(at - userStoppedAt));
@@ -196,11 +224,14 @@ export function summarizeTurns(events, { connectedAt = null, endedAt, engine = '
         break;
       case 'output_audio_buffer.stopped':
         agentPlaying = false;
+        agentStopped(at);
+        contactFinishedAt = at;
         break;
       // OpenAI clears Ping's audio when the user talks over it, so only count a clear that followed their speech.
       case 'output_audio_buffer.cleared':
         if (agentPlaying && userSpokeOver) talkOvers += 1;
         agentPlaying = false;
+        agentStopped(at);
         break;
       // Logged by the app when talking over Ping turned out to be aizuchi and Ping carried on.
       case 'aizuchi':
@@ -222,6 +253,12 @@ export function summarizeTurns(events, { connectedAt = null, endedAt, engine = '
   // If a call got both, only LatencyReport counts, so no reply is counted twice.
   const reported = providerLatencies.LatencyReport.length ? providerLatencies.LatencyReport : providerLatencies.AgentStartedSpeaking;
   const provider = spread(reported);
+  // Still talking when the call ended.
+  if (endedAt !== undefined) {
+    userStopped(endedAt);
+    agentStopped(endedAt);
+  }
+  const answerStart = spread(answerStarts);
   return {
     replyLatencyMedianMs: percentile(sorted, 0.5),
     replyLatencyP90Ms: percentile(sorted, 0.9),
@@ -247,6 +284,9 @@ export function summarizeTurns(events, { connectedAt = null, endedAt, engine = '
     providerLatencyMedianMs: measures.providerLatency ? provider.median : null,
     providerLatencyP90Ms: measures.providerLatency ? provider.p90 : null,
     providerLatencyCount: measures.providerLatency ? reported.length : null,
+    userSpeechMs,
+    agentSpeechMs,
+    answerStartMedianMs: answerStart.median,
   };
 }
 

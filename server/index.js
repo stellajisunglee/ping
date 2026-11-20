@@ -17,6 +17,7 @@ import { createPushSender } from './push.js';
 import { createOpenAI } from './openai.js';
 import { isValidTimeZone } from './schedule.js';
 import { cleanMetrics, metricsProblems } from '../public/turn-metrics.js';
+import { cleanLearning } from '../public/learning-metrics.js';
 import { buildSession, NOT_NOW_GOODBYES, PROMPT_VERSION, smartTurnRules, TIME_UP_LINES, turnDetection, voiceMessageFor } from './tutor.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -26,6 +27,7 @@ const PUBLIC_DIR = join(ROOT, 'public');
 export const buildCommit = (value) => (typeof value === 'string' && /^[0-9a-f]{7,40}$/i.test(value) ? value.toLowerCase() : null);
 const TICK_MS = 1_000;
 const MAX_BODY_BYTES = 64_000; // room for a full call's transcript
+const MIN_GRADED_TURNS = 3; // learner lines a recorded call needs before its speaking level is estimated
 const MAX_RECORDING_BYTES = 25_000_000; // a 10-minute call is about 10 MB from an iPhone
 const MAX_RECORDED_LINES = 400;
 const MAX_FEEDBACK_LENGTH = 2_000;
@@ -45,9 +47,10 @@ const CONTENT_TYPES = {
   '.png': 'image/png',
   '.wasm': 'application/wasm',
   '.onnx': 'application/octet-stream',
+  '.json': 'application/json; charset=utf-8', // the JLPT word list
 };
 // Image files are already compressed. Everything else is sent brotli-compressed when the browser accepts it.
-const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.webmanifest', '.wasm', '.onnx']);
+const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.webmanifest', '.wasm', '.onnx', '.json']);
 // Smart Turn's runtime and models have their version in the path, so a browser can keep them for good.
 const IMMUTABLE_PATHS = ['/vendor/', '/models/'];
 const SMART_TURN_FILES = new Set([
@@ -212,6 +215,7 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       clearAt: user.clearAt,
       settings: user.settings,
       levelChosen: user.levelChosen, // false until they pick a JLPT level, which the app asks for before Home
+      progress: engine.progress(user),
       hasSubscription: Boolean(user.subscription),
       streak: engine.streak(user),
       lastCall: engine.lastCall(user),
@@ -229,6 +233,20 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
 
   // scenarioId is set only on an admin's controlled test call, so the phone can show its checklist.
   const callState = (call) => ({ id: call.id, state: call.state, contactName: engine.contactNameOf(call), ...(call.scenarioId ? { scenarioId: call.scenarioId } : {}) });
+
+  // A recorded call with enough of the learner's Japanese gets a speaking-level estimate from OpenAI, in the
+  // background so the phone isn't kept waiting. Only recorded calls, whose transcript is already kept, are graded.
+  function gradeLevel(user, call, lines) {
+    if (!openai.hasKey || lines.filter((line) => line.from === 'you').length < MIN_GRADED_TURNS) return;
+    if (user.levelEstimates.some((estimate) => estimate.callId === call.id)) return;
+    openai
+      .gradeLevel(lines)
+      .then((estimate) => {
+        if (!engine.saveLevelEstimate(user, call.id, estimate)) return;
+        recordings.saveLevelEstimate(engine.recordingInfo(user, call), estimate);
+      })
+      .catch((error) => console.warn(`Level estimate failed: ${error.message}`));
+  }
 
   async function handleApi(req, res, pathname) {
     const { method } = req;
@@ -506,13 +524,25 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       return json(res, 201, {});
     }
 
+    // Numbers about the learner's Japanese, worked out on the phone from the call's transcript. Every user's are
+    // accepted, like the timing numbers, since no words come with them.
+    const learningRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/learning$/);
+    if (method === 'POST' && learningRoute) {
+      const learning = cleanLearning(await readJson(req));
+      if (!learning) return json(res, 400, { error: 'Invalid learning numbers.' });
+      if (!engine.saveLearning(user, learningRoute[1], learning)) return json(res, 404, { error: 'Call not found.' });
+      return json(res, 201, {});
+    }
+
     // The phone sends a transcript after every recorded call, and after every call on a paid plan.
     // A paid plan keeps it to personalize later calls; a recorded call keeps it for review.
     const transcript = pathname.match(/^\/api\/calls\/([\w-]+)\/transcript$/);
     if (method === 'POST' && transcript) {
       const { lines } = await readJson(req);
       const recordedCall = engine.recordedCall(user, transcript[1]);
-      const recorded = recordedCall ? recordings.saveTranscript(engine.recordingInfo(user, recordedCall), cleanTranscript(lines).slice(-MAX_RECORDED_LINES)) : false;
+      const kept = cleanTranscript(lines).slice(-MAX_RECORDED_LINES);
+      const recorded = recordedCall ? recordings.saveTranscript(engine.recordingInfo(user, recordedCall), kept) : false;
+      if (recorded) gradeLevel(user, recordedCall, kept);
       return json(res, 200, { saved: engine.saveConversation(user, transcript[1], lines), recorded });
     }
 
@@ -694,7 +724,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     dailyCallLimit: Number(process.env.DAILY_CALL_LIMIT) || null,
     engineReady: (name) => name !== 'deepgram-agent' || Boolean(process.env.DEEPGRAM_API_KEY),
   });
-  const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '', baseUrl: process.env.OPENAI_BASE_URL, textModel: process.env.TEXT_MODEL });
+  const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '', baseUrl: process.env.OPENAI_BASE_URL, textModel: process.env.TEXT_MODEL, levelModel: process.env.LEVEL_MODEL });
   const deepgram = createDeepgram({ apiKey: process.env.DEEPGRAM_API_KEY ?? '' });
   const { server, ensureVoiceMessage } = createApp({
     engine,

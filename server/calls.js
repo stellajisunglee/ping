@@ -39,6 +39,10 @@ const MAX_LINE_LENGTH = 500;
 const KEEP_FEEDBACK = 1000;
 const MAX_ACCOUNTS_IN_REPORT = 20;
 const KEEP_RATINGS = 200;
+const KEEP_PROGRESS = 1000; // calls in a learner's progress history, and level estimates, outside admin and beta accounts
+// A speaking level is shown once this many calls have been graded, as the middle of the latest this many.
+export const LEVEL_SAMPLE = 5;
+const JLPT_ORDER = ['N5', 'N4', 'N3', 'N2', 'N1'];
 const KEEP_CALL_LOG = 5000;
 const MIN_SECONDS_TO_CONNECT = 10;
 const SCHEDULE_FIELDS = ['frequency', 'customDays', 'callStartHour', 'callEndHour'];
@@ -51,7 +55,7 @@ export class PlanError extends Error {}
 
 // The Privacy Policy's version. 2: calls are recorded. 3: Deepgram joins OpenAI as a voice service.
 // Accounts that saw an older version get a one-time notice on Home about what changed since.
-export const POLICY_VERSION = 4; // 2: calls recorded, 3: Deepgram named, 4: post-call comments and testers' data kept
+export const POLICY_VERSION = 4; // 2: calls recorded, 3: Deepgram named, 4: post-call comments, testers' data kept, learning numbers and level estimates
 const RECORDING_POLICY = 2;
 export const policyNoticeFor = (seen = 0) => (seen >= POLICY_VERSION ? null : seen < RECORDING_POLICY ? 'recording' : 'update');
 // Admins and beta testers record every call as part of testing. YC reviewers and everyone else
@@ -105,6 +109,8 @@ const newUserFields = () => ({
   ratings: [], // the 1-5 taps after each call: how often Ping cut them off, and how natural it felt
   policyVersion: 0, // the Privacy Policy version they've seen. 0: joined before calls were recorded
   levelChosen: false, // whether they've picked their JLPT level. Everyone picks one before they first reach Home
+  progress: [], // one entry per call: speaking time, English share, Japanese characters, estimated level (numbers and levels only)
+  levelEstimates: [], // the model's speaking-level estimate for each graded call, newest first, with its one-line reason
 });
 
 // Accounts saved before JLPT levels keep their old level's place on the scale until they pick one.
@@ -566,18 +572,15 @@ export class CallEngine {
     const smartTurnUnknown = call.turnMode === 'smartTurn' && metrics.smartTurnFallback === null;
     const actualTurnMode = smartTurnUnknown ? null : call.turnMode === 'smartTurn' && metrics.smartTurnFallback ? 'silence' : (call.turnMode ?? null);
     call.turnMetrics = { callId, ...metrics, engine: call.engine ?? 'gpt-realtime', turnMode: call.turnMode ?? null, actualTurnMode, thinkingTime, speed, proficiency };
+    // Every number the phone sent goes in the call log, which outlives the call record, plus two worked out from them.
+    const spoke = (metrics.userSpeechMs ?? 0) + (metrics.agentSpeechMs ?? 0);
     this.#log(call, {
       actualTurnMode,
-      replyGapMedianMs: metrics.replyGapMedianMs,
-      turnEndWaitMedianMs: metrics.turnEndWaitMedianMs,
-      suspectedCutoffs: metrics.suspectedCutoffs,
-      bargeIns: metrics.bargeIns,
-      ignoredAizuchi: metrics.ignoredAizuchi,
-      talkOvers: metrics.talkOvers,
-      userTurns: metrics.userTurns,
-      providerLatencyMedianMs: metrics.providerLatencyMedianMs,
-      providerLatencyP90Ms: metrics.providerLatencyP90Ms,
+      ...metrics,
+      userCallSharePercent: metrics.userSpeechMs === null || !spoke ? null : Math.round((metrics.userSpeechMs / spoke) * 100),
+      avgTurnMs: metrics.userSpeechMs === null || !metrics.userTurns ? null : Math.round(metrics.userSpeechMs / metrics.userTurns),
     });
+    this.#recordProgress(user, call, { userSpeechMs: metrics.userSpeechMs });
     this.store.save();
     return call.turnMetrics;
   }
@@ -742,6 +745,60 @@ export class CallEngine {
     return true;
   }
 
+  // The learning numbers the phone worked out from the call's transcript (public/learning-metrics.js).
+  saveLearning(user, callId, learning) {
+    const call = this.store.calls[callId];
+    if (!call || call.userId !== user.id || !call.connectedAt) return null;
+    call.learning = learning;
+    this.#log(call, learning);
+    this.#recordProgress(user, call, { englishTurnPercent: learning.englishTurnPercent, japaneseChars: learning.japaneseChars });
+    this.store.save();
+    return learning;
+  }
+
+  // The model's estimate of the learner's speaking level from a recorded call (OpenAI's gradeLevel).
+  // The reason is kept with the account; the call log keeps only the levels and confidence.
+  saveLevelEstimate(user, callId, estimate) {
+    const call = this.store.calls[callId];
+    if (!call || call.userId !== user.id) return null;
+    const record = { callId, at: this.now(), ...estimate };
+    const estimates = [record, ...user.levelEstimates.filter((saved) => saved.callId !== callId)];
+    user.levelEstimates = keepsEverything(user) ? estimates : estimates.slice(0, KEEP_PROGRESS);
+    this.#log(call, { estimatedLevel: estimate.level, estimatedVocabulary: estimate.vocabulary, estimatedGrammar: estimate.grammar, levelConfidence: estimate.confidence });
+    this.#recordProgress(user, call, { estimatedLevel: estimate.level });
+    this.store.save();
+    return record;
+  }
+
+  // What the learner sees under My Stack: minutes of Japanese they've spoken on calls, adding up over time, and,
+  // after enough graded calls, the level their speaking sounds like (the middle of their last few estimates).
+  progress(user) {
+    let total = 0;
+    const points = [...user.progress]
+      .sort((a, b) => a.at - b.at)
+      .filter((entry) => entry.japaneseMs !== null && entry.japaneseMs !== undefined)
+      .map((entry) => {
+        total += entry.japaneseMs;
+        return { at: entry.at, minutes: Math.round((total / 60_000) * 10) / 10 };
+      });
+    const recent = user.levelEstimates.slice(0, LEVEL_SAMPLE).map((estimate) => JLPT_ORDER.indexOf(estimate.level));
+    const speakingLevel = recent.length >= LEVEL_SAMPLE ? JLPT_ORDER[[...recent].sort((a, b) => a - b)[Math.floor(recent.length / 2)]] : null;
+    return { points, totalMinutes: points.at(-1)?.minutes ?? 0, speakingLevel, gradedCalls: user.levelEstimates.length, callsUntilLevel: Math.max(0, LEVEL_SAMPLE - user.levelEstimates.length) };
+  }
+
+  // One entry per call in the learner's own progress history, filled in as the timing, learning numbers and level
+  // arrive. Japanese speaking time is their speaking time, less the share of their lines that were mostly English.
+  #recordProgress(user, call, change) {
+    let entry = user.progress.find((saved) => saved.callId === call.id);
+    if (!entry) {
+      entry = { callId: call.id, at: call.connectedAt ?? call.startedAt ?? this.now(), userSpeechMs: null, englishTurnPercent: null, japaneseChars: null, japaneseMs: null, estimatedLevel: null };
+      user.progress.push(entry);
+      if (!keepsEverything(user) && user.progress.length > KEEP_PROGRESS) user.progress.splice(0, user.progress.length - KEEP_PROGRESS);
+    }
+    Object.assign(entry, change);
+    if (entry.userSpeechMs !== null && entry.englishTurnPercent !== null) entry.japaneseMs = Math.round((entry.userSpeechMs * (100 - entry.englishTurnPercent)) / 100);
+  }
+
   // The two 1-5 taps after a call, and the optional comment, kept with the account since calls are removed after
   // 7 days. The call log only says whether there was a comment: its text stays with the account (and the recording).
   saveRating(user, callId, rating, comment = null) {
@@ -901,7 +958,11 @@ export class CallEngine {
     delete this.store.calls[callId];
     this.store.callLog = this.store.callLog.filter((entry) => entry.callId !== callId);
     this.store.scenarioChecks = this.store.scenarioChecks.filter((check) => check.callId !== callId);
-    if (owner) owner.ratings = owner.ratings.filter((record) => record.callId !== callId);
+    if (owner) {
+      owner.ratings = owner.ratings.filter((record) => record.callId !== callId);
+      owner.progress = owner.progress.filter((entry) => entry.callId !== callId);
+      owner.levelEstimates = owner.levelEstimates.filter((record) => record.callId !== callId);
+    }
     this.store.save();
     return true;
   }

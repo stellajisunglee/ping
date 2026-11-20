@@ -79,6 +79,13 @@ export class Recordings {
     return true;
   }
 
+  // Adds the model's speaking-level estimate to a recorded call, beside its transcript.
+  saveLevelEstimate(info, estimate) {
+    if (!this.#valid(info)) return false;
+    this.#saveInfo(info, { levelEstimate: estimate });
+    return true;
+  }
+
   // Every recorded call, newest first, without the transcripts.
   list() {
     if (!existsSync(this.dir)) return [];

@@ -340,6 +340,24 @@ export function turnFacts(entry) {
   ];
 }
 
+// The learner's side of a call, for the admin call log. Calls from before these were measured show -.
+export function learningFacts(entry) {
+  const value = (number, suffix = '') => (number == null ? '-' : `${number}${suffix}`);
+  const words = entry.distinctWords == null ? '-' : `${entry.distinctWords} (N5 ${entry.jlptN5Words}, N4 ${entry.jlptN4Words}, N3 ${entry.jlptN3Words}, N2 ${entry.jlptN2Words}, N1 ${entry.jlptN1Words}, other ${entry.offListWords})`;
+  const level = entry.estimatedLevel ? `${entry.estimatedLevel} (vocabulary ${entry.estimatedVocabulary}, grammar ${entry.estimatedGrammar}, ${entry.levelConfidence} confidence)` : '-';
+  return [
+    ['Learner talk share', value(entry.userCallSharePercent, '%')],
+    ['Average turn', entry.avgTurnMs == null ? '-' : `${secondsText(entry.avgTurnMs)}, ${value(entry.avgTurnChars)} characters`],
+    ['Time to start answering', entry.answerStartMedianMs == null ? '-' : secondsText(entry.answerStartMedianMs)],
+    ['Japanese characters said', value(entry.japaneseChars)],
+    ['Turns mostly in English', value(entry.englishTurnPercent, '%')],
+    ['Different words', words],
+    ['Stack words used / new', entry.stackWordsUsed == null ? '-' : `${entry.stackWordsUsed} / ${entry.newWords}`],
+    ['Help requests', value(entry.helpRequests)],
+    ['Estimated level', level],
+  ];
+}
+
 // Which opening question a call got: at random, or a test scenario's, with the admin's checklist results.
 // Entries from before topic modes say -.
 export function topicText(entry, checks = [], scenarios = []) {
@@ -379,6 +397,7 @@ function callLogRow(entry, checks = [], comment = null) {
     ['Topic', topicText(entry, checks, state.me.callSetup?.scenarios)],
     ['Length', durationText(entry.seconds)],
     ...turnFacts(entry),
+    ...learningFacts(entry),
     ['Rating', entry.cutOffs ? `cut-offs ${entry.cutOffs}/5, natural ${entry.naturalness}/5` : '-'],
     ...(comment ? [['Comment', comment]] : []),
   ];
@@ -498,6 +517,10 @@ function recordingRow(call) {
         body.append(el('p', { className: 'muted', textContent: 'No audio was uploaded for this call.' }));
       }
       if (call.rating?.comment) body.append(el('p', { className: 'recording-comment', textContent: `Comment: ${call.rating.comment}` }));
+      if (call.levelEstimate) {
+        const { level, confidence, reason } = call.levelEstimate;
+        body.append(el('p', { className: 'muted', textContent: `Estimated speaking level: ${level} (${confidence} confidence). ${reason}` }));
+      }
       const { lines } = await api(`/api/admin/recordings/${call.callId}`);
       body.append(
         lines.length

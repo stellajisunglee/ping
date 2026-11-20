@@ -285,3 +285,25 @@ test('the admin call log says n/a for what an engine cannot measure, and - for w
   assert.deepEqual(facts({ engine: 'deepgram-agent' }), { 'Gap before reply': 'n/a', 'Deepgram-reported latency': '-', 'Talked over Ping': '-', 'Suspected cut-offs': '-' });
   assert.deepEqual(facts({}), { 'Gap before reply': '-', 'Talked over Ping': '-', 'Suspected cut-offs': '-' });
 });
+
+test('speaking time adds up each side, and time to answer runs from the contact finishing to the user starting', () => {
+  const summary = summarize(
+    timeline(
+      ['agentStarted', 0], ['agentStopped', 3000], // the contact asks: 3 s
+      ['speechStarted', 4200], ['speechStopped', 7000], ['committed', 7010], // 1.2 s to start; 2.8 s of speech (no silence wait known)
+      ['agentStarted', 8000], ['agentStopped', 10_000], // 2 s
+      ['speechStarted', 12_000], ['speechStopped', 16_000], ['committed', 16_010], // 2 s to start; 4 s
+      ['agentStarted', 17_000], ['speechStarted', 17_500], ['agentCleared', 17_600], ['speechStopped', 18_500], // talked over: no answer time
+    ),
+  );
+  assert.equal(summary.agentSpeechMs, 3000 + 2000 + 600);
+  assert.equal(summary.userSpeechMs, 2800 + 4000 + 1000);
+  assert.equal(summary.answerStartMedianMs, 1200, 'the median of 1.2 s and 2 s, by nearest rank');
+});
+
+test('speech still going when the call ends counts up to the end, and a call with no answers has no answer time', () => {
+  const summary = summarizeTurns(timeline(['agentStarted', 0], ['agentStopped', 2000], ['speechStarted', 59_000]), { connectedAt: 0, endedAt: 60_000 });
+  assert.equal(summary.userSpeechMs, 1000);
+  assert.equal(summary.answerStartMedianMs, 57_000);
+  assert.equal(summarize(timeline(['agentStarted', 0], ['agentStopped', 2000])).answerStartMedianMs, null);
+});
