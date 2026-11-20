@@ -123,9 +123,29 @@ function recordingStatus(text) {
   $('recording-status').hidden = !text;
 }
 
+const megabytes = (bytes) => `${Math.round(bytes / 1_000_000).toLocaleString()} MB`;
+
+// How full the server's disk is. Admin and beta testers' recordings are never deleted automatically,
+// so this says when they need to move to cloud storage.
+export function storageText({ recordingsBytes, storeBytes, diskBytes, freeBytes }) {
+  const used = `Recordings ${megabytes(recordingsBytes)}, other data ${megabytes(storeBytes)}`;
+  if (!diskBytes) return `${used}.`;
+  const full = Math.round(((diskBytes - freeBytes) / diskBytes) * 100);
+  return `${used}. The disk is ${full}% full (${megabytes(freeBytes)} free of ${megabytes(diskBytes)})${full >= 80 ? ': time to move recordings to cloud storage.' : '.'}`;
+}
+
+async function renderStorage() {
+  try {
+    $('storage-status').textContent = storageText(await api('/api/admin/storage'));
+  } catch {
+    $('storage-status').textContent = "Couldn't check the disk.";
+  }
+}
+
 function renderAdminTools() {
   $('admin-tools').hidden = !isAdmin();
   if (!isAdmin()) return;
+  renderStorage();
   $('record-input').checked = recordSwitch();
   const { recording, waiting, problem } = lastRecording;
   $('save-recording-button').hidden = !recording;
@@ -303,13 +323,18 @@ const secondsText = (ms) => (ms == null ? '-' : `${(ms / 1000).toFixed(1)} s`);
 // What the admin call log says about a call's turn-taking. What the engine doesn't let the phone measure says
 // n/a; what wasn't measured or reported (an older entry, or a call with no replies) says -.
 // Deepgram's latency is its own report, from where it judged the user stopped, so it's never shown as the gap.
+// Engines whose provider reports its own latency, and what to call that provider.
+const PROVIDER_NAMES = { 'deepgram-agent': 'Deepgram' };
+
 export function turnFacts(entry) {
   const deepgram = entry.engine === 'deepgram-agent';
   const talkOvers = entry.talkOvers == null ? '-' : `${entry.talkOvers} (${deepgram ? 'aizuchi: n/a' : `${entry.ignoredAizuchi ?? '-'} aizuchi`})`;
   const providerLatency = entry.providerLatencyMedianMs == null ? '-' : `${secondsText(entry.providerLatencyMedianMs)}, P90 ${secondsText(entry.providerLatencyP90Ms)}`;
+  // providerLatency* is whatever latency the engine's own provider reports, labelled with the provider's name.
+  const provider = PROVIDER_NAMES[entry.engine];
   return [
     ['Gap before reply', deepgram ? 'n/a' : secondsText(entry.replyGapMedianMs)],
-    ...(deepgram ? [['Deepgram-reported latency', providerLatency]] : []),
+    ...(provider ? [[`${provider}-reported latency`, providerLatency]] : []),
     ['Talked over Ping', talkOvers],
     ['Suspected cut-offs', entry.suspectedCutoffs ?? '-'],
   ];
@@ -324,8 +349,25 @@ export function topicText(entry, checks = [], scenarios = []) {
   return `Controlled: ${name}${counts.length ? ` (${counts.map(([result, count]) => `${count} ${result}`).join(', ')})` : ''}`;
 }
 
+// An admin deletes a call's recording, transcript, rating, comment and log entry. Admin and beta testers'
+// calls are never deleted otherwise. Removes the row from the page once it's gone.
+function deleteCallButton(callId, row) {
+  const button = el('button', { type: 'button', className: 'text-link danger', textContent: 'Delete this call' });
+  button.addEventListener('click', async () => {
+    if (!confirm("Delete this call's recording, transcript, rating, comment and call log entry? This can't be undone.")) return;
+    try {
+      await api(`/api/admin/calls/${callId}`, { method: 'DELETE' });
+      row().remove();
+      renderStorage();
+    } catch (error) {
+      alert(error.message);
+    }
+  });
+  return button;
+}
+
 // One call in the admin call log. The turn mode is blank for engines that decide turns themselves.
-function callLogRow(entry, checks = []) {
+function callLogRow(entry, checks = [], comment = null) {
   const when = new Date(entry.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   const who = `${ACCOUNT_KINDS[entry.joinedWith] ?? entry.joinedWith ?? ''} ${entry.userId.slice(0, 6)}`;
   const mode = TURN_MODE_NAMES[entry.turnMode] ?? '';
@@ -338,13 +380,16 @@ function callLogRow(entry, checks = []) {
     ['Length', durationText(entry.seconds)],
     ...turnFacts(entry),
     ['Rating', entry.cutOffs ? `cut-offs ${entry.cutOffs}/5, natural ${entry.naturalness}/5` : '-'],
+    ...(comment ? [['Comment', comment]] : []),
   ];
-  return el(
+  const row = el(
     'li',
     { className: 'call-log-entry' },
     el('p', {}, el('strong', { textContent: when }), el('span', { className: 'muted', textContent: ` ${who}${entry.recorded ? ' · recorded' : ''}` })),
     el('dl', {}, ...facts.flatMap(([term, value]) => [el('dt', { textContent: term }), el('dd', { textContent: String(value) })])),
   );
+  row.append(deleteCallButton(entry.callId, () => row));
+  return row;
 }
 
 async function renderCallLog() {
@@ -352,9 +397,10 @@ async function renderCallLog() {
   const list = $('call-log-list');
   list.replaceChildren(el('li', { className: 'muted', textContent: 'Loading…' }));
   try {
-    const { calls, scenarioChecks = [] } = await api('/api/admin/calls');
+    const { calls, scenarioChecks = [], comments = [] } = await api('/api/admin/calls');
     const checksFor = (entry) => scenarioChecks.filter((check) => check.callId === entry.callId);
-    list.replaceChildren(...(calls.length ? calls.map((entry) => callLogRow(entry, checksFor(entry))) : [el('li', { className: 'muted', textContent: 'No calls yet.' })]));
+    const commentFor = (entry) => comments.find((saved) => saved.callId === entry.callId)?.comment ?? null;
+    list.replaceChildren(...(calls.length ? calls.map((entry) => callLogRow(entry, checksFor(entry), commentFor(entry))) : [el('li', { className: 'muted', textContent: 'No calls yet.' })]));
   } catch (error) {
     list.replaceChildren();
     setError('call-log-error', error.message);
@@ -451,6 +497,7 @@ function recordingRow(call) {
       } else {
         body.append(el('p', { className: 'muted', textContent: 'No audio was uploaded for this call.' }));
       }
+      if (call.rating?.comment) body.append(el('p', { className: 'recording-comment', textContent: `Comment: ${call.rating.comment}` }));
       const { lines } = await api(`/api/admin/recordings/${call.callId}`);
       body.append(
         lines.length
@@ -460,8 +507,10 @@ function recordingRow(call) {
     } catch (error) {
       body.append(el('p', { className: 'error', textContent: error.message }));
     }
+    body.append(deleteCallButton(call.callId, () => item));
   });
-  return el('li', {}, details);
+  const item = el('li', {}, details);
+  return item;
 }
 
 async function renderRecordings() {

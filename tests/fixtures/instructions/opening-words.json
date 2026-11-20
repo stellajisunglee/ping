@@ -1,10 +1,10 @@
 {
-  "ping-beginner-formal-incoming-morning": "もしもし、ピンです！おはようございます！今、お時間大丈夫ですか？",
-  "ping-beginner-formal-callback-afternoon": "もしもし、ピンです！折り返してくれて、ありがとうございます！今日は何を食べましたか？",
-  "ping-intermediate-casual-incoming-evening": "もしもし、ピンだよ！こんばんは！今、話せる？",
-  "ping-advanced-casual-callback-after-midnight": "もしもし、ピンだよ！折り返してくれて、ありがとう！最近、どう？",
-  "ping-advanced-formal-incoming-night": "もしもし、ピンです！こんばんは！今、お時間大丈夫ですか？",
-  "ping-intermediate-formal-callback-memories": "もしもし、ピンです！折り返してくれて、ありがとうございます！今日は何をしましたか？",
-  "custom-beginner-formal-incoming": "もしもし、ユキです！おはようございます！今、お時間大丈夫ですか？",
-  "custom-advanced-casual-callback-memories": "もしもし、ユキだよ！折り返してくれて、ありがとう！"
+  "ping-n5-formal-incoming-morning": "もしもし、ピンです！おはようございます！今、お時間大丈夫ですか？",
+  "ping-n4-formal-callback-afternoon": "もしもし、ピンです！折り返してくれて、ありがとうございます！今日は何を食べましたか？",
+  "ping-n3-casual-incoming-evening": "もしもし、ピンだよ！こんばんは！今、話せる？",
+  "ping-n1-casual-callback-after-midnight": "もしもし、ピンだよ！折り返してくれて、ありがとう！最近、どう？",
+  "ping-n2-formal-incoming-night": "もしもし、ピンです！こんばんは！今、お時間大丈夫ですか？",
+  "ping-n3-formal-callback-memories": "もしもし、ピンです！折り返してくれて、ありがとうございます！今日は何をしましたか？",
+  "custom-n5-formal-incoming": "もしもし、ユキです！おはようございます！今、お時間大丈夫ですか？",
+  "custom-n1-casual-callback-memories": "もしもし、ユキだよ！折り返してくれて、ありがとう！"
 }

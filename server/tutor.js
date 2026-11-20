@@ -52,8 +52,8 @@ export const TOOLS = [
         },
         proficiency: {
           type: 'string',
-          enum: ['beginner', 'intermediate', 'advanced'],
-          description: 'How hard your Japanese is.',
+          enum: ['N5', 'N4', 'N3', 'N2', 'N1'],
+          description: "How hard your Japanese is, as a JLPT level: N5 is the easiest and N1 the hardest. To make it a little easier or harder, move one level from the user's current level.",
         },
         callsEnabled: {
           type: 'boolean',

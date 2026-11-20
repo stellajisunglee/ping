@@ -11,7 +11,7 @@
     "name": "Right for the learner's level",
     "question": "Is Ping's Japanese right for the learner's level?",
     "pass": "Beginner: short sentences, everyday words, simple grammar. Intermediate: natural everyday Japanese. Advanced: natural Japanese at any level.",
-    "fail": "The Japanese is clearly too hard for the level (long sentences, rare words, complex grammar), or babyish for an intermediate or advanced learner."
+    "fail": "The Japanese is clearly too hard for the level (long sentences, rare words, complex grammar), or babyish for a learner at JLPT N3 or above."
   },
   {
     "id": "brevity",

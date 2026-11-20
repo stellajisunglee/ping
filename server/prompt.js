@@ -11,12 +11,14 @@ import { DEFAULT_SETTINGS } from './settings.js';
 // Which version of the instructions a call got, saved in the call log so calls can be compared across prompt
 // changes. Raise it by one whenever what a contact is told changes (this file, persona.js or lines.js).
 // tests/instructions-snapshot.test.js fails until it's raised, since it pins the golden copies to it.
-export const PROMPT_VERSION = 1;
+export const PROMPT_VERSION = 2; // 2: JLPT levels N5-N1 replaced beginner, intermediate and advanced
 
 const LEVEL_GUIDE = {
-  beginner: 'The user is a beginner. Use only very common words and simple sentence patterns.',
-  intermediate: 'The user is intermediate. Use natural everyday sentences and ordinary vocabulary.',
-  advanced: 'The user is advanced. Speak as you would to a fluent adult, with natural vocabulary and expressions.',
+  N5: 'The user is at about JLPT N5, just starting. Use only very common words and simple sentence patterns.',
+  N4: 'The user is at about JLPT N4. Use common everyday words and simple sentence patterns.',
+  N3: 'The user is at about JLPT N3. Use natural everyday sentences and ordinary vocabulary.',
+  N2: 'The user is at about JLPT N2. Speak naturally, with a wide range of everyday vocabulary and expressions.',
+  N1: 'The user is at about JLPT N1, near-fluent. Speak as you would to a fluent adult, with natural vocabulary and expressions.',
 };
 
 const FORMALITY_GUIDE = {

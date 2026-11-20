@@ -443,7 +443,7 @@ test('turn metrics are stored on the call with their settings, and logged once',
   const stored = engine.store.calls[call.id].turnMetrics;
   // This call never connected, so it was never assigned a turn mode.
   const notSent = { talkOvers: null, providerLatencyMedianMs: null, providerLatencyP90Ms: null, providerLatencyCount: null };
-  assert.deepEqual(stored, { callId: call.id, ...METRICS, ...notSent, engine: 'gpt-realtime', turnMode: null, actualTurnMode: null, thinkingTime: 'normal', speed: 1, proficiency: 'beginner' });
+  assert.deepEqual(stored, { callId: call.id, ...METRICS, ...notSent, engine: 'gpt-realtime', turnMode: null, actualTurnMode: null, thinkingTime: 'normal', speed: 1, proficiency: 'N5' });
   assert.equal(lines.length, 1);
   assert.match(lines[0], /^turn-metrics \{/);
   assert.deepEqual(JSON.parse(lines[0].slice('turn-metrics '.length)), stored);
@@ -599,7 +599,7 @@ test('accounts that saw an older Privacy Policy get a one-time notice about what
   assert.equal((await request('/api/me', { token })).data.policyNotice, null);
 });
 
-test('after a call, the user can rate cut-offs and naturalness from 1 to 5, as numbers only', async () => {
+test('after a call, the user can rate cut-offs and naturalness from 1 to 5', async () => {
   const tester = await joinWith(BETA_CODE);
   const { data: notConnected } = await request('/api/calls', { method: 'POST', token: tester.token });
   const rate = (callId, body, token = tester.token) => request(`/api/calls/${callId}/rating`, { method: 'POST', token, body });
@@ -616,11 +616,35 @@ test('after a call, the user can rate cut-offs and naturalness from 1 to 5, as n
 
   const { ratings } = engine.userForToken(tester.token);
   assert.equal(ratings.length, 1);
-  assert.deepEqual(Object.keys(ratings[0]).sort(), ['at', 'callId', 'cutOffs', 'engine', 'naturalness', 'turnMode']);
+  assert.deepEqual(Object.keys(ratings[0]).sort(), ['at', 'callId', 'comment', 'cutOffs', 'engine', 'naturalness', 'turnMode']);
+  assert.equal(ratings[0].comment, null, 'the second rating had no comment');
   assert.deepEqual([ratings[0].cutOffs, ratings[0].naturalness, ratings[0].engine], [1, 5, 'gpt-realtime']);
   assert.equal(ratings[0].turnMode, engine.store.calls[call.id].turnMode, 'the rating keeps the mode the call was assigned');
   const listed = (await request('/api/admin/recordings', { token: await join() })).data.recordings.find((item) => item.callId === call.id);
-  assert.deepEqual(listed.rating, { cutOffs: 1, naturalness: 5 });
+  assert.deepEqual(listed.rating, { cutOffs: 1, naturalness: 5, comment: null });
+});
+
+test('a comment left with the rating is kept with that call, for admins only, and only flagged in the call log', async () => {
+  const tester = await joinWith(BETA_CODE);
+  const call = await connectedCall(tester.token);
+  await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: tester.token });
+  const long = `  ${'あ'.repeat(1200)}  `;
+  const rate = (body) => request(`/api/calls/${call.id}/rating`, { method: 'POST', token: tester.token, body });
+  assert.equal((await rate({ cutOffs: 3, naturalness: 3, comment: 42 })).status, 201, 'a comment that is not text is dropped, not refused');
+  assert.equal(engine.userForToken(tester.token).ratings[0].comment, null);
+  assert.equal((await rate({ cutOffs: 3, naturalness: 3, comment: long })).status, 201);
+  assert.equal(engine.userForToken(tester.token).ratings[0].comment.length, 1000, 'trimmed and capped');
+  assert.equal((await rate({ cutOffs: 2, naturalness: 4, comment: ' Ping waited too long after my answer. ' })).status, 201);
+
+  const admin = await join();
+  assert.equal((await request('/api/admin/calls', { token: tester.token })).status, 403);
+  const { data } = await request('/api/admin/calls', { token: admin });
+  const entry = data.calls.find((logged) => logged.callId === call.id);
+  assert.equal(entry.commented, true);
+  assert.ok(!JSON.stringify(entry).includes('Ping waited'), "the call log keeps numbers and flags, not the comment's words");
+  assert.equal(data.comments.find((saved) => saved.callId === call.id).comment, 'Ping waited too long after my answer.');
+  const listed = (await request('/api/admin/recordings', { token: admin })).data.recordings.find((item) => item.callId === call.id);
+  assert.equal(listed.rating.comment, 'Ping waited too long after my answer.');
 });
 
 // Engines and turn modes
@@ -861,7 +885,7 @@ test('every randomized call logs its ids, settings, build, prompt version, how i
   }
   for (const entry of entries) {
     assert.ok(CONFIG_FIELDS.every((field) => field in entry), JSON.stringify(entry));
-    assert.deepEqual([entry.contactId, entry.proficiency, entry.formality, entry.thinkingTime, entry.speed, entry.endReason], ['ping', 'beginner', 'formal', 'normal', 1, 'hung-up']);
+    assert.deepEqual([entry.contactId, entry.proficiency, entry.formality, entry.thinkingTime, entry.speed, entry.endReason], ['ping', 'N5', 'formal', 'normal', 1, 'hung-up']);
     assert.ok(QUESTIONS.some((question) => question.id === entry.questionId));
     assert.deepEqual([entry.buildCommit, entry.promptVersion], [COMMIT.toLowerCase(), PROMPT_VERSION]);
     // This server has no Deepgram key, so all four ran on OpenAI.
@@ -936,4 +960,38 @@ test('the server keeps metrics from the oldest app version, with what it never s
     console.log = log;
     await request('/api/call-setup', { method: 'PUT', token, body: { manual: false } });
   }
+});
+
+test('the app asks for a JLPT level until one is picked, and refuses the old level names', async () => {
+  const token = await join();
+  assert.equal((await request('/api/me', { token })).data.levelChosen, false);
+  const old = await request('/api/settings', { method: 'PATCH', token, body: { proficiency: 'advanced' } });
+  assert.equal(old.data.settings.proficiency, 'N5');
+  assert.equal((await request('/api/me', { token })).data.levelChosen, false);
+  const picked = await request('/api/settings', { method: 'PATCH', token, body: { proficiency: 'N3' } });
+  assert.equal(picked.data.settings.proficiency, 'N3');
+  assert.equal((await request('/api/me', { token })).data.levelChosen, true);
+});
+
+test('an admin can delete one call, recording included, and see how full the disk is', async () => {
+  const tester = await joinWith(BETA_CODE);
+  const call = await connectedCall(tester.token);
+  await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: tester.token });
+  assert.equal(await uploadAudio(tester.token, call.id), 201);
+  await request(`/api/calls/${call.id}/transcript`, { method: 'POST', token: tester.token, body: { lines: RECORDED_LINES } });
+  await request(`/api/calls/${call.id}/rating`, { method: 'POST', token: tester.token, body: { cutOffs: 2, naturalness: 4, comment: 'Nice.' } });
+
+  const admin = await join();
+  assert.equal((await request(`/api/admin/calls/${call.id}`, { method: 'DELETE', token: tester.token })).status, 403);
+  assert.equal((await request('/api/admin/storage', { token: tester.token })).status, 403);
+  const before = (await request('/api/admin/storage', { token: admin })).data;
+  assert.ok(before.recordingsBytes >= AUDIO.length);
+
+  assert.equal((await request(`/api/admin/calls/${call.id}`, { method: 'DELETE', token: admin })).status, 200);
+  assert.equal((await request(`/api/admin/recordings/${call.id}`, { token: admin })).status, 404);
+  const { data } = await request('/api/admin/calls', { token: admin });
+  assert.equal(data.calls.some((entry) => entry.callId === call.id), false);
+  assert.equal(data.comments.some((saved) => saved.callId === call.id), false);
+  assert.equal((await request(`/api/admin/calls/${call.id}`, { method: 'DELETE', token: admin })).status, 404);
+  assert.ok((await request('/api/admin/storage', { token: admin })).data.recordingsBytes < before.recordingsBytes);
 });

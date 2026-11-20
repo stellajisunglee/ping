@@ -70,7 +70,7 @@ async function enable() {
   }
   try {
     await subscribeToPush();
-    go('home');
+    goHome();
     notice(microphoneWarning);
   } catch (error) {
     setError('enable-error', error.message);
@@ -84,7 +84,7 @@ async function join(event) {
     const result = await api('/api/register', { method: 'POST', body: { inviteCode: $('invite-code').value.trim(), timeZone: timeZone() } });
     writeToken(result.token);
     state.me = result;
-    show('enable');
+    show('level');
   } catch (error) {
     setError('join-error', error.message);
   }
@@ -208,7 +208,7 @@ const POLICY_NOTICES = {
   },
   update: {
     title: 'Privacy Policy updated',
-    text: 'Some calls now run on Deepgram, another voice AI service, as well as OpenAI. The Privacy Policy lists who handles your calls.',
+    text: 'You can now leave a comment after a call. Comments are kept with that call so the Ping team can read them. The Privacy Policy has the details.',
   },
 };
 
@@ -227,7 +227,23 @@ async function dismissPolicyNotice() {
   await api('/api/policy/seen', { method: 'POST' }).catch((error) => console.warn('Could not save that the notice was seen', error));
 }
 
-const goHome = () => go('home');
+// Everyone picks a JLPT level before they reach Home, including accounts from before there were JLPT levels.
+const goHome = () => (state.me && !state.me.levelChosen ? show('level') : go('home'));
+
+// The level picker, shown once before Home. Then notifications, if they aren't on yet.
+async function chooseLevel(proficiency) {
+  setError('level-error', null);
+  try {
+    const settings = await api('/api/settings', { method: 'PATCH', body: { proficiency } });
+    state.me.settings = settings.settings;
+    state.me.levelChosen = true;
+    const pushAllowed = 'Notification' in window && Notification.permission === 'granted';
+    if (!pushAllowed) return show('enable');
+    goHome();
+  } catch (error) {
+    setError('level-error', error.message);
+  }
+}
 
 // Ringing
 
@@ -563,6 +579,7 @@ function askForRating(callId, endedNotice) {
     );
   }
   $('rate-done').disabled = true;
+  $('rate-comment').value = '';
   show('rate');
 }
 
@@ -575,8 +592,9 @@ function chooseRating(field, value) {
 function finishRating(send) {
   if (!rating) return;
   const { callId, endedNotice, cutOffs, naturalness } = rating;
+  const comment = $('rate-comment').value.trim() || null;
   rating = null;
-  if (send) api(`/api/calls/${callId}/rating`, { method: 'POST', body: { cutOffs, naturalness } }).catch((error) => console.warn('Could not save the rating', error));
+  if (send) api(`/api/calls/${callId}/rating`, { method: 'POST', body: { cutOffs, naturalness, comment } }).catch((error) => console.warn('Could not save the rating', error));
   goHome();
   notice(endedNotice);
 }
@@ -643,6 +661,10 @@ function bindEvents() {
   });
   $('join-form').addEventListener('submit', join);
   $('enable-button').addEventListener('click', enable);
+  $('level-choices').addEventListener('click', (event) => {
+    const choice = event.target.closest('[data-level]');
+    if (choice) chooseLevel(choice.dataset.level);
+  });
   $('answer-button').addEventListener('click', () => answer(ringingCallId));
   $('outgoing-cancel').addEventListener('click', cancelOutgoing);
   $('policy-notice-ok').addEventListener('click', dismissPolicyNotice);

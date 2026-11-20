@@ -21,7 +21,7 @@ const SCREEN_TABS = {
   recordings: 'settings',
   'call-log': 'settings',
 };
-const SCREENS = [...Object.keys(SCREEN_TABS), 'install', 'join', 'enable', 'ringing', 'outgoing', 'call', 'rate'];
+const SCREENS = [...Object.keys(SCREEN_TABS), 'install', 'join', 'level', 'enable', 'ringing', 'outgoing', 'call', 'rate'];
 const renderers = {};
 const TAB_ROOTS = ['home', 'contacts', 'settings'];
 const BACK_SWIPE_DISTANCE = 70;

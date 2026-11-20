@@ -895,12 +895,12 @@
     "title": "Intermediate learner, longer answer",
     "question": "lately",
     "settings": {
-      "proficiency": "intermediate"
+      "proficiency": "N3"
     },
     "turns": [
       "最近は仕事が忙しくて、あまり寝られていないんですが、週末に温泉に行く予定なので楽しみにしています。"
     ],
-    "expect": "Ping answers in natural everyday Japanese suited to an intermediate learner (not simplified baby talk), reacts to the onsen plan, and asks a follow-up.",
+    "expect": "Ping answers in natural everyday Japanese suited to an intermediate (JLPT N3) learner (not simplified baby talk), reacts to the onsen plan, and asks a follow-up.",
     "checks": [
       {
         "type": "noEnglish",

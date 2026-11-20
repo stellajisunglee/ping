@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { brotliCompress, constants as zlibConstants } from 'node:zlib';
@@ -7,7 +7,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
-import { CallEngine, cleanRating, cleanTranscript, LimitError, PlanError, policyNoticeFor, recordingLocked, recordsCalls } from './calls.js';
+import { CallEngine, cleanComment, cleanRating, cleanTranscript, LimitError, PlanError, policyNoticeFor, recordingLocked, recordsCalls } from './calls.js';
 import { audioExtension, Recordings } from './recordings.js';
 import { callConfig, ENGINES, RANDOM_MIX } from './experiment.js';
 import { SCENARIOS } from './scenarios.js';
@@ -116,6 +116,23 @@ async function readJson(req) {
 const isSubscription = (value) =>
   typeof value?.endpoint === 'string' && value.endpoint.startsWith('https://') && typeof value.keys?.p256dh === 'string' && typeof value.keys?.auth === 'string';
 
+// The recordings' size, the store file's, and the disk's size and free space where the data lives (null if unknown).
+export function diskUsage({ dataDir, recordingsBytes }) {
+  const storeFile = dataDir ? join(dataDir, 'ping.json') : null;
+  let storeBytes = 0;
+  try {
+    if (storeFile && existsSync(storeFile)) storeBytes = statSync(storeFile).size;
+  } catch {}
+  let diskBytes = null;
+  let freeBytes = null;
+  try {
+    const stats = statfsSync(dataDir ?? ROOT);
+    diskBytes = stats.blocks * stats.bsize;
+    freeBytes = stats.bavail * stats.bsize;
+  } catch {}
+  return { recordingsBytes, storeBytes, diskBytes, freeBytes };
+}
+
 export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: '' }), config }) {
   const { inviteCodes, vapidPublicKey, model, voice, dataDir } = config;
   const deepgramThinkModel = config.deepgramThinkModel ?? 'gpt-4.1-mini';
@@ -194,6 +211,7 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       turnMode: user.turnMode,
       clearAt: user.clearAt,
       settings: user.settings,
+      levelChosen: user.levelChosen, // false until they pick a JLPT level, which the app asks for before Home
       hasSubscription: Boolean(user.subscription),
       streak: engine.streak(user),
       lastCall: engine.lastCall(user),
@@ -313,6 +331,23 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       return;
     }
 
+    // An admin deletes everything kept about one call, its recording included. Nothing else ever deletes
+    // admin and beta testers' calls.
+    const deleteCallRoute = pathname.match(/^\/api\/admin\/calls\/([\w-]+)$/);
+    if (method === 'DELETE' && deleteCallRoute) {
+      if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
+      const deletedRecording = recordings.deleteCall(deleteCallRoute[1]);
+      const deletedData = engine.deleteCallData(deleteCallRoute[1]);
+      if (!deletedRecording && !deletedData) return json(res, 404, { error: 'Call not found.' });
+      return json(res, 200, {});
+    }
+
+    // How full the disk is, so the admin knows when recordings need to move to cloud storage.
+    if (method === 'GET' && pathname === '/api/admin/storage') {
+      if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
+      return json(res, 200, diskUsage({ dataDir, recordingsBytes: recordings.bytes() }));
+    }
+
     if (method === 'GET' && pathname === '/api/admin/invites') {
       if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
       return json(res, 200, { invites: engine.inviteReport(Object.keys(inviteCodes).filter((name) => inviteCodes[name])) });
@@ -347,7 +382,7 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
 
     if (method === 'GET' && pathname === '/api/admin/calls') {
       if (user.role !== 'admin') return json(res, 403, { error: 'This is only for admins.' });
-      return json(res, 200, { calls: engine.callLog(), scenarioChecks: engine.scenarioChecks() });
+      return json(res, 200, { calls: engine.callLog(), scenarioChecks: engine.scenarioChecks(), comments: engine.callComments() });
     }
 
     const checkRoute = pathname.match(/^\/api\/admin\/calls\/([\w-]+)\/checks$/);
@@ -484,13 +519,16 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
     // The two 1-5 taps after a call. Numbers only, like the timing numbers.
     const ratingRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/rating$/);
     if (method === 'POST' && ratingRoute) {
-      const rating = cleanRating(await readJson(req));
+      const body = await readJson(req);
+      const rating = cleanRating(body);
       if (!rating) return json(res, 400, { error: 'Ratings are whole numbers from 1 to 5.' });
-      const record = engine.saveRating(user, ratingRoute[1], rating);
+      const comment = cleanComment(body.comment);
+      const record = engine.saveRating(user, ratingRoute[1], rating, comment);
       if (!record) return json(res, 404, { error: 'Call not found.' });
       const recordedCall = engine.recordedCall(user, ratingRoute[1]);
-      if (recordedCall) recordings.saveRating(engine.recordingInfo(user, recordedCall), rating);
-      console.log(`call-rating ${JSON.stringify(record)}`);
+      if (recordedCall) recordings.saveRating(engine.recordingInfo(user, recordedCall), { ...rating, comment });
+      // The server log gets the numbers only, never the comment's words.
+      console.log(`call-rating ${JSON.stringify({ ...record, comment: undefined, commented: Boolean(comment) })}`);
       return json(res, 201, {});
     }
 

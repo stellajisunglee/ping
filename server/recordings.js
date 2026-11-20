@@ -116,6 +116,27 @@ export class Recordings {
     return { type: TYPE_FOR_EXTENSION[info.audio], size: statSync(path).size, stream: () => createReadStream(path) };
   }
 
+  // One call's recording and transcript, when an admin deletes it. Returns whether there was one.
+  deleteCall(callId) {
+    const info = this.find(callId);
+    if (!info) return false;
+    for (const file of readdirSync(this.#folder(info.userId))) {
+      if (file.startsWith(`${callId}.`)) rmSync(join(this.#folder(info.userId), file), { force: true });
+    }
+    return true;
+  }
+
+  // How many bytes the recordings take, for the admin's disk-usage line.
+  bytes() {
+    if (!existsSync(this.dir)) return 0;
+    let total = 0;
+    for (const userId of readdirSync(this.dir)) {
+      if (!SAFE_ID.test(userId) || !statSync(this.#folder(userId)).isDirectory()) continue;
+      for (const file of readdirSync(this.#folder(userId))) total += statSync(join(this.#folder(userId), file)).size;
+    }
+    return total;
+  }
+
   deleteUser(userId) {
     if (!SAFE_ID.test(String(userId))) return;
     rmSync(this.#folder(userId), { recursive: true, force: true });

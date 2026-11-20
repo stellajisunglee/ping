@@ -39,6 +39,20 @@
       <p class="fine">Ping is an AI, for adults in the US. During a call, your voice goes to an AI voice service (OpenAI or Deepgram) so Ping can reply. Calls are recorded and transcribed so the Ping team can review them and improve Ping. By joining, you agree to the Privacy Policy and Terms of Service, which are in Settings.</p>
     </main>
 
+    <main id="screen-level" class="screen centered" hidden>
+      <h1 id="level-title">What's your Japanese level?</h1>
+      <p class="muted">Ping speaks Japanese at this level. Levels follow the JLPT, from N5 (easiest) to N1.</p>
+      <div id="level-choices" class="level-choices" role="group" aria-labelledby="level-title">
+        <button type="button" class="level-choice" data-level="N5"><strong>N5</strong><span>Just starting: greetings and simple sentences</span></button>
+        <button type="button" class="level-choice" data-level="N4"><strong>N4</strong><span>Basic conversation about everyday things</span></button>
+        <button type="button" class="level-choice" data-level="N3"><strong>N3</strong><span>Everyday conversation at a natural pace</span></button>
+        <button type="button" class="level-choice" data-level="N2"><strong>N2</strong><span>Comfortable in most conversations</span></button>
+        <button type="button" class="level-choice" data-level="N1"><strong>N1</strong><span>Near-fluent</span></button>
+      </div>
+      <p id="level-error" class="error" role="alert" hidden></p>
+      <p class="fine">Not sure? Pick the closest. You can change it any time in Settings, or ask Ping to speak more easily on a call.</p>
+    </main>
+
     <main id="screen-enable" class="screen centered" hidden>
       <img class="logo" src="/icons/icon-192.png" alt="ping" />
       <h1>So Ping can reach you</h1>
@@ -197,6 +211,7 @@
         <p id="recording-status" class="muted" role="status" hidden></p>
         <button class="secondary wide" type="button" data-go="recordings">Call recordings</button>
         <button class="secondary wide" type="button" data-go="call-log">Call log</button>
+        <p id="storage-status" class="muted" role="status"></p>
       </section>
     </main>
 
@@ -247,9 +262,11 @@
       <div class="setting">
         <label for="proficiency-input">Japanese level</label>
         <select id="proficiency-input">
-          <option value="beginner">Beginner</option>
-          <option value="intermediate">Intermediate</option>
-          <option value="advanced">Advanced</option>
+          <option value="N5">N5 · Just starting</option>
+          <option value="N4">N4 · Basic conversation</option>
+          <option value="N3">N3 · Everyday conversation</option>
+          <option value="N2">N2 · Comfortable</option>
+          <option value="N1">N1 · Near-fluent</option>
         </select>
       </div>
       <div class="setting">
@@ -326,15 +343,15 @@
       <h2>Turning recording off</h2>
       <p>On most accounts, you can turn off "Use my calls to improve Ping" in Manage Account. Calls after that aren't recorded, and calls recorded before are kept. On beta tester and admin accounts, recording is part of testing, so it stays on.</p>
       <h2>How long Ping keeps them</h2>
-      <p>Recordings and transcripts are kept until you delete your account.</p>
+      <p>Recordings and transcripts are kept until you delete your account. On beta tester and admin accounts, everything kept about your calls (recordings, transcripts, ratings, comments and call details) stays until you delete your account or the Ping team deletes it.</p>
       <h2>What else Ping stores</h2>
-      <p>Which invite code you joined with and when, how many calls you've made, your time zone, settings, plan, streak, notification details, voicemails, recent call times, your word and sentence stacks, your contacts, and timing numbers from each call, such as how long Ping took to reply.</p>
+      <p>Which invite code you joined with and when, how many calls you've made, your time zone, settings (including your Japanese level), plan, streak, notification details, voicemails, recent call times, your word and sentence stacks, your contacts, and timing numbers from each call, such as how long Ping took to reply.</p>
       <h2>Conversations</h2>
       <p>On a paid plan, the text of your recent calls is also used to personalize future calls.</p>
       <h2>Cancelling and deleting</h2>
       <p>If you move to a smaller plan, words and sentences beyond its limit, and on the free plan your saved conversations, clear after 30 days. Deleting your account in Manage Account removes your account data right away, including your call recordings and transcripts.</p>
       <h2>Feedback</h2>
-      <p>Anything you send through Feedback is stored without your account attached.</p>
+      <p>After a call you can rate it and leave a comment. Ratings and comments are stored with that call and your account, so the Ping team can read them alongside it. Anything you send through Feedback in Settings is stored without your account attached.</p>
       <h2>Changes</h2>
       <p>If this policy changes in a way that affects you, Ping will tell you in the app.</p>
     </main>
@@ -397,6 +414,8 @@
         <div id="rate-natural" class="rating-choices"></div>
         <p id="rate-natural-scale" class="rating-scale"><span>1 Not at all</span><span>5 Like a real conversation</span></p>
       </fieldset>
+      <label class="visually-hidden" for="rate-comment">Anything else about the call?</label>
+      <textarea id="rate-comment" class="rate-comment" rows="3" maxlength="1000" placeholder="What felt natural or unnatural about this call?"></textarea>
       <button id="rate-done" class="primary wide" type="button" disabled>Done</button>
       <button id="rate-skip" class="text-link" type="button">Skip</button>
     </main>

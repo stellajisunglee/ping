@@ -14,7 +14,7 @@ export function formatTranscript(transcript) {
 }
 
 export function describeLearner(settings) {
-  return `Level: ${settings.proficiency}. Speech style requested: ${settings.formality}.`;
+  return `Level: JLPT ${settings.proficiency}. Speech style requested: ${settings.formality}.`;
 }
 
 export const JUDGE_SYSTEM = `You review practice phone calls between Ping, an AI friend that phones Japanese learners, and a learner.

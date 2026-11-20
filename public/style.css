@@ -1350,3 +1350,65 @@ textarea {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* The JLPT level picker, shown once before Home */
+.level-choices {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: 360px;
+  text-align: left;
+}
+
+.level-choice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.level-choice strong {
+  min-width: 2.2em;
+  font-size: 1.15rem;
+  color: var(--accent);
+}
+
+.level-choice span {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.level-choice:active,
+.level-choice:focus-visible {
+  border-color: var(--accent);
+}
+
+/* The optional comment under the post-call ratings. The placeholder goes when they start typing. */
+.rate-comment {
+  max-width: 360px;
+  resize: vertical;
+}
+
+.rate-comment::placeholder {
+  color: var(--muted);
+}
+
+.rate-comment:focus::placeholder {
+  color: transparent;
+}
+
+.text-link.danger {
+  color: var(--decline);
+}
+
+.recording-comment {
+  margin: 8px 0;
+  font-style: italic;
+}

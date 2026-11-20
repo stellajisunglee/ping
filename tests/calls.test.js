@@ -11,7 +11,7 @@ import { Store } from '../server/store.js';
 const SUBSCRIPTION = { endpoint: 'https://push.example/1', keys: { p256dh: 'a', auth: 'b' } };
 const NOON_IN_TOKYO = Date.UTC(2026, 9, 31, 3);
 
-function setup({ pushResult = { gone: false }, store = new Store(), dailyCallLimit } = {}) {
+function setup({ pushResult = { gone: false }, store = new Store(), dailyCallLimit, joinedWith = 'beta' } = {}) {
   const clock = { now: NOON_IN_TOKYO };
   const pushes = [];
   const engine = new CallEngine({
@@ -24,7 +24,7 @@ function setup({ pushResult = { gone: false }, store = new Store(), dailyCallLim
       return pushResult;
     },
   });
-  const { user, token } = engine.register('Asia/Tokyo');
+  const { user, token } = engine.register('Asia/Tokyo', 'beta', joinedWith);
   engine.setSubscription(user, SUBSCRIPTION);
   return { clock, pushes, engine, user, token, store };
 }
@@ -965,7 +965,7 @@ test('admins and YC reviewers are unlimited already, so a dropped call changes n
 // The call log's record of each call
 
 test('the call log keeps why a call ended after the call itself is removed, and only the first report counts', async () => {
-  const context = setup();
+  const context = setup({ joinedWith: 'yc' }); // a YC reviewer's calls are removed after 7 days
   const call = placeCall(context, { seconds: 60, reason: 'dropped' });
   context.engine.endCall(context.user, call.id, 'hung-up'); // a later report changes nothing
   context.clock.now += 8 * 86_400_000;
@@ -978,7 +978,7 @@ test('the call log keeps why a call ended after the call itself is removed, and 
 
 test('the settings are logged as the call starts, and neither a later change nor a reconnect rewrites them', () => {
   const context = setup();
-  context.engine.updateSettings(context.user, { formality: 'casual', proficiency: 'advanced' });
+  context.engine.updateSettings(context.user, { formality: 'casual', proficiency: 'N1' });
   const call = context.engine.callBack(context.user);
   context.engine.sessionDetails(context.user, call.id);
   assert.equal(context.engine.recordConfig(context.user, call.id, { promptVersion: 1, silenceMs: 1300 }), true);
@@ -988,7 +988,7 @@ test('the settings are logged as the call starts, and neither a later change nor
   const entry = context.engine.callLog().find((item) => item.callId === call.id);
   assert.deepEqual(
     [entry.proficiency, entry.formality, entry.thinkingTime, entry.speed, entry.silenceMs],
-    ['advanced', 'casual', 'normal', 1, 1300],
+    ['N1', 'casual', 'normal', 1, 1300],
   );
   assert.equal(context.engine.recordConfig(setup().user, call.id, {}), false, "someone else's call");
 });
@@ -1034,4 +1034,75 @@ test('the configuration is read from what the engine was sent, with null for any
   const deepgram = callConfig({ session: { type: 'Settings', agent: { listen: { provider: { model: 'flux-general-multi' } } } } });
   assert.deepEqual(Object.keys(deepgram).sort(), fields);
   assert.deepEqual([deepgram.listenModel, deepgram.turnDetection, deepgram.eotThreshold, deepgram.thinkModel, deepgram.voice], ['flux-general-multi', 'flux', null, null, null]);
+});
+
+test('accounts saved with the old levels move to JLPT, keeping their place, and are asked to pick one', () => {
+  const store = new Store();
+  const saved = (id, proficiency) => ({ id, tokenHash: id, timeZone: 'Asia/Tokyo', settings: { proficiency }, subscription: null, messages: [], usage: { day: null, calls: 0 } });
+  store.users.a = saved('a', 'beginner');
+  store.users.b = saved('b', 'intermediate');
+  store.users.c = saved('c', 'advanced');
+  store.users.d = saved('d', 'N2');
+  store.users.e = saved('e', 'fluent');
+  new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO });
+  assert.deepEqual(
+    ['a', 'b', 'c', 'd', 'e'].map((id) => store.users[id].settings.proficiency),
+    ['N5', 'N3', 'N1', 'N2', 'N5'],
+  );
+  assert.ok(Object.values(store.users).every((user) => user.levelChosen === false), 'everyone picks a JLPT level before Home');
+});
+
+test('a new account has picked no level until it sets one, by the picker, Settings or a call', () => {
+  const context = setup();
+  assert.equal(context.user.levelChosen, false);
+  context.engine.updateSettings(context.user, { formality: 'casual' });
+  assert.equal(context.user.levelChosen, false, 'another setting is not a level');
+  context.engine.updateSettings(context.user, { proficiency: 'beginner' });
+  assert.equal(context.user.levelChosen, false, 'an old level name is refused');
+  assert.equal(context.user.settings.proficiency, 'N5');
+  context.engine.updateSettings(context.user, { proficiency: 'N4' });
+  assert.equal(context.user.levelChosen, true);
+  assert.equal(context.user.settings.proficiency, 'N4');
+});
+
+test("admin and beta testers' calls, ratings and call log entries never expire; everyone else's do", async () => {
+  const store = new Store();
+  const tester = setup({ store });
+  const reviewer = { user: tester.engine.register('Asia/Tokyo', 'beta', 'yc').user };
+  const testerCall = placeCall(tester, { seconds: 60, reason: 'hung-up' });
+  const reviewerCall = placeCall({ ...tester, user: reviewer.user }, { seconds: 60, reason: 'hung-up' });
+  tester.clock.now += 30 * 86_400_000;
+  await tester.engine.tick();
+  assert.ok(store.calls[testerCall.id], "a beta tester's call is kept");
+  assert.equal(store.calls[reviewerCall.id], undefined, "a YC reviewer's call is removed after 7 days");
+
+  for (let index = 0; index < 205; index += 1) tester.user.ratings.push({ callId: `old-${index}`, at: 0, cutOffs: 1, naturalness: 1, comment: null });
+  tester.engine.saveRating(tester.user, testerCall.id, { cutOffs: 2, naturalness: 4 }, 'Good pacing.');
+  assert.equal(tester.user.ratings.length, 206, "a beta tester's ratings aren't capped");
+  assert.equal(tester.user.ratings[0].comment, 'Good pacing.');
+});
+
+test("past 5,000 entries the call log drops the oldest of other accounts' entries, never a tester's", () => {
+  const store = new Store();
+  const context = setup({ store });
+  const reviewer = context.engine.register('Asia/Tokyo', 'beta', 'yc').user;
+  const entry = (index, userId) => ({ callId: `c${index}`, userId, at: index });
+  store.callLog = [entry(0, context.user.id), ...Array.from({ length: 4999 }, (_, index) => entry(index + 1, reviewer.id))];
+  context.engine.callBack(context.user);
+  context.engine.sessionDetails(context.user, Object.values(store.calls).at(-1).id); // logs a new entry
+  assert.equal(store.callLog.length, 5000);
+  assert.equal(store.callLog[0].callId, 'c0', "the tester's oldest entry stays");
+  assert.equal(store.callLog[1].callId, 'c2', "the reviewer's oldest entry went");
+});
+
+test('an admin can delete everything kept about one call', () => {
+  const context = setup();
+  const call = placeCall(context, { seconds: 60, reason: 'hung-up' });
+  context.engine.saveRating(context.user, call.id, { cutOffs: 2, naturalness: 4 }, 'Felt natural.');
+  assert.equal(context.engine.deleteCallData(call.id), true);
+  assert.equal(context.store.calls[call.id], undefined);
+  assert.equal(context.engine.callLog().some((item) => item.callId === call.id), false);
+  assert.equal(context.user.ratings.some((record) => record.callId === call.id), false);
+  assert.deepEqual(context.engine.callComments(), []);
+  assert.equal(context.engine.deleteCallData(call.id), false, 'nothing left to delete');
 });

@@ -64,9 +64,9 @@ test('the code checks score tools, language, length and repeats', () => {
 });
 
 test('the judge sees the scenario, the learner settings, the conversation with tool calls, and the rubric', () => {
-  const result = { transcript, settings: { proficiency: 'beginner', formality: 'formal' } };
+  const result = { transcript, settings: { proficiency: 'N5', formality: 'formal' } };
   const message = judgeUserMessage(scenarios[0], result, rubric);
-  assert.match(message, /Level: beginner\. Speech style requested: formal\./);
+  assert.match(message, /Level: JLPT N5\. Speech style requested: formal\./);
   assert.match(message, /\[tool: add_to_stack \{"kanji":"予定"\}\]/);
   assert.match(message, /- noLoop:/);
   assert.match(formatTranscript(transcript), /^Ping: こんにちは/);
@@ -107,7 +107,7 @@ test("a scenario's session is Ping's real instructions and tools, in text, with 
   assert.ok(session.tools.some((tool) => tool.name === 'add_to_stack'));
   assert.match(session.instructions, /食べた/);
   assert.equal(settings.formality, 'casual');
-  assert.equal(settings.proficiency, 'beginner');
+  assert.equal(settings.proficiency, 'N5');
   assert.match(session.instructions, /折り返してくれて/, 'the learner started the call, so Ping goes straight to the question');
   assert.match(scenarioSession({ question: 'eat', incoming: true }, 'gpt-realtime').session.instructions, /お時間大丈夫ですか/);
 });

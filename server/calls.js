@@ -6,7 +6,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { canCall, cleanContact, contactList, findContact, isPaid, MAX_CUSTOM_CONTACTS, PING, planLimits, PLANS, selectedContact } from './contacts.js';
 import { recordCallDay, streakToShow } from './progress.js';
 import { localDay, localDayNumber, localParts, nextCallTime } from './schedule.js';
-import { applySettings, DEFAULT_SETTINGS } from './settings.js';
+import { applySettings, DEFAULT_SETTINGS, LEGACY_LEVELS, PROFICIENCY_LEVELS } from './settings.js';
 import { addSentence, addStarterStack, addWord, applyDowngrade, cleanSentence, cleanSentenceWords, cleanWord } from './stack.js';
 import { pickQuestion, questionById, TURN_MODES } from './tutor.js';
 import { comboKey, ENGINES, FALLBACK_COMBO, pickCombo, RANDOM_MIX, validCombo } from './experiment.js';
@@ -40,7 +40,6 @@ const KEEP_FEEDBACK = 1000;
 const MAX_ACCOUNTS_IN_REPORT = 20;
 const KEEP_RATINGS = 200;
 const KEEP_CALL_LOG = 5000;
-const KEEP_SCENARIO_CHECKS = 5000;
 const MIN_SECONDS_TO_CONNECT = 10;
 const SCHEDULE_FIELDS = ['frequency', 'customDays', 'callStartHour', 'callEndHour'];
 const RENAMED_PLANS = { plus: 'premium', pro: 'platinum' };
@@ -52,19 +51,26 @@ export class PlanError extends Error {}
 
 // The Privacy Policy's version. 2: calls are recorded. 3: Deepgram joins OpenAI as a voice service.
 // Accounts that saw an older version get a one-time notice on Home about what changed since.
-export const POLICY_VERSION = 3;
+export const POLICY_VERSION = 4; // 2: calls recorded, 3: Deepgram named, 4: post-call comments and testers' data kept
 const RECORDING_POLICY = 2;
 export const policyNoticeFor = (seen = 0) => (seen >= POLICY_VERSION ? null : seen < RECORDING_POLICY ? 'recording' : 'update');
 // Admins and beta testers record every call as part of testing. YC reviewers and everyone else
 // can turn recording off in Manage Account, which stops future recordings only.
 export const recordingLocked = (user) => user.role === 'admin' || user.joinedWith === 'beta';
 export const recordsCalls = (user) => recordingLocked(user) || !user.recordingOff;
+// Admin and beta tester accounts are for building Ping, so nothing of theirs expires or is trimmed: calls, ratings,
+// comments and their call log entries stay until an admin deletes the call or the account is deleted.
+export const keepsEverything = (user) => user?.role === 'admin' || user?.joinedWith === 'beta';
 
 // A call's rating is two whole numbers from 1 to 5, or nothing.
 export function cleanRating(body) {
   const scale = (value) => Number.isInteger(value) && value >= 1 && value <= 5;
   return scale(body?.cutOffs) && scale(body?.naturalness) ? { cutOffs: body.cutOffs, naturalness: body.naturalness } : null;
 }
+
+// The optional comment under the ratings: what felt natural or unnatural. Plain text, trimmed and capped, or null.
+export const MAX_COMMENT_LENGTH = 1000;
+export const cleanComment = (value) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, MAX_COMMENT_LENGTH) : null);
 
 // A transcript as the phone sends it, kept to who said what: 'you' or 'contact'.
 export const cleanTranscript = (lines) =>
@@ -98,7 +104,14 @@ const newUserFields = () => ({
   recordingOff: false, // turned off in Manage Account, where the account allows it
   ratings: [], // the 1-5 taps after each call: how often Ping cut them off, and how natural it felt
   policyVersion: 0, // the Privacy Policy version they've seen. 0: joined before calls were recorded
+  levelChosen: false, // whether they've picked their JLPT level. Everyone picks one before they first reach Home
 });
+
+// Accounts saved before JLPT levels keep their old level's place on the scale until they pick one.
+function withJlptLevel(settings) {
+  const proficiency = LEGACY_LEVELS[settings.proficiency] ?? (PROFICIENCY_LEVELS.includes(settings.proficiency) ? settings.proficiency : DEFAULT_SETTINGS.proficiency);
+  return { ...settings, proficiency };
+}
 
 export class CallEngine {
   // No dailyCallLimit means unlimited calls, which is for prototyping only. See "Before beta launch" in the README.
@@ -118,7 +131,7 @@ export class CallEngine {
         role: user.role ?? 'admin', // accounts from before there were two invite codes
         joinedWith: user.joinedWith ?? user.role ?? 'admin',
         plan: RENAMED_PLANS[user.plan] ?? user.plan ?? 'free',
-        settings: { ...DEFAULT_SETTINGS, ...user.settings },
+        settings: withJlptLevel({ ...DEFAULT_SETTINGS, ...user.settings }),
         missedCallToReturn: user.missedCallToReturn ?? (user.lastMissedAt ?? 0) > (user.lastCallAt ?? 0),
         usage: { ownCalls: 0, ...user.usage },
       });
@@ -173,6 +186,7 @@ export class CallEngine {
   updateSettings(user, change) {
     const before = user.settings;
     user.settings = applySettings(before, change);
+    if (PROFICIENCY_LEVELS.includes(change.proficiency)) user.levelChosen = true;
     const scheduleChanged = SCHEDULE_FIELDS.some((field) => String(before[field]) !== String(user.settings[field]));
     if (user.settings.callsEnabled && (scheduleChanged || !user.nextCallAt || user.nextCallAt <= this.now())) {
       this.#schedule(user, { skipToday: this.#rangToday(user) });
@@ -202,7 +216,7 @@ export class CallEngine {
     const jobs = [];
     for (const call of Object.values(this.store.calls)) {
       if (call.state === 'ringing' && now >= call.ringDeadline) jobs.push(this.#miss(call));
-      else if (now - call.createdAt > KEEP_CALLS_MS) delete this.store.calls[call.id];
+      else if (now - call.createdAt > KEEP_CALLS_MS && !keepsEverything(this.store.users[call.userId])) delete this.store.calls[call.id];
     }
     for (const user of Object.values(this.store.users)) {
       if (user.clearAt && now >= user.clearAt) {
@@ -467,7 +481,7 @@ export class CallEngine {
     if (!scenario.checkpoints.some((checkpoint) => checkpoint.id === checkpointId) || !(result === null || CHECK_RESULTS.includes(result))) return false;
     const checks = this.store.scenarioChecks.filter((check) => !(check.callId === callId && check.checkpointId === checkpointId));
     if (result) checks.push({ callId, scenarioId: scenario.id, checkpointId, result, at: this.now() });
-    this.store.scenarioChecks = checks.slice(-KEEP_SCENARIO_CHECKS);
+    this.store.scenarioChecks = checks; // admins' own test results, so never trimmed
     this.store.save();
     return true;
   }
@@ -506,6 +520,14 @@ export class CallEngine {
   // Newest first. Numbers and ids only, for the admin call log.
   callLog(limit = 300) {
     return this.store.callLog.slice(-limit).reverse();
+  }
+
+  // Every comment left after a call, newest first, for admins. Join them to the call log by callId.
+  callComments(limit = 1000) {
+    return Object.values(this.store.users)
+      .flatMap((user) => user.ratings.filter((record) => record.comment).map(({ callId, at, comment }) => ({ callId, at, comment })))
+      .sort((a, b) => b.at - a.at)
+      .slice(0, limit);
   }
 
   // Admins' checklist results for controlled test calls, newest first. Join them to the call log by callId.
@@ -720,14 +742,16 @@ export class CallEngine {
     return true;
   }
 
-  // The two 1-5 taps after a call. Numbers only, kept with the account since calls are removed after 7 days.
-  saveRating(user, callId, rating) {
+  // The two 1-5 taps after a call, and the optional comment, kept with the account since calls are removed after
+  // 7 days. The call log only says whether there was a comment: its text stays with the account (and the recording).
+  saveRating(user, callId, rating, comment = null) {
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id || !call.connectedAt) return null;
-    const record = { callId, at: this.now(), engine: call.engine ?? 'gpt-realtime', turnMode: call.turnMode ?? null, cutOffs: rating.cutOffs, naturalness: rating.naturalness };
+    const record = { callId, at: this.now(), engine: call.engine ?? 'gpt-realtime', turnMode: call.turnMode ?? null, cutOffs: rating.cutOffs, naturalness: rating.naturalness, comment };
     call.rating = { cutOffs: rating.cutOffs, naturalness: rating.naturalness };
-    this.#log(call, { cutOffs: rating.cutOffs, naturalness: rating.naturalness });
-    user.ratings = [record, ...user.ratings.filter((saved) => saved.callId !== callId)].slice(0, KEEP_RATINGS);
+    this.#log(call, { cutOffs: rating.cutOffs, naturalness: rating.naturalness, commented: Boolean(comment) });
+    const ratings = [record, ...user.ratings.filter((saved) => saved.callId !== callId)];
+    user.ratings = keepsEverything(user) ? ratings : ratings.slice(0, KEEP_RATINGS);
     this.store.save();
     return record;
   }
@@ -856,6 +880,32 @@ export class CallEngine {
     this.#log(call, { contactId: call.contactId ?? null, questionId: call.questionId ?? null, ...topic, proficiency, formality, thinkingTime, speed });
   }
 
+  // Past KEEP_CALL_LOG entries, the oldest go first, except admin and beta testers' entries, which stay.
+  #trimCallLog() {
+    let over = this.store.callLog.length - KEEP_CALL_LOG;
+    if (over <= 0) return;
+    this.store.callLog = this.store.callLog.filter((entry) => {
+      if (over <= 0 || keepsEverything(this.store.users[entry.userId])) return true;
+      over -= 1;
+      return false;
+    });
+  }
+
+  // An admin deletes everything kept about one call: the call, its call log entry, rating, comment and
+  // checklist results. The recording is deleted by the server. Returns false if nothing was kept.
+  deleteCallData(callId) {
+    const call = this.store.calls[callId];
+    const inLog = this.store.callLog.some((entry) => entry.callId === callId);
+    const owner = this.store.users[call?.userId ?? this.store.callLog.find((entry) => entry.callId === callId)?.userId];
+    if (!call && !inLog) return false;
+    delete this.store.calls[callId];
+    this.store.callLog = this.store.callLog.filter((entry) => entry.callId !== callId);
+    this.store.scenarioChecks = this.store.scenarioChecks.filter((check) => check.callId !== callId);
+    if (owner) owner.ratings = owner.ratings.filter((record) => record.callId !== callId);
+    this.store.save();
+    return true;
+  }
+
   // Adds to the call's entry in the call log, creating it the first time.
   #log(call, change) {
     let entry = this.store.callLog.findLast((candidate) => candidate.callId === call.id);
@@ -863,7 +913,7 @@ export class CallEngine {
       const user = this.store.users[call.userId];
       entry = { callId: call.id, userId: call.userId, joinedWith: user?.joinedWith ?? null, at: call.startedAt ?? this.now(), direction: call.direction, engine: call.engine ?? 'gpt-realtime', turnMode: call.turnMode ?? null, assigned: call.assigned ?? null, recorded: Boolean(call.recorded) };
       this.store.callLog.push(entry);
-      if (this.store.callLog.length > KEEP_CALL_LOG) this.store.callLog.splice(0, this.store.callLog.length - KEEP_CALL_LOG);
+      this.#trimCallLog();
     }
     Object.assign(entry, change);
   }

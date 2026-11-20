@@ -3,7 +3,11 @@
 export const MIN_SPEED = 0.6;
 export const MAX_SPEED = 1.5;
 export const LANGUAGES = ['ja'];
-export const PROFICIENCY_LEVELS = ['beginner', 'intermediate', 'advanced'];
+// JLPT levels, easiest first. N5 is just starting, N1 near-fluent.
+export const PROFICIENCY_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
+// The three levels Ping had before JLPT, for accounts saved then. Each keeps its old place on the scale,
+// and the user is asked to pick a JLPT level before they next reach Home.
+export const LEGACY_LEVELS = { beginner: 'N5', intermediate: 'N3', advanced: 'N1' };
 export const FORMALITY_LEVELS = ['formal', 'casual'];
 export const FREQUENCIES = ['daily', 'every-other-day', 'weekdays', 'weekends', 'custom'];
 export const DEFAULT_SETTINGS = {
@@ -11,7 +15,7 @@ export const DEFAULT_SETTINGS = {
   thinkingTime: 'normal',
   callsEnabled: true,
   language: 'ja',
-  proficiency: 'beginner',
+  proficiency: 'N5',
   formality: 'formal',
   frequency: 'daily',
   customDays: [1, 3, 5], // 0 is Sunday

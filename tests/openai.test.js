@@ -18,7 +18,7 @@ test('example sentences use a structured response and are read from the output',
       };
     },
   });
-  const result = await openai.exampleSentences(WORD, 'beginner');
+  const result = await openai.exampleSentences(WORD, 'N5');
   assert.match(sent.url, /\/responses$/);
   assert.equal(sent.body.model, 'test-model');
   assert.equal(sent.body.text.format.type, 'json_schema');
@@ -51,7 +51,7 @@ test("a sentence's words come back as structured output, in dictionary form with
 
 test('a failed or empty lookup raises an error', async () => {
   const failing = createOpenAI({ apiKey: 'key', fetchImpl: async () => ({ ok: false, status: 500, text: async () => 'nope' }) });
-  await assert.rejects(failing.exampleSentences(WORD, 'beginner'), /500/);
+  await assert.rejects(failing.exampleSentences(WORD, 'N5'), /500/);
   const empty = createOpenAI({ apiKey: 'key', fetchImpl: async () => ({ ok: true, json: async () => ({ output: [] }) }) });
-  await assert.rejects(empty.exampleSentences(WORD, 'beginner'), /empty/);
+  await assert.rejects(empty.exampleSentences(WORD, 'N5'), /empty/);
 });

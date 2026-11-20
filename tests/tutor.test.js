@@ -117,9 +117,9 @@ test('Ping is formal by default, says it\'s not sure when off topic, and sticks 
 });
 
 test('the level and politeness settings change how the contact talks', () => {
-  const settings = { ...DEFAULT_SETTINGS, formality: 'casual', proficiency: 'advanced' };
+  const settings = { ...DEFAULT_SETTINGS, formality: 'casual', proficiency: 'N1' };
   const instructions = buildInstructions({ question: QUESTIONS[0], localHour: 12, settings });
-  assert.match(instructions, /The user is advanced/);
+  assert.match(instructions, /The user is at about JLPT N1, near-fluent/);
   assert.match(instructions, /casual speech/);
   assert.match(instructions, /ピンだよ/);
   assert.ok(instructions.includes(QUESTIONS[0].casual));
@@ -186,9 +186,9 @@ test('slower speeds are more patient with gaps in speech', () => {
 });
 
 test('schedule and call settings are checked', () => {
-  const changed = applySettings(DEFAULT_SETTINGS, { frequency: 'weekends', proficiency: 'advanced', formality: 'casual', callStartHour: 8, callEndHour: 12, customDays: [6, 0, 9, 6, 'x'] });
+  const changed = applySettings(DEFAULT_SETTINGS, { frequency: 'weekends', proficiency: 'N1', formality: 'casual', callStartHour: 8, callEndHour: 12, customDays: [6, 0, 9, 6, 'x'] });
   assert.equal(changed.frequency, 'weekends');
-  assert.equal(changed.proficiency, 'advanced');
+  assert.equal(changed.proficiency, 'N1');
   assert.equal(changed.formality, 'casual');
   assert.deepEqual([changed.callStartHour, changed.callEndHour], [8, 12]);
   assert.deepEqual(changed.customDays, [0, 6]);
@@ -592,7 +592,7 @@ test("Ping tells her life in Japanese at the learner's level, without losing it"
   assert.match(whoYouAre(instructions), /Tell them about your life in Japanese at their level: simplify or leave out details that need harder words or grammar\./);
   // Her life is all still there, and the level system is unchanged.
   assert.ok(instructions.includes(PING_BIO));
-  assert.match(instructions, /The user is a beginner\. Use only very common words and simple sentence patterns\./);
+  assert.match(instructions, /The user is at about JLPT N5, just starting\. Use only very common words and simple sentence patterns\./);
 });
 
 test('Ping never calls the learner ユーザーさん, usually uses no form of address, and her own sections say "they", not "the user"', () => {
