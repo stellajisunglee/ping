@@ -216,6 +216,7 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       settings: user.settings,
       levelChosen: user.levelChosen, // false until they pick a JLPT level, which the app asks for before Home
       progress: engine.progress(user),
+      recentCalls: engine.recentCalls(user),
       hasSubscription: Boolean(user.subscription),
       streak: engine.streak(user),
       lastCall: engine.lastCall(user),
@@ -522,6 +523,13 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       }
       console.log(`turn-metrics ${JSON.stringify(record)}`);
       return json(res, 201, {});
+    }
+
+    // One call's details for the Calls tab.
+    const detailsRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/details$/);
+    if (method === 'GET' && detailsRoute) {
+      const details = engine.callDetails(user, detailsRoute[1]);
+      return details ? json(res, 200, details) : json(res, 404, { error: 'Call not found.' });
     }
 
     // Numbers about the learner's Japanese, worked out on the phone from the call's transcript. Every user's are

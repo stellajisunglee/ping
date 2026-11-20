@@ -6,6 +6,8 @@ import { audioUnlocked, startRingtone, unlockAudio } from './ringtone.js';
 import { initStack, renderStackTiles } from './stack.js';
 import { failedCallNotice, startCall } from './voice.js';
 import { summarizeLearning, wordLevels } from './learning-metrics.js';
+import { renderProgress } from './progress.js';
+import { initRecents, renderBadge } from './recents.js';
 
 const RING_FALLBACK_MS = 12_000; // the server decides a call was missed. This only covers its message getting lost.
 // Calling a contact rings this long first, like a real phone call, before Ping picks up.
@@ -102,36 +104,6 @@ function describeSchedule() {
   return `Calls ${when}, between ${hour(callStartHour)} and ${hour(callEndHour)}`;
 }
 
-function renderVoicemail() {
-  const { voicemail } = state.me;
-  $('voicemail-section').hidden = !voicemail;
-  if (!voicemail) return;
-
-  const when = el('p', {
-    className: 'muted',
-    textContent: `Missed call from ${voicemail.contactName}, ${new Date(voicemail.at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`,
-  });
-  const japanese = el('p', { lang: 'ja', textContent: voicemail.japanese });
-  const english = el('p', { className: 'muted', textContent: voicemail.english });
-  const player = el('audio', { controls: true, preload: 'none', src: voicemail.audioUrl });
-  const card = el('div', { className: voicemail.heard ? 'card message' : 'card message unheard' }, when, japanese, english, player);
-  player.addEventListener('play', () => {
-    player.playbackRate = state.me.settings.speed;
-    if (!voicemail.heard) {
-      voicemail.heard = true;
-      card.className = 'card message';
-      api(`/api/messages/${voicemail.id}/heard`, { method: 'POST' }).catch(() => {});
-    }
-  });
-  // Without a recording the words above still deliver the message.
-  player.addEventListener('error', () => player.remove());
-
-  const callBack = el('button', { className: 'secondary', type: 'button', textContent: 'Call back', disabled: !state.me.calling.canCall });
-  callBack.addEventListener('click', () => callContact(voicemail.contactId));
-  card.append(callBack);
-  $('voicemail').replaceChildren(card);
-}
-
 // Ping greets the user by the time of day, in Japanese with English underneath for beginners.
 const GREETINGS = [
   { from: 5, japanese: 'おはよう！', english: 'Good morning' },
@@ -197,7 +169,8 @@ function renderHome() {
   renderLastCall();
   setError('home-clear', clearWarning());
   renderStackTiles();
-  renderVoicemail();
+  renderProgress();
+  renderBadge();
   renderPolicyNotice();
 }
 
@@ -227,6 +200,8 @@ async function dismissPolicyNotice() {
   state.me.policyNotice = null;
   await api('/api/policy/seen', { method: 'POST' }).catch((error) => console.warn('Could not save that the notice was seen', error));
 }
+
+const showCallsTab = () => (state.me && !state.me.levelChosen ? show('level') : go('calls'));
 
 // Everyone picks a JLPT level before they reach Home, including accounts from before there were JLPT levels.
 const goHome = () => (state.me && !state.me.levelChosen ? show('level') : go('home'));
@@ -711,7 +686,8 @@ function bindEvents() {
     if (data.type === 'ring') showRinging(data.callId, data.contactName);
     else if (data.type === 'missed' && data.callId === ringingCallId) missed();
     else if (data.type === 'answer' && !activeCallId) answer(data.callId);
-    else if (data.type === 'show-messages' && !activeCallId) refresh().then(goHome, goHome);
+    // A missed call's notification opens the Calls tab, where the voicemail is.
+    else if (data.type === 'show-messages' && !activeCallId) refresh().then(showCallsTab, showCallsTab);
   });
 }
 
@@ -719,6 +695,7 @@ async function init() {
   onShow('home', renderHome);
   initStack();
   initContacts({ onCall: callContact });
+  initRecents({ onCall: callContact });
   initSettings();
   bindEvents();
   enableSwipeBack();
@@ -746,7 +723,8 @@ async function init() {
   const params = new URLSearchParams(location.search);
   const callId = params.get('call');
   history.replaceState(null, '', '/');
-  goHome();
+  if (params.get('messages')) showCallsTab();
+  else goHome();
   if (callId) answer(callId);
 }
 

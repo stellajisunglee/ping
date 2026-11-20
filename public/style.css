@@ -1,6 +1,7 @@
 :root {
   color-scheme: light dark;
   --background: #f1f7fc;
+  --chart-line: #3a8acb; /* validated against --surface with the dataviz checks */
   --surface: #ffffff;
   --text: #1b2a38;
   --muted: #5b6e81;
@@ -20,6 +21,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #101a23;
+    --chart-line: #3d9be6;
     --surface: #182531;
     --text: #e8f1f9;
     --muted: #9db0c2;
@@ -1411,4 +1413,254 @@ textarea {
 .recording-comment {
   margin: 8px 0;
   font-style: italic;
+}
+
+/* The Calls tab: an unheard-voicemail dot on the tab, the voicemail card, and recent calls like a phone's */
+.hero button {
+  position: relative;
+}
+
+.tab-badge {
+  position: absolute;
+  top: 6px;
+  left: calc(50% + 6px);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--decline);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.voicemail-card.unheard {
+  border-color: var(--accent);
+}
+
+.voicemail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.voicemail-head p {
+  margin: 0;
+}
+
+.voicemail-card .button-row {
+  justify-content: flex-start;
+}
+
+.voicemail-words summary {
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.recents {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recent {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+
+.recent-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+.recent-direction {
+  display: flex;
+  width: 18px;
+  color: var(--muted);
+}
+
+.recent-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.recent-name {
+  font-weight: 600;
+}
+
+.recent-name.missed {
+  color: var(--decline);
+}
+
+.recent-kind,
+.recent-when {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.recent-when {
+  white-space: nowrap;
+}
+
+.recent-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+}
+
+.recents .icon svg,
+.recent-info svg {
+  width: 20px;
+  height: 20px;
+}
+
+.recents .stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.recents .empty {
+  padding: 16px 0;
+  border: 0;
+}
+
+.detail-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-head h1 {
+  margin: 0;
+}
+
+.detail-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.detail-facts dt {
+  color: var(--muted);
+}
+
+.detail-facts dd {
+  margin: 0;
+}
+
+.detail-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.detail-transcript .you {
+  color: var(--muted);
+}
+
+/* Home's progress card: minutes of Japanese spoken, adding up */
+.progress-card {
+  margin-top: 12px;
+}
+
+.progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.progress-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.progress-total {
+  margin: 0;
+  color: var(--muted);
+}
+
+.progress-total strong {
+  color: var(--text);
+  font-size: 1.6rem;
+}
+
+.progress-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  touch-action: pan-y;
+  outline-offset: 2px;
+}
+
+.progress-baseline {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.progress-area {
+  fill: var(--chart-line);
+  fill-opacity: 0.14;
+}
+
+.progress-line {
+  fill: none;
+  stroke: var(--chart-line);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.progress-end {
+  fill: var(--chart-line);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.progress-hair {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.progress-axis {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.progress-readout {
+  min-height: 1.2em;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.progress-level {
+  margin: 0;
 }

@@ -1106,3 +1106,53 @@ test('an admin can delete everything kept about one call', () => {
   assert.deepEqual(context.engine.callComments(), []);
   assert.equal(context.engine.deleteCallData(call.id), false, 'nothing left to delete');
 });
+
+test('the Calls tab lists calls both ways with how they went, newest first, and outlives the call records', async () => {
+  const context = setup({ joinedWith: 'yc' });
+  const { engine, user, clock, store } = context;
+
+  await ringNow(context); // Ping calls; the user answers and talks for 90 seconds
+  const answered = callOf(store);
+  engine.answer(answered.id);
+  engine.sessionDetails(user, answered.id);
+  engine.markConnected(user, answered.id);
+  clock.now += 90_000;
+  engine.endCall(user, answered.id, 'hung-up');
+
+  await ringNow(context); // the next one is missed
+  const missed = callOf(store);
+  clock.now = missed.ringDeadline + 1;
+  await engine.tick();
+
+  const outgoing = engine.callBack(user); // the user calls back, but it never connects
+  engine.endCall(user, outgoing.id, 'failed');
+
+  const recent = engine.recentCalls(user);
+  assert.deepEqual(
+    recent.map((entry) => [entry.direction, entry.outcome, entry.seconds, entry.contactName]),
+    [['outgoing', 'calling', null, 'Ping'], ['incoming', 'missed', null, 'Ping'], ['incoming', 'connected', 90, 'Ping']],
+  );
+
+  clock.now += 30 * 86_400_000;
+  await engine.tick();
+  assert.equal(store.calls[answered.id], undefined, 'the call record is gone');
+  assert.equal(engine.recentCalls(user).length, 3, 'the history stays');
+  const details = engine.callDetails(user, answered.id);
+  assert.deepEqual([details.call.seconds, details.lines], [90, []]);
+  assert.equal(engine.callDetails(user, 'not-a-call'), null);
+});
+
+test("a call's details include what the learner said in Japanese, and its transcript on a paid plan", () => {
+  const context = setup();
+  const { engine, user } = context;
+  user.plan = 'premium';
+  const call = placeCall(context, { seconds: 120, reason: 'hung-up' });
+  engine.saveTurnMetrics(user, call.id, { userSpeechMs: 60_000, agentSpeechMs: 50_000, userTurns: 6, smartTurnFallback: 0 });
+  engine.saveLearning(user, call.id, { englishTurnPercent: 50, japaneseChars: 80, newWords: 2 });
+  engine.saveConversation(user, call.id, [{ from: 'contact', text: '今日は何をしましたか？' }, { from: 'you', text: '映画を見ました。' }]);
+  const details = engine.callDetails(user, call.id);
+  assert.deepEqual([details.japaneseMinutes, details.japaneseChars, details.newWords, details.lines.length], [0.5, 80, 2, 2]);
+  assert.equal(engine.progress(user).totalMinutes, 0.5);
+  engine.deleteCallData(call.id);
+  assert.equal(engine.callDetails(user, call.id), null, 'an admin deleting the call removes it from the Calls tab too');
+});

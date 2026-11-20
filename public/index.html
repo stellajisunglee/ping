@@ -94,17 +94,34 @@
       </section>
       <section id="home-last-call" class="card last-call" aria-label="Your last call" hidden></section>
       <p id="home-clear" class="notice warning" hidden></p>
-      <section id="voicemail-section" aria-labelledby="voicemail-title" hidden>
-        <h2 id="voicemail-title">Voicemail</h2>
-        <div id="voicemail"></div>
-      </section>
       <section class="home-stack" aria-labelledby="home-stack-title">
         <h2 id="home-stack-title">My Stack</h2>
         <div class="tile-row">
           <button class="tile" type="button" data-go="words"><strong>Words</strong><span id="stack-words-count" class="muted"></span></button>
           <button class="tile" type="button" data-go="sentences"><strong>Sentences</strong><span id="stack-sentences-count" class="muted"></span></button>
         </div>
+        <section class="card progress-card" aria-labelledby="progress-title">
+          <div class="progress-head">
+            <h3 id="progress-title">Japanese you've spoken</h3>
+            <p class="progress-total"><strong id="progress-total">0</strong> min</p>
+          </div>
+          <div id="progress-chart" class="progress-chart"></div>
+          <p id="progress-level" class="progress-level" hidden></p>
+        </section>
       </section>
+    </main>
+
+    <main id="screen-calls" class="screen tabbed" hidden>
+      <h1>Calls</h1>
+      <section id="voicemail-section" aria-label="Voicemail" hidden>
+        <div id="voicemail"></div>
+      </section>
+      <ul id="recent-calls" class="recents" aria-label="Recent calls"></ul>
+    </main>
+
+    <main id="screen-call-detail" class="screen tabbed" hidden>
+      <button class="back" type="button" data-back>‹ Calls</button>
+      <div id="call-detail" class="stack full"></div>
     </main>
 
     <main id="screen-words" class="screen tabbed" hidden>
@@ -494,6 +511,11 @@
       <button type="button" data-go="home">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path class="stroke" d="M4 11l8-7 8 7v9h-5v-6H9v6H4v-9Z" /></svg>
         Home
+      </button>
+      <button type="button" data-go="calls">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path class="stroke" d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z" /></svg>
+        Calls
+        <span id="calls-badge" class="tab-badge" hidden></span>
       </button>
       <button type="button" data-go="contacts">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle class="stroke" cx="12" cy="8" r="4" /><path class="stroke" d="M4 21c1-5 4-7 8-7s7 2 8 7" /></svg>

@@ -9,6 +9,8 @@ const SCREEN_TABS = {
   word: 'home',
   sentences: 'home',
   sentence: 'home',
+  calls: 'calls',
+  'call-detail': 'calls',
   contacts: 'contacts',
   'contact-new': 'contacts',
   settings: 'settings',
@@ -23,7 +25,7 @@ const SCREEN_TABS = {
 };
 const SCREENS = [...Object.keys(SCREEN_TABS), 'install', 'join', 'level', 'enable', 'ringing', 'outgoing', 'call', 'rate'];
 const renderers = {};
-const TAB_ROOTS = ['home', 'contacts', 'settings'];
+const TAB_ROOTS = ['home', 'calls', 'contacts', 'settings'];
 const BACK_SWIPE_DISTANCE = 70;
 
 let trail = [];

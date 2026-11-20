@@ -39,7 +39,9 @@ const MAX_LINE_LENGTH = 500;
 const KEEP_FEEDBACK = 1000;
 const MAX_ACCOUNTS_IN_REPORT = 20;
 const KEEP_RATINGS = 200;
-const KEEP_PROGRESS = 1000; // calls in a learner's progress history, and level estimates, outside admin and beta accounts
+const KEEP_PROGRESS = 1000;
+const KEEP_HISTORY = 200; // calls in the Calls tab, outside admin and beta accounts
+const RECENT_CALLS = 100; // how many the Calls tab shows // calls in a learner's progress history, and level estimates, outside admin and beta accounts
 // A speaking level is shown once this many calls have been graded, as the middle of the latest this many.
 export const LEVEL_SAMPLE = 5;
 const JLPT_ORDER = ['N5', 'N4', 'N3', 'N2', 'N1'];
@@ -111,6 +113,7 @@ const newUserFields = () => ({
   levelChosen: false, // whether they've picked their JLPT level. Everyone picks one before they first reach Home
   progress: [], // one entry per call: speaking time, English share, Japanese characters, estimated level (numbers and levels only)
   levelEstimates: [], // the model's speaking-level estimate for each graded call, newest first, with its one-line reason
+  callHistory: [], // the Calls tab: each call to or from a contact, with how it went. Kept after the call record is removed
 });
 
 // Accounts saved before JLPT levels keep their old level's place on the scale until they pick one.
@@ -289,6 +292,7 @@ export class CallEngine {
     if (call.state === 'ringing') {
       call.state = 'answered';
       this.#recordOutcome(call, 'answered');
+      this.#history(call, { outcome: 'answered' });
       this.store.save();
     }
     return call;
@@ -300,6 +304,7 @@ export class CallEngine {
     if (call.state === 'ringing') {
       call.state = 'declined';
       this.#recordOutcome(call, 'declined');
+      this.#history(call, { outcome: 'declined' });
       const user = this.store.users[call.userId];
       if (user) user.missedCallToReturn = true;
       this.store.save();
@@ -316,6 +321,7 @@ export class CallEngine {
     user.messages = [message, ...user.messages].slice(0, KEEP_MESSAGES);
     user.lastCallOutcome = 'missed';
     user.missedCallToReturn = true;
+    this.#history(call, { outcome: 'missed' });
     this.store.save();
     if (!user.subscription) return;
     const { gone } = await this.sendPush(user.subscription, { type: 'missed', callId: call.id, contactName: contact.name }, { ttl: 86_400 });
@@ -354,6 +360,7 @@ export class CallEngine {
       maxSeconds: planLimits(user.plan).perCall * 60,
     };
     this.store.calls[call.id] = call;
+    this.#history(call, { outcome: 'calling' });
     this.store.save();
     return call;
   }
@@ -397,6 +404,7 @@ export class CallEngine {
     call.endedAt = this.now();
     // Kept in the log, since the call itself is removed after 7 days. Missing means the phone never said.
     this.#log(call, { seconds: Math.round((call.endedAt - (call.connectedAt ?? call.startedAt)) / 1000), endReason: call.endReason });
+    if (call.connectedAt) this.#history(call, { seconds: Math.round((call.endedAt - call.connectedAt) / 1000) });
     this.store.save();
     return true;
   }
@@ -557,6 +565,7 @@ export class CallEngine {
       user.lastCallAt = this.now();
     }
     call.connectedAt = this.now();
+    this.#history(call, { outcome: 'connected' });
     user.streak = recordCallDay(user.streak, localDayNumber(this.now(), user.timeZone), user.settings);
     this.store.save();
     return true;
@@ -799,6 +808,48 @@ export class CallEngine {
     if (entry.userSpeechMs !== null && entry.englishTurnPercent !== null) entry.japaneseMs = Math.round((entry.userSpeechMs * (100 - entry.englishTurnPercent)) / 100);
   }
 
+  // The Calls tab, newest first: calls the contact made (answered, missed or declined) and calls the user made
+  // (connected or not), each with the contact's name as it is now.
+  recentCalls(user) {
+    return user.callHistory
+      .slice(-RECENT_CALLS)
+      .reverse()
+      .map((entry) => ({ ...entry, contactName: this.#contactName(user, entry.contactId) }));
+  }
+
+  // One call for the Calls tab's details: the call, what the learner did on it, and its transcript if the
+  // account keeps them (paid plans).
+  callDetails(user, callId) {
+    const entry = user.callHistory.find((saved) => saved.callId === callId);
+    if (!entry) return null;
+    const progress = user.progress.find((saved) => saved.callId === callId) ?? null;
+    const conversation = user.conversations.find((saved) => saved.callId === callId);
+    return {
+      call: { ...entry, contactName: this.#contactName(user, entry.contactId) },
+      japaneseMinutes: progress?.japaneseMs == null ? null : Math.round((progress.japaneseMs / 60_000) * 10) / 10,
+      japaneseChars: progress?.japaneseChars ?? null,
+      newWords: this.store.calls[callId]?.learning?.newWords ?? null,
+      lines: conversation?.lines ?? [],
+    };
+  }
+
+  #contactName(user, contactId) {
+    return findContact(user, contactId)?.name ?? (contactId === PING.id ? PING.name : 'Former contact');
+  }
+
+  // Adds to the call's entry in the Calls tab history, creating it the first time.
+  #history(call, change) {
+    const user = this.store.users[call.userId];
+    if (!user) return;
+    let entry = user.callHistory.find((saved) => saved.callId === call.id);
+    if (!entry) {
+      entry = { callId: call.id, contactId: call.contactId, direction: call.direction, at: call.createdAt ?? this.now(), outcome: null, seconds: null };
+      user.callHistory.push(entry);
+      if (!keepsEverything(user) && user.callHistory.length > KEEP_HISTORY) user.callHistory.splice(0, user.callHistory.length - KEEP_HISTORY);
+    }
+    Object.assign(entry, change);
+  }
+
   // The two 1-5 taps after a call, and the optional comment, kept with the account since calls are removed after
   // 7 days. The call log only says whether there was a comment: its text stays with the account (and the recording).
   saveRating(user, callId, rating, comment = null) {
@@ -962,6 +1013,7 @@ export class CallEngine {
       owner.ratings = owner.ratings.filter((record) => record.callId !== callId);
       owner.progress = owner.progress.filter((entry) => entry.callId !== callId);
       owner.levelEstimates = owner.levelEstimates.filter((record) => record.callId !== callId);
+      owner.callHistory = owner.callHistory.filter((entry) => entry.callId !== callId);
     }
     this.store.save();
     return true;
