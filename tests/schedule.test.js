@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isCallDay, isValidTimeZone, localDay, localDayNumber, localParts, nextCallTime } from '../server/schedule.js';
+import { DEFAULT_HOUR_WEIGHT, hourWeights, isCallDay, isValidTimeZone, localDay, localDayNumber, localParts, nextCallTime } from '../server/schedule.js';
 
 const hourIn = (ms, timeZone) => localParts(ms, timeZone).hour;
 
@@ -95,4 +95,33 @@ test('every other day alternates, across a month end', () => {
   const settings = { frequency: 'every-other-day' };
   assert.notEqual(isCallDay(start, settings), isCallDay(start + 1, settings));
   assert.equal(isCallDay(start, settings), isCallDay(start + 2, settings));
+});
+
+test('equal hour weights pick exactly the moment no weights would', () => {
+  const now = Date.UTC(2026, 9, 31, 3);
+  const even = Object.fromEntries(Array.from({ length: 24 }, (_, hour) => [hour, DEFAULT_HOUR_WEIGHT]));
+  for (const value of [0, 0.13, 0.5, 0.77, 0.999]) {
+    const plain = nextCallTime({ now, timeZone: 'Asia/Tokyo', skipToday: true, random: () => value });
+    const weighted = nextCallTime({ now, timeZone: 'Asia/Tokyo', skipToday: true, random: () => value, hourWeights: even });
+    assert.ok(Math.abs(plain - weighted) <= 1, `${value}: ${plain} vs ${weighted}`);
+  }
+});
+
+test('calls lean toward hours that get answered, but every hour of the window stays possible', () => {
+  const now = Date.UTC(2026, 9, 31, 3);
+  const timeZone = 'Asia/Tokyo';
+  const weights = hourWeights({ 19: { rang: 8, answered: 8 }, 10: { rang: 8, answered: 0 } });
+  const counts = {};
+  for (let index = 0; index < 1000; index += 1) {
+    const hour = hourIn(nextCallTime({ now, timeZone, skipToday: true, random: () => (index + 0.5) / 1000, hourWeights: weights }), timeZone);
+    counts[hour] = (counts[hour] ?? 0) + 1;
+  }
+  assert.ok(Object.keys(counts).every((hour) => hour >= 10 && hour < 20), 'still inside the window');
+  assert.ok(counts[19] > 1.5 * counts[15], `19:00 (${counts[19]}) is likelier than an hour with no history (${counts[15]})`);
+  assert.ok(counts[10] > 0 && counts[10] < counts[15], `10:00 (${counts[10]}) is rarer, but still possible`);
+});
+
+test('hour weights wait for a few calls before changing anything', () => {
+  assert.equal(hourWeights({ 9: { rang: 2, answered: 0 } }), null);
+  assert.deepEqual(hourWeights({ 9: { rang: 2, answered: 0 }, 18: { rang: 1, answered: 1 } }), { 9: 0.25, 18: 2 / 3 });
 });

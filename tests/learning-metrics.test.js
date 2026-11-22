@@ -74,3 +74,10 @@ test("the admin call log shows the learner's side of a call, and - for calls fro
   assert.equal(measured['Estimated level'], 'N4 (vocabulary N4, grammar N5, medium confidence)');
   assert.ok(Object.values(facts({})).every((value) => value === '-'));
 });
+
+test("the invite list says whether Ping fits into a learner's day", async () => {
+  const { habitText } = await import('../public/settings.js');
+  const habit = { days: 28, pingCalls: 6, answerRatePercent: 83, pickupMedianSeconds: 5, callsStartedByPing: 6, callsStartedByLearner: 2, practiceDaysPerWeek: 3.5, answeredHours: {}, unplannedMinutesThisWeek: 4.2 };
+  assert.equal(habitText(habit), "Last 4 weeks: answered 83% of Ping's 6 calls (in 5 s) · started 2 themselves · 3.5 practice days a week · 4.2 min of Japanese from Ping's calls this week");
+  assert.match(habitText({ ...habit, pingCalls: 0, answerRatePercent: null, pickupMedianSeconds: null }), /no calls from Ping yet/);
+});

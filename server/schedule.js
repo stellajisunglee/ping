@@ -63,8 +63,41 @@ function localToUtc(year, month, day, hour, timeZone) {
   return wall - offsetAt(first, timeZone);
 }
 
+// A moment between earliest and end. hourWeights ({ localHour: weight }) makes some hours of the window likelier than
+// others, in proportion to how much of each hour is left; without it, every moment is as likely. Equal weights give
+// exactly the same moment as none, for the same random number.
+function momentInWindow(earliest, end, random, timeZone, hourWeights) {
+  if (!hourWeights) return Math.floor(earliest + random() * (end - earliest));
+  const pieces = [];
+  for (let from = earliest; from < end; ) {
+    const { hour, minute, second } = localParts(from, timeZone);
+    const to = Math.min(end, from + (60 - minute) * 60_000 - second * 1000 - (from % 1000));
+    pieces.push({ from, to, weight: (hourWeights[hour] ?? DEFAULT_HOUR_WEIGHT) * (to - from) });
+    from = to;
+  }
+  const total = pieces.reduce((sum, piece) => sum + piece.weight, 0);
+  if (!(total > 0)) return Math.floor(earliest + random() * (end - earliest));
+  let left = random() * total;
+  for (const piece of pieces) {
+    if (left < piece.weight) return Math.floor(piece.from + (left / piece.weight) * (piece.to - piece.from));
+    left -= piece.weight;
+  }
+  return Math.floor(pieces.at(-1).to - 1);
+}
+
+// How likely the learner is to answer in an hour with no history, out of 1: the same prior every hour starts from.
+export const DEFAULT_HOUR_WEIGHT = 0.5;
+
+// Each hour's chance of being answered, from Ping's calls in it: (answered + 1) / (rang + 2), so an hour with no
+// calls stays at 0.5 and one missed call only nudges it. Returns null until there are minCalls calls to learn from.
+export function hourWeights(answeredHours = {}, minCalls = 3) {
+  const calls = Object.values(answeredHours).reduce((total, hour) => total + hour.rang, 0);
+  if (calls < minCalls) return null;
+  return Object.fromEntries(Object.entries(answeredHours).map(([hour, { rang, answered }]) => [hour, (answered + 1) / (rang + 2)]));
+}
+
 // Returns null when no day qualifies, which means a custom schedule with no days picked.
-export function nextCallTime({ now, timeZone, skipToday = false, random = Math.random, settings = {} }) {
+export function nextCallTime({ now, timeZone, skipToday = false, random = Math.random, settings = {}, hourWeights = null }) {
   const { callStartHour = WINDOW_START_HOUR, callEndHour = WINDOW_END_HOUR } = settings;
   const today = localParts(now, timeZone);
   const todayNumber = localDayNumber(now, timeZone);
@@ -73,7 +106,7 @@ export function nextCallTime({ now, timeZone, skipToday = false, random = Math.r
     const start = localToUtc(today.year, today.month, today.day + daysAhead, callStartHour, timeZone);
     const end = localToUtc(today.year, today.month, today.day + daysAhead, callEndHour, timeZone);
     const earliest = Math.max(start, now + MIN_NOTICE_MS);
-    if (earliest < end) return Math.floor(earliest + random() * (end - earliest));
+    if (earliest < end) return momentInWindow(earliest, end, random, timeZone, hourWeights);
   }
   return null;
 }

@@ -5,7 +5,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { canCall, cleanContact, contactList, findContact, isPaid, MAX_CUSTOM_CONTACTS, PING, planLimits, PLANS, selectedContact } from './contacts.js';
 import { recordCallDay, streakToShow } from './progress.js';
-import { localDay, localDayNumber, localParts, nextCallTime } from './schedule.js';
+import { hourWeights, localDay, localDayNumber, localParts, nextCallTime } from './schedule.js';
 import { applySettings, DEFAULT_SETTINGS, LEGACY_LEVELS, PROFICIENCY_LEVELS } from './settings.js';
 import { addSentence, addStarterStack, addWord, applyDowngrade, cleanSentence, cleanSentenceWords, cleanWord } from './stack.js';
 import { pickQuestion, questionById, TURN_MODES } from './tutor.js';
@@ -39,9 +39,11 @@ const MAX_LINE_LENGTH = 500;
 const KEEP_FEEDBACK = 1000;
 const MAX_ACCOUNTS_IN_REPORT = 20;
 const KEEP_RATINGS = 200;
-const KEEP_PROGRESS = 1000;
+const KEEP_PROGRESS = 1000; // calls in a learner's progress history, and level estimates, outside admin and beta accounts
 const KEEP_HISTORY = 200; // calls in the Calls tab, outside admin and beta accounts
-const RECENT_CALLS = 100; // how many the Calls tab shows // calls in a learner's progress history, and level estimates, outside admin and beta accounts
+const RECENT_CALLS = 100; // how many the Calls tab shows
+const HABIT_DAYS = 28; // the window the habit numbers look back over
+const DAY_MS = 86_400_000;
 // A speaking level is shown once this many calls have been graded, as the middle of the latest this many.
 export const LEVEL_SAMPLE = 5;
 const JLPT_ORDER = ['N5', 'N4', 'N3', 'N2', 'N1'];
@@ -234,7 +236,7 @@ export class CallEngine {
       }
       if (user.testRingAt && now >= user.testRingAt) {
         user.testRingAt = null;
-        jobs.push(this.#ring(user));
+        jobs.push(this.#ring(user, { test: true }));
       } else if (user.nextCallAt && now >= user.nextCallAt && user.subscription && user.settings.callsEnabled) {
         const onTime = now - user.nextCallAt <= LATE_CALL_LIMIT_MS;
         if (onTime) user.lastRingDay = localDay(now, user.timeZone);
@@ -246,7 +248,7 @@ export class CallEngine {
     await Promise.all(jobs);
   }
 
-  async #ring(user) {
+  async #ring(user, { test = false } = {}) {
     if (this.#activeCall(user)) return;
     const now = this.now();
     const contact = selectedContact(user);
@@ -261,6 +263,7 @@ export class CallEngine {
       ringDeadline: now + DELIVERY_GRACE_MS,
       deliveredAt: null,
       sessions: 0,
+      ...(test ? { test: true } : {}), // an admin's "ring my phone", left out of the habit numbers
       // Ping's scheduled call always comes, since one of the day's calls is kept for it, and stops at the plan's longest call.
       maxSeconds: planLimits(user.plan).perCall * 60,
     };
@@ -292,7 +295,8 @@ export class CallEngine {
     if (call.state === 'ringing') {
       call.state = 'answered';
       this.#recordOutcome(call, 'answered');
-      this.#history(call, { outcome: 'answered' });
+      // How long the phone rang before they picked up, from when the ring reached it.
+      this.#history(call, { outcome: 'answered', pickupSeconds: Math.max(0, Math.round((this.now() - (call.deliveredAt ?? call.createdAt)) / 1000)) });
       this.store.save();
     }
     return call;
@@ -800,12 +804,47 @@ export class CallEngine {
   #recordProgress(user, call, change) {
     let entry = user.progress.find((saved) => saved.callId === call.id);
     if (!entry) {
-      entry = { callId: call.id, at: call.connectedAt ?? call.startedAt ?? this.now(), userSpeechMs: null, englishTurnPercent: null, japaneseChars: null, japaneseMs: null, estimatedLevel: null };
+      entry = { callId: call.id, at: call.connectedAt ?? call.startedAt ?? this.now(), direction: call.direction, selfLevel: user.settings.proficiency, userSpeechMs: null, englishTurnPercent: null, japaneseChars: null, japaneseMs: null, estimatedLevel: null };
       user.progress.push(entry);
       if (!keepsEverything(user) && user.progress.length > KEEP_PROGRESS) user.progress.splice(0, user.progress.length - KEEP_PROGRESS);
     }
     Object.assign(entry, change);
     if (entry.userSpeechMs !== null && entry.englishTurnPercent !== null) entry.japaneseMs = Math.round((entry.userSpeechMs * (100 - entry.englishTurnPercent)) / 100);
+  }
+
+  // Whether Japanese is fitting into the learner's day, over the last HABIT_DAYS: how often they answer Ping's calls
+  // and how fast, who starts calls, how many days they practice, which hours work, and the north star: minutes of
+  // Japanese a week from Ping's calls they answered, which they didn't have to plan. Admin test rings are left out.
+  habit(user) {
+    const now = this.now();
+    const since = now - HABIT_DAYS * DAY_MS;
+    const recent = user.callHistory.filter((entry) => entry.at >= since && !entry.test);
+    const pingCalls = recent.filter((entry) => entry.direction === 'incoming' && ['answered', 'connected', 'missed', 'declined'].includes(entry.outcome));
+    const answered = pingCalls.filter((entry) => entry.outcome === 'answered' || entry.outcome === 'connected');
+    const pickups = answered.map((entry) => entry.pickupSeconds).filter((value) => value !== null && value !== undefined).sort((a, b) => a - b);
+    const connected = recent.filter((entry) => entry.outcome === 'connected');
+    const practiceDays = new Set(connected.map((entry) => localDayNumber(entry.at, user.timeZone))).size;
+    const hours = {};
+    for (const entry of pingCalls) {
+      const hour = entry.localHour ?? localParts(entry.at, user.timeZone).hour;
+      hours[hour] ??= { rang: 0, answered: 0 };
+      hours[hour].rang += 1;
+      if (answered.includes(entry)) hours[hour].answered += 1;
+    }
+    const lastWeek = new Set(connected.filter((entry) => entry.direction === 'incoming' && entry.at >= now - 7 * DAY_MS).map((entry) => entry.callId));
+    const unplannedMs = user.progress.filter((entry) => lastWeek.has(entry.callId)).reduce((total, entry) => total + (entry.japaneseMs ?? 0), 0);
+    return {
+      days: HABIT_DAYS,
+      pingCalls: pingCalls.length,
+      answerRatePercent: pingCalls.length ? Math.round((answered.length / pingCalls.length) * 100) : null,
+      pickupMedianSeconds: pickups.length ? pickups[Math.floor((pickups.length - 1) / 2)] : null,
+      callsStartedByPing: recent.filter((entry) => entry.direction === 'incoming').length,
+      callsStartedByLearner: recent.filter((entry) => entry.direction === 'outgoing').length,
+      // Per week of the window they've had the account, so a learner who joined last week isn't averaged over four.
+      practiceDaysPerWeek: Math.round((practiceDays / (Math.max(7, Math.min(HABIT_DAYS, (now - (user.joinedAt ?? since)) / DAY_MS)) / 7)) * 10) / 10,
+      answeredHours: hours,
+      unplannedMinutesThisWeek: Math.round((unplannedMs / 60_000) * 10) / 10,
+    };
   }
 
   // The Calls tab, newest first: calls the contact made (answered, missed or declined) and calls the user made
@@ -843,7 +882,19 @@ export class CallEngine {
     if (!user) return;
     let entry = user.callHistory.find((saved) => saved.callId === call.id);
     if (!entry) {
-      entry = { callId: call.id, contactId: call.contactId, direction: call.direction, at: call.createdAt ?? this.now(), outcome: null, seconds: null };
+      const at = call.createdAt ?? this.now();
+      entry = {
+        callId: call.id,
+        contactId: call.contactId,
+        direction: call.direction, // incoming: Ping (or a contact) started it; outgoing: the learner did
+        at,
+        localHour: localParts(at, user.timeZone).hour, // which hours get answered
+        selfLevel: user.settings.proficiency, // the JLPT level the learner had chosen when the call started
+        ...(call.test ? { test: true } : {}),
+        outcome: null,
+        seconds: null,
+        pickupSeconds: null,
+      };
       user.callHistory.push(entry);
       if (!keepsEverything(user) && user.callHistory.length > KEEP_HISTORY) user.callHistory.splice(0, user.callHistory.length - KEEP_HISTORY);
     }
@@ -918,7 +969,7 @@ export class CallEngine {
     return codes.map((code) => {
       const users = Object.values(this.store.users).filter((user) => user.joinedWith === code);
       const accounts = users
-        .map((user) => ({ joinedAt: user.joinedAt, calls: user.connectedCalls, lastCallAt: user.lastCallAt, words: user.words.length }))
+        .map((user) => ({ joinedAt: user.joinedAt, calls: user.connectedCalls, lastCallAt: user.lastCallAt, words: user.words.length, level: user.settings.proficiency, habit: this.habit(user) }))
         .sort((a, b) => (b.joinedAt ?? 0) - (a.joinedAt ?? 0));
       return {
         code,
@@ -985,6 +1036,8 @@ export class CallEngine {
     // The settings as the call starts. Ids and setting values only: never a custom contact's name or topic.
     const { proficiency, formality, thinkingTime, speed } = user.settings;
     const topic = { topicMode: call.topicMode ?? 'randomized', scenarioId: call.scenarioId ?? null };
+    // proficiency is the learner's own choice of JLPT level (the level picker, Manage Account, or asking Ping on a call),
+    // as the call started: compare it with estimatedLevel.
     this.#log(call, { contactId: call.contactId ?? null, questionId: call.questionId ?? null, ...topic, proficiency, formality, thinkingTime, speed });
   }
 
@@ -1040,7 +1093,9 @@ export class CallEngine {
   }
 
   #schedule(user, { skipToday = false } = {}) {
-    user.nextCallAt = nextCallTime({ now: this.now(), timeZone: user.timeZone, skipToday, random: this.random, settings: user.settings });
+    // Ping's call leans toward the hours of their window they tend to answer in (hourWeights in schedule.js).
+    const weights = hourWeights(this.habit(user).answeredHours);
+    user.nextCallAt = nextCallTime({ now: this.now(), timeZone: user.timeZone, skipToday, random: this.random, settings: user.settings, hourWeights: weights });
   }
 
   // DAILY_CALL_LIMIT is a safety net on top of the plan's calls, counting every call the user makes.

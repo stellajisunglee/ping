@@ -1156,3 +1156,66 @@ test("a call's details include what the learner said in Japanese, and its transc
   engine.deleteCallData(call.id);
   assert.equal(engine.callDetails(user, call.id), null, 'an admin deleting the call removes it from the Calls tab too');
 });
+
+test("Ping's calls record how fast they were picked up, the hour, and the learner's chosen level; test rings are marked", async () => {
+  const context = setup({ joinedWith: 'yc' });
+  const { engine, user, clock, store } = context;
+  engine.updateSettings(user, { proficiency: 'N3' });
+  await ringNow(context);
+  const call = callOf(store);
+  engine.markDelivered(call.id);
+  clock.now += 4000;
+  engine.answer(call.id);
+  engine.sessionDetails(user, call.id);
+  engine.markConnected(user, call.id);
+  const [entry] = engine.recentCalls(user);
+  assert.deepEqual([entry.pickupSeconds, entry.selfLevel, entry.localHour, entry.test], [4, 'N3', localParts(call.createdAt, 'Asia/Tokyo').hour, undefined]);
+  assert.equal(engine.callLog().find((logged) => logged.callId === call.id).proficiency, 'N3', 'the call log keeps the level they chose, as the call started');
+
+  engine.endCall(user, call.id, 'hung-up');
+  engine.requestTestRing(user);
+  clock.now += 60_000;
+  await engine.tick();
+  assert.equal(callOf(store).test, true, "an admin's test ring is marked, and left out of the habit numbers");
+  clock.now = callOf(store).ringDeadline + 1;
+  await engine.tick();
+  assert.equal(engine.recentCalls(user)[0].test, true);
+  assert.equal(engine.habit(user).pingCalls, 1, 'only the real call counts');
+});
+
+test('the habit numbers say whether Japanese fits into their day: answers, pick-up, who starts, practice days, unplanned minutes', async () => {
+  const context = setup({ joinedWith: 'yc' });
+  const { engine, user, clock, store } = context;
+  const pingCalls = async (answers) => {
+    await ringNow(context);
+    const call = callOf(store);
+    engine.markDelivered(call.id);
+    if (!answers) {
+      clock.now = call.ringDeadline + 1;
+      await engine.tick();
+      return;
+    }
+    clock.now += 6000;
+    engine.answer(call.id);
+    engine.sessionDetails(user, call.id);
+    engine.markConnected(user, call.id);
+    clock.now += 120_000;
+    engine.endCall(user, call.id, 'hung-up');
+    engine.saveTurnMetrics(user, call.id, { userSpeechMs: 60_000, agentSpeechMs: 60_000, userTurns: 6, smartTurnFallback: 0 });
+    engine.saveLearning(user, call.id, { englishTurnPercent: 0, japaneseChars: 50, newWords: 0 });
+  };
+  await pingCalls(true);
+  await pingCalls(false);
+  await pingCalls(true);
+  placeCall(context, { seconds: 60, reason: 'hung-up' }); // one they started themselves
+
+  const habit = engine.habit(user);
+  assert.equal(habit.pingCalls, 3);
+  assert.equal(habit.answerRatePercent, 67);
+  assert.equal(habit.pickupMedianSeconds, 6);
+  assert.deepEqual([habit.callsStartedByPing, habit.callsStartedByLearner], [3, 1]);
+  assert.ok(habit.practiceDaysPerWeek > 0);
+  assert.equal(habit.unplannedMinutesThisWeek, 2, "two minutes of Japanese from Ping's calls, not the one they started");
+  const hours = Object.values(habit.answeredHours);
+  assert.deepEqual([hours.reduce((sum, hour) => sum + hour.rang, 0), hours.reduce((sum, hour) => sum + hour.answered, 0)], [3, 2]);
+});

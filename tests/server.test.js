@@ -329,6 +329,7 @@ test('YC reviewers join as beta testers, and admins can see who joined with each
   assert.ok(yc.lastCallAt);
   assert.equal(yc.newest.length, 2);
   assert.ok(yc.newest.every((account) => account.joinedAt && !('token' in account) && !('id' in account)));
+  assert.ok(yc.newest.every((account) => account.level && account.habit && 'answerRatePercent' in account.habit), "each account's chosen level and habit numbers");
   assert.deepEqual(data.invites.map((invite) => invite.code), ['admin', 'beta', 'yc']);
   assert.ok(!JSON.stringify(data).includes(YC_CODE), 'the codes themselves are never sent');
 });

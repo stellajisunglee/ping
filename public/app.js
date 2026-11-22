@@ -171,6 +171,7 @@ function renderHome() {
   renderStackTiles();
   renderProgress();
   renderBadge();
+  renderBrowserNote();
   renderPolicyNotice();
 }
 
@@ -213,12 +214,43 @@ async function chooseLevel(proficiency) {
     const settings = await api('/api/settings', { method: 'PATCH', body: { proficiency } });
     state.me.settings = settings.settings;
     state.me.levelChosen = true;
-    const pushAllowed = 'Notification' in window && Notification.permission === 'granted';
-    if (!pushAllowed) return show('enable');
+    if (!pushAllowed() && !browserOnly()) return show('enable');
     goHome();
   } catch (error) {
     setError('level-error', error.message);
   }
+}
+
+// Ping can be used in a plain browser tab: an iPhone's Safari, or a computer without notifications. There the
+// user can call Ping, but Ping can't call them, since calls arrive as notifications. The choice is kept per browser.
+const BROWSER_ONLY_KEY = 'ping-browser-only';
+const pushAllowed = () => 'Notification' in window && Notification.permission === 'granted';
+
+function browserOnly() {
+  try {
+    return localStorage.getItem(BROWSER_ONLY_KEY) === 'yes';
+  } catch {
+    return false;
+  }
+}
+
+function useBrowserOnly(next) {
+  try {
+    localStorage.setItem(BROWSER_ONLY_KEY, 'yes');
+  } catch {}
+  next();
+}
+
+// Home says Ping can't call them here, and how to change that.
+function renderBrowserNote() {
+  const callsOff = !pushAllowed();
+  $('browser-note').hidden = !callsOff;
+  if (!callsOff) return;
+  const ios = isIosBrowserTab();
+  $('browser-note-text').textContent = ios
+    ? "Ping can't call you in Safari, but you can call Ping. To get calls, add Ping to your Home Screen from the Share button."
+    : "Ping can't call you in this browser until notifications are on, but you can call Ping.";
+  $('browser-note-enable').hidden = ios;
 }
 
 // Ringing
@@ -661,6 +693,9 @@ function bindEvents() {
   });
   $('join-form').addEventListener('submit', join);
   $('enable-button').addEventListener('click', enable);
+  $('enable-skip').addEventListener('click', () => useBrowserOnly(goHome));
+  $('install-skip').addEventListener('click', () => useBrowserOnly(() => show('join')));
+  $('browser-note-enable').addEventListener('click', () => show('enable'));
   $('level-choices').addEventListener('click', (event) => {
     const choice = event.target.closest('[data-level]');
     if (choice) chooseLevel(choice.dataset.level);
@@ -703,22 +738,26 @@ async function init() {
   state.config = await api('/api/config').catch(() => ({}));
   state.token = readToken();
 
-  if (!state.token) return show(isIosBrowserTab() ? 'install' : 'join');
+  // An iPhone's Safari tab is asked to add Ping to the Home Screen first, unless they chose to stay in Safari.
+  const firstScreen = () => (isIosBrowserTab() && !browserOnly() ? 'install' : 'join');
+  if (!state.token) return show(firstScreen());
 
   try {
     await refresh();
   } catch (error) {
     if (error.status === 401) {
       writeToken(null);
-      return show(isIosBrowserTab() ? 'install' : 'join');
+      return show(firstScreen());
     }
     throw error;
   }
 
-  const pushAllowed = 'Notification' in window && Notification.permission === 'granted';
-  if (!pushAllowed) return show('enable');
-  // Browsers can replace a subscription at any time, so send the current one on every open.
-  await subscribeToPush().catch((error) => console.warn('Could not refresh the push subscription', error));
+  if (pushAllowed()) {
+    // Browsers can replace a subscription at any time, so send the current one on every open.
+    await subscribeToPush().catch((error) => console.warn('Could not refresh the push subscription', error));
+  } else if (!browserOnly()) {
+    return show(state.me.levelChosen ? 'enable' : 'level');
+  }
 
   const params = new URLSearchParams(location.search);
   const callId = params.get('call');

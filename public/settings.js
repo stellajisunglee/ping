@@ -57,7 +57,6 @@ function renderManageCalls() {
   $('language-input').value = settings.language;
   $('speed-input').value = settings.speed;
   $('speed-output').textContent = `${Number(settings.speed).toFixed(2)}×`;
-  $('proficiency-input').value = settings.proficiency;
   $('formality-input').value = settings.formality;
   $('thinking-input').value = settings.thinkingTime;
   $('calls-input').checked = settings.callsEnabled;
@@ -208,6 +207,12 @@ const when = (at) => (at ? new Date(at).toLocaleString(undefined, { month: 'shor
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
 // Admins only: how many people joined with each invite code, and whether they've made a call.
+// Whether Ping fits into a learner's day, over the last 4 weeks, for the invite list.
+export function habitText(habit) {
+  const answered = habit.answerRatePercent === null ? "no calls from Ping yet" : `answered ${habit.answerRatePercent}% of Ping's ${plural(habit.pingCalls, 'call')}${habit.pickupMedianSeconds === null ? '' : ` (in ${habit.pickupMedianSeconds} s)`}`;
+  return `Last ${habit.days / 7} weeks: ${answered} · started ${habit.callsStartedByLearner} themselves · ${habit.practiceDaysPerWeek} practice days a week · ${habit.unplannedMinutesThisWeek} min of Japanese from Ping's calls this week`;
+}
+
 async function renderInvites() {
   $('invites-section').hidden = !isAdmin();
   if (!isAdmin()) return;
@@ -220,9 +225,12 @@ async function renderInvites() {
           ? `${plural(invite.accounts, 'account')} · ${invite.accountsThatCalled} made a call · ${plural(invite.calls, 'call')} in all`
           : 'Nobody has joined yet.';
         const accounts = invite.newest.map((account) =>
-          el('li', {
-            textContent: `Joined ${when(account.joinedAt)} · ${account.calls ? `${plural(account.calls, 'call')}, last ${when(account.lastCallAt)}` : 'no calls yet'} · ${plural(account.words, 'word')}`,
-          }),
+          el(
+            'li',
+            {},
+            `Joined ${when(account.joinedAt)} · ${account.calls ? `${plural(account.calls, 'call')}, last ${when(account.lastCallAt)}` : 'no calls yet'} · ${plural(account.words, 'word')}${account.level ? ` · chose ${account.level}` : ''}`,
+            ...(account.habit ? [el('br'), habitText(account.habit)] : []),
+          ),
         );
         return el(
           'div',
@@ -354,6 +362,7 @@ export function learningFacts(entry) {
     ['Different words', words],
     ['Stack words used / new', entry.stackWordsUsed == null ? '-' : `${entry.stackWordsUsed} / ${entry.newWords}`],
     ['Help requests', value(entry.helpRequests)],
+    ['Self-selected level', value(entry.proficiency)],
     ['Estimated level', level],
   ];
 }
@@ -465,8 +474,21 @@ async function sendFeedback(event) {
   }
 }
 
+// Manage Account's Japanese level: the JLPT level the learner chose when they joined, which they can change here.
+async function changeLevel(proficiency) {
+  setError('account-error', null);
+  try {
+    const { settings } = await api('/api/settings', { method: 'PATCH', body: { proficiency } });
+    state.me.settings = settings;
+  } catch (error) {
+    setError('account-error', error.message);
+  }
+  $('proficiency-input').value = state.me.settings.proficiency;
+}
+
 // Manage Account's recording switch. Admin and beta tester accounts can't turn it off.
 function renderAccount() {
+  $('proficiency-input').value = state.me.settings.proficiency;
   const { on, canTurnOff } = state.me.recording;
   $('recording-input').checked = on;
   $('recording-input').disabled = !canTurnOff;
@@ -569,7 +591,7 @@ export function initSettings() {
   });
   $('speed-input').addEventListener('change', (event) => changeSetting({ speed: Number(event.target.value) }));
   $('language-input').addEventListener('change', (event) => changeSetting({ language: event.target.value }));
-  $('proficiency-input').addEventListener('change', (event) => changeSetting({ proficiency: event.target.value }));
+  $('proficiency-input').addEventListener('change', (event) => changeLevel(event.target.value));
   $('formality-input').addEventListener('change', (event) => changeSetting({ formality: event.target.value }));
   $('thinking-input').addEventListener('change', (event) => changeSetting({ thinkingTime: event.target.value }));
   $('calls-input').addEventListener('change', (event) => changeSetting({ callsEnabled: event.target.checked }));

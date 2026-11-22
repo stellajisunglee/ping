@@ -1664,3 +1664,12 @@ textarea {
 .progress-level {
   margin: 0;
 }
+
+/* Home, in a browser tab without notifications: Ping can't call them here */
+.browser-note p {
+  margin: 0;
+}
+
+.browser-note .small {
+  align-self: flex-start;
+}

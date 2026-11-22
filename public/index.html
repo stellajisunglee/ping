@@ -25,6 +25,8 @@
         <li>Choose <strong>Add to Home Screen</strong></li>
         <li>Open Ping from your Home Screen</li>
       </ol>
+      <button id="install-skip" class="text-link" type="button">Use Ping in Safari instead</button>
+      <p class="fine">In Safari you can call Ping, but Ping can't call you.</p>
     </main>
 
     <main id="screen-join" class="screen centered" hidden>
@@ -50,7 +52,7 @@
         <button type="button" class="level-choice" data-level="N1"><strong>N1</strong><span>Near-fluent</span></button>
       </div>
       <p id="level-error" class="error" role="alert" hidden></p>
-      <p class="fine">Not sure? Pick the closest. You can change it any time in Settings, or ask Ping to speak more easily on a call.</p>
+      <p class="fine">Not sure? Pick the closest. You can change it any time in Settings, Manage Account, or ask Ping to speak more easily on a call.</p>
     </main>
 
     <main id="screen-enable" class="screen centered" hidden>
@@ -59,6 +61,8 @@
       <p>Notifications let Ping call you. The microphone lets you talk back.</p>
       <button id="enable-button" class="primary" type="button">Turn on notifications and microphone</button>
       <p id="enable-error" class="error" role="alert" hidden></p>
+      <button id="enable-skip" class="text-link" type="button">Not now: just use Ping in this browser</button>
+      <p class="fine">Without notifications you can still call Ping, but Ping can't call you.</p>
     </main>
 
     <main id="screen-home" class="screen tabbed" hidden>
@@ -79,6 +83,10 @@
           <button class="secondary" type="button" data-go="privacy">Privacy Policy</button>
           <button id="policy-notice-ok" class="primary" type="button">OK</button>
         </div>
+      </section>
+      <section id="browser-note" class="card browser-note" aria-label="Calls in this browser" hidden>
+        <p id="browser-note-text"></p>
+        <button id="browser-note-enable" class="secondary small" type="button">Turn on calls</button>
       </section>
       <section class="card call-card" aria-label="Call">
         <p id="home-status" class="muted"></p>
@@ -237,6 +245,17 @@
       <h1>Manage Account</h1>
       <p class="muted">Your account lives on this phone, with no email or password yet. Deleting it removes your streak, stack, contacts, saved conversations and call recordings.</p>
       <p id="account-error" class="error" role="alert" hidden></p>
+      <div class="setting">
+        <label for="proficiency-input">Japanese level</label>
+        <select id="proficiency-input">
+          <option value="N5">N5 · Just starting</option>
+          <option value="N4">N4 · Basic conversation</option>
+          <option value="N3">N3 · Everyday conversation</option>
+          <option value="N2">N2 · Comfortable</option>
+          <option value="N1">N1 · Near-fluent</option>
+        </select>
+      </div>
+      <p class="muted">The level you picked when you joined, as a JLPT level. Ping speaks Japanese at this level from your next call.</p>
       <div class="setting row">
         <label for="recording-input">Use my calls to improve Ping</label>
         <input id="recording-input" type="checkbox" role="switch" />
@@ -275,16 +294,6 @@
           <label for="end-hour-input" class="visually-hidden">To</label>
           <select id="end-hour-input"></select>
         </div>
-      </div>
-      <div class="setting">
-        <label for="proficiency-input">Japanese level</label>
-        <select id="proficiency-input">
-          <option value="N5">N5 · Just starting</option>
-          <option value="N4">N4 · Basic conversation</option>
-          <option value="N3">N3 · Everyday conversation</option>
-          <option value="N2">N2 · Comfortable</option>
-          <option value="N1">N1 · Near-fluent</option>
-        </select>
       </div>
       <div class="setting">
         <label for="formality-input">Speech style</label>
