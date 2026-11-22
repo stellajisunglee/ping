@@ -86,6 +86,21 @@ export class Recordings {
     return true;
   }
 
+  // Every recorded call with its transcript, for the data export.
+  all() {
+    if (!existsSync(this.dir)) return [];
+    const calls = [];
+    for (const userId of readdirSync(this.dir)) {
+      if (!SAFE_ID.test(userId) || !statSync(this.#folder(userId)).isDirectory()) continue;
+      for (const file of readdirSync(this.#folder(userId))) {
+        if (!file.endsWith('.json')) continue;
+        const info = this.#readInfo(userId, file.slice(0, -'.json'.length));
+        if (info) calls.push({ lines: [], ...info });
+      }
+    }
+    return calls.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+  }
+
   // Every recorded call, newest first, without the transcripts.
   list() {
     if (!existsSync(this.dir)) return [];

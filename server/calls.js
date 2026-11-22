@@ -847,6 +847,13 @@ export class CallEngine {
     };
   }
 
+  // Everything kept, for the data export: accounts without their sign-in token or push subscription, the call log,
+  // recent call records, checklist results and feedback.
+  exportData() {
+    const users = Object.values(this.store.users).map(({ tokenHash, subscription, ...user }) => ({ ...user, hasSubscription: Boolean(subscription) }));
+    return { users, calls: Object.values(this.store.calls), callLog: this.store.callLog, scenarioChecks: this.store.scenarioChecks, feedback: this.store.feedback };
+  }
+
   // The Calls tab, newest first: calls the contact made (answered, missed or declined) and calls the user made
   // (connected or not), each with the contact's name as it is now.
   recentCalls(user) {

@@ -187,6 +187,29 @@ Calls are recorded so the Ping team can listen to them and read their transcript
 
 OpenAI's docs don't say how a Realtime call reports running out of credit, so the app treats any call error, failed reply or refused connection whose type or code mentions "quota" or "credit" as out of credit. Two failed replies in a row, for any reason, also mean the contact can't talk (one is retried). Either way the call screen shows the notice for three seconds before the call ends (`public/voice.js`). The app has no documented way to read the remaining balance, so it can only tell once credit has run out, not when it's running low. For that, set a usage alert or auto-recharge in OpenAI's billing settings.
 
+## Analyzing the data
+
+Ping's data lives on Render's disk in more than one place: `DATA_DIR/ping.json` (accounts, the call log, call history, progress, ratings, level estimates), `DATA_DIR/recordings/<user>/<call>.json` (transcripts) and the audio beside them. To analyze it on a laptop:
+
+1. Make a random key of at least 32 characters (for example `openssl rand -hex 24`) and set it as `EXPORT_KEY` both on Render and in your laptop's `.env`. Without it the export is off.
+2. Run `npm run pull-data`. It downloads everything to `~/ping-data` (or `PING_DATA_DIR`): the raw export as `raw/ping-<date>.json`, any audio not already there under `audio/`, and **one SQLite file**, `ping-<date>.sqlite`, copied to `ping-latest.sqlite`. Each run is a dated snapshot, so calls the server later removes (other accounts' after 7 days) stay on the laptop.
+3. Open the SQLite file with pandas, R, DB Browser for SQLite or any SQL tool.
+
+In the SQLite file each fact is stored once (`scripts/build-db.js`), even where the server keeps copies:
+
+| Table | One row per |
+| --- | --- |
+| `learners` | account: invite code, plan, joined, chosen level, call hours |
+| `calls` | call, connected or not: who started it, outcome, hour, pick-up time, length, level chosen at the time, test ring or not |
+| `call_setup` | connected call: engine, turn mode, topic, settings, build, prompt version, what the engine was sent |
+| `turn_metrics`, `learning_metrics` | connected call: the phone's timing numbers, and the learner's Japanese |
+| `ratings`, `level_estimates` | rated or graded call, with the comment or the model's reason |
+| `words`, `sentences`, `scenario_checks`, `recordings`, `transcript_lines`, `feedback` | as named |
+
+Two views do the usual joins: `call_facts` (one row per call with everything, plus talk share, average turn and Japanese minutes) and `learner_weeks` (each learner's weeks since joining: Ping's calls, answered, calls they started, and unplanned Japanese minutes). `node scripts/pull-data.js --from <DATA_DIR>` builds the same file from a local folder instead of the server.
+
+The export (`GET /api/export`, and `/api/export/audio/:callId`) needs the `X-Export-Key` header, counts wrong keys toward the same limit as wrong invite codes, and never includes sign-in tokens or push subscriptions. The pulled folder holds transcripts and recordings: keep it on the laptop, outside any git repository.
+
 ## Limits of web push
 
 - There's no ringtone or full-screen call screen when the app is closed. The call is a normal notification, with whatever sound and vibration the phone gives notifications, repeated during the 10 seconds where the phone allows it. The in-app ring screen, ringtone and vibration only appear when the app is open, and iPhones don't allow web apps to vibrate.
@@ -210,6 +233,7 @@ Set these as environment variables, in `.env` locally or under the service's **E
 | `TEXT_MODEL` | Writes example sentences and lists a sentence's kanji words | `gpt-6-luna` |
 | `DEEPGRAM_API_KEY` | Deepgram's Voice Agent engine. Needs the Member role or higher, to mint call tokens | Deepgram calls say Deepgram isn't set up |
 | `LEVEL_MODEL` | Estimates a learner's speaking level from a recorded call | `gpt-4.1-mini` |
+| `EXPORT_KEY` | Lets `npm run pull-data` download the data for analysis (see "Analyzing the data"). At least 32 random characters, the same on Render and in your laptop's `.env` | The export is off |
 | `DEEPGRAM_THINK_MODEL`, `DEEPGRAM_VOICE` | The model that writes Deepgram calls' replies, and their voice | `gpt-4.1-mini`, `flux-ayumi-ja` |
 | `DAILY_CALL_LIMIT` | How many calls a user can start per day, including test rings. Admins and YC reviewers aren't limited | No limit |
 
@@ -309,3 +333,4 @@ Ping is for adults in the US, and the Privacy Policy and Terms in the app are dr
 - `evals/`: conversation evals. Scripted learner situations played against Ping's real instructions on OpenAI's Realtime model in text, scored by exact checks and a Claude judge, with tools to check the judge against your own labels. Runs only on a developer's computer and needs `ANTHROPIC_API_KEY` in `.env` for the judge. See `evals/README.md`.
 - `bench/`: a Python benchmark of end-of-turn detectors on Japanese learner speech. It runs only on a developer's computer and is never deployed. See `bench/README.md`.
 - `scripts/build-icons.js`: draws the "ping" logo into `public/icons`.
+- `scripts/pull-data.js` and `scripts/build-db.js`: copy the data to a laptop and build one SQLite file for analysis.

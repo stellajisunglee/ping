@@ -1077,3 +1077,45 @@ test('a call that is not recorded is never graded', async () => {
   await waitForGrading();
   assert.equal(openai.graded.length, before);
 });
+
+// The data export
+
+test('the data export needs EXPORT_KEY, is off without one, and never sends sign-in tokens or push details', async () => {
+  const KEY = 'k'.repeat(40);
+  const recordingsDir = mkdtempSync(joinPath(tmpdir(), 'ping-export-'));
+  const start = async (exportKey) => {
+    const { server: app } = createApp({ engine, openai, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE }, vapidPublicKey: 'public', model: 'm', voice: 'v', dataDir: null, recordingsDir, exportKey } });
+    await new Promise((resolve) => app.listen(0, resolve));
+    const url = `http://127.0.0.1:${app.address().port}`;
+    const get = async (path, key) => fetch(url + path, { headers: key ? { 'X-Export-Key': key } : {} });
+    return { app, url, get };
+  };
+
+  const off = await start('');
+  assert.equal((await off.get('/api/export', KEY)).status, 404, 'off without a key');
+  off.app.close();
+  const short = await start('too-short');
+  assert.equal((await short.get('/api/export', 'too-short')).status, 404, 'off with a short key');
+  short.app.close();
+
+  const on = await start(KEY);
+  const register = await fetch(`${on.url}/api/register`, { method: 'POST', body: JSON.stringify({ inviteCode: BETA_CODE, timeZone: 'Asia/Tokyo' }) });
+  const tester = await register.json();
+  const call = (await (await fetch(`${on.url}/api/calls`, { method: 'POST', headers: { Authorization: `Bearer ${tester.token}` } })).json());
+  await fetch(`${on.url}/api/calls/${call.id}/session`, { method: 'POST', headers: { Authorization: `Bearer ${tester.token}` } });
+  await fetch(`${on.url}/api/calls/${call.id}/recording`, { method: 'POST', headers: { Authorization: `Bearer ${tester.token}`, 'Content-Type': 'audio/mp4' }, body: AUDIO });
+
+  assert.equal((await on.get('/api/export')).status, 403);
+  assert.equal((await on.get('/api/export', 'x'.repeat(40))).status, 403);
+  const response = await on.get('/api/export', KEY);
+  assert.equal(response.status, 200);
+  const exported = await response.json();
+  const text = JSON.stringify(exported);
+  assert.ok(exported.data.users.length > 0 && Array.isArray(exported.data.callLog) && Array.isArray(exported.recordings));
+  assert.ok(!text.includes('tokenHash') && !text.includes(tester.token) && !text.includes('p256dh'), 'no sign-in tokens or push keys');
+  assert.ok(exported.recordings.some((recording) => recording.callId === call.id && recording.audio === 'm4a'));
+  const audio = await on.get(`/api/export/audio/${call.id}`, KEY);
+  assert.deepEqual(new Uint8Array(await audio.arrayBuffer()), AUDIO);
+  assert.equal((await on.get(`/api/export/audio/${call.id}`)).status, 403);
+  on.app.close();
+});

@@ -27,6 +27,7 @@ const PUBLIC_DIR = join(ROOT, 'public');
 export const buildCommit = (value) => (typeof value === 'string' && /^[0-9a-f]{7,40}$/i.test(value) ? value.toLowerCase() : null);
 const TICK_MS = 1_000;
 const MAX_BODY_BYTES = 64_000; // room for a full call's transcript
+const MIN_EXPORT_KEY_LENGTH = 32; // EXPORT_KEY must be at least this long, or the data export stays off
 const MIN_GRADED_TURNS = 3; // learner lines a recorded call needs before its speaking level is estimated
 const MAX_RECORDING_BYTES = 25_000_000; // a 10-minute call is about 10 MB from an iPhone
 const MAX_RECORDED_LINES = 400;
@@ -137,7 +138,7 @@ export function diskUsage({ dataDir, recordingsBytes }) {
 }
 
 export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: '' }), config }) {
-  const { inviteCodes, vapidPublicKey, model, voice, dataDir } = config;
+  const { inviteCodes, vapidPublicKey, model, voice, dataDir, exportKey = '' } = config;
   const deepgramThinkModel = config.deepgramThinkModel ?? 'gpt-4.1-mini';
   const deepgramVoice = config.deepgramVoice ?? 'flux-ayumi-ja';
   const commit = buildCommit(config.buildCommit);
@@ -278,6 +279,30 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       const [, id, action] = callAction;
       const call = action === 'delivered' ? engine.markDelivered(id) : action === 'answer' ? engine.answer(id) : engine.decline(id);
       return call ? json(res, 200, callState(call)) : json(res, 404, { error: 'Call not found.' });
+    }
+
+    // The data export, for analysis on a laptop (scripts/pull-data.js). It needs EXPORT_KEY, not an account: off when
+    // the key isn't set (or is shorter than MIN_EXPORT_KEY_LENGTH), and wrong keys count toward the same per-minute limit
+    // as wrong invite codes. Sign-in tokens and push subscriptions are never included.
+    const exportRoute = pathname.match(/^\/api\/export(?:\/audio\/([\w-]+))?$/);
+    if (method === 'GET' && exportRoute) {
+      if (!exportKey || exportKey.length < MIN_EXPORT_KEY_LENGTH) return json(res, 404, { error: 'Not found.' });
+      const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ?? req.socket.remoteAddress;
+      if (recentWrongCodes(ip).length >= MAX_WRONG_CODES_PER_MINUTE) return json(res, 429, { error: 'Too many tries. Wait a minute and try again.' });
+      const given = String(req.headers['x-export-key'] ?? '');
+      if (!given || !codesMatch(given, exportKey)) {
+        recordWrongCode(ip);
+        return json(res, 403, { error: 'Wrong export key.' });
+      }
+      if (exportRoute[1]) {
+        const audio = recordings.audio(exportRoute[1]);
+        if (!audio) return json(res, 404, { error: 'No audio for that call.' });
+        res.writeHead(200, { 'Content-Type': audio.type, 'Content-Length': audio.size, 'Cache-Control': 'no-store', ...SECURITY_HEADERS });
+        audio.stream().pipe(res);
+        return;
+      }
+      console.log('data-export');
+      return json(res, 200, { exportedAt: Date.now(), buildCommit: commit, promptVersion: PROMPT_VERSION, data: engine.exportData(), recordings: recordings.all() });
     }
 
     const token = req.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
@@ -748,6 +773,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         yc: process.env.YC_INVITE_CODE ?? '',
       },
       vapidPublicKey: VAPID_PUBLIC_KEY,
+      exportKey: process.env.EXPORT_KEY ?? '',
       model: process.env.REALTIME_MODEL ?? 'gpt-realtime',
       voice,
       dataDir,
