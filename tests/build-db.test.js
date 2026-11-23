@@ -13,7 +13,13 @@ const exported = {
   data: {
     users: [{
       id: 'u1', role: 'beta', joinedWith: 'beta', plan: 'free', joinedAt: joined, timeZone: 'America/Los_Angeles', hasSubscription: true,
-      settings: { proficiency: 'N4', formality: 'formal', speed: 1, thinkingTime: 'normal', callStartHour: 10, callEndHour: 20, frequency: 'daily', callsEnabled: true },
+      settings: { proficiency: 'N4', formality: 'formal', speed: 1, thinkingTime: 'normal', callStartHour: 18, callEndHour: 21, frequency: 'daily', callsEnabled: true },
+      name: 'Stella', nameReading: 'ステラ', onboarded: true, onboardedAt: joined + 60_000, levelChosenAt: joined + 50_000,
+      settingsChanges: [
+        { at: joined + 40_000, field: 'callStartHour', from: 10, to: 18, duringCall: false },
+        { at: joined + 50_000, field: 'proficiency', from: 'N5', to: 'new', duringCall: false },
+        { at: joined + 9 * DAY, field: 'proficiency', from: 'new', to: 'N4', duringCall: true },
+      ],
       callHistory: [
         { callId: 'c1', contactId: 'ping', direction: 'incoming', at: joined + DAY, localHour: 18, selfLevel: 'N4', outcome: 'connected', seconds: 150, pickupSeconds: 5 },
         { callId: 'c2', contactId: 'ping', direction: 'incoming', at: joined + 2 * DAY, localHour: 11, selfLevel: 'N4', outcome: 'missed', seconds: null, pickupSeconds: null },
@@ -27,7 +33,7 @@ const exported = {
       progress: [],
     }],
     callLog: [
-      { callId: 'c1', userId: 'u1', joinedWith: 'beta', at: joined + DAY, direction: 'incoming', engine: 'gpt-realtime', turnMode: 'silence', proficiency: 'N4', seconds: 150, userSpeechMs: 60_000, agentSpeechMs: 60_000, userTurns: 6, replyGapMedianMs: 2000, suspectedCutoffs: 0, englishTurnPercent: 25, japaneseChars: 120, naturalness: 4, cutOffs: 1, estimatedLevel: 'N4', userCallSharePercent: 50 },
+      { callId: 'c1', userId: 'u1', joinedWith: 'beta', at: joined + DAY, direction: 'incoming', engine: 'gpt-realtime', turnMode: 'silence', proficiency: 'N4', callStartHour: 18, callEndHour: 21, frequency: 'daily', seconds: 150, userSpeechMs: 60_000, agentSpeechMs: 60_000, userTurns: 6, replyGapMedianMs: 2000, suspectedCutoffs: 0, englishTurnPercent: 25, japaneseChars: 120, naturalness: 4, cutOffs: 1, estimatedLevel: 'N4', userCallSharePercent: 50 },
       { callId: 'c3', userId: 'u1', joinedWith: 'beta', at: joined + 9 * DAY, direction: 'outgoing', engine: 'deepgram-agent', turnMode: null, proficiency: 'N4', seconds: 90, userSpeechMs: 30_000, agentSpeechMs: 30_000, userTurns: 4, englishTurnPercent: 0 },
       { callId: 'old', userId: 'u1', joinedWith: 'beta', at: joined + 3 * DAY, direction: 'incoming', engine: 'gpt-realtime', turnMode: 'smartTurn', proficiency: 'beginner', seconds: 60 },
     ],
@@ -54,5 +60,23 @@ test('each fact is stored once, in its own table, joined by ids', () => {
     { week: 2, pingCalls: 0, pingCallsAnswered: 0, learnerCalls: 1, unplannedJapaneseMinutes: 0 },
   ], 'the test ring is left out; only Ping-started calls count as unplanned');
   assert.equal(db.prepare("SELECT audioFile FROM recordings WHERE callId = 'c1'").get().audioFile, '/audio/u1/c1.m4a');
+  db.close();
+});
+
+test('the call window, level changes and onboarding come out cleanly, with levels as numbers and no names', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'ping-db-')), 'ping.sqlite');
+  const counts = buildDatabase(exported, path);
+  assert.equal(counts.settings_changes, 3);
+  const db = new DatabaseSync(path);
+  const learner = { ...db.prepare('SELECT * FROM learners').get() };
+  assert.deepEqual([learner.selfLevel, learner.selfLevelRank, learner.callStartHour, learner.onboarded, learner.nameGiven], ['N4', 2, 18, 1, 1]);
+  assert.ok(learner.onboardedAt && learner.levelChosenAt);
+  assert.ok(!JSON.stringify(learner).includes('Stella') && !JSON.stringify(learner).includes('ステラ'), "the learner's name stays out of the analysis file");
+  const changes = db.prepare("SELECT fromValue, toValue, duringCall FROM settings_changes WHERE field = 'proficiency' ORDER BY at").all().map((row) => ({ ...row }));
+  assert.deepEqual(changes, [{ fromValue: 'N5', toValue: 'new', duringCall: 0 }, { fromValue: 'new', toValue: 'N4', duringCall: 1 }]);
+  const setup = { ...db.prepare("SELECT callStartHour, callEndHour, frequency FROM call_setup WHERE callId = 'c1'").get() };
+  assert.deepEqual(setup, { callStartHour: 18, callEndHour: 21, frequency: 'daily' });
+  assert.equal(db.prepare("SELECT selfLevelRank FROM calls WHERE callId = 'old'").get().selfLevelRank, 1, 'beginner, from before JLPT, ranks with N5');
+  assert.equal(db.prepare("SELECT estimatedLevelRank FROM call_facts WHERE callId = 'c1'").get().estimatedLevelRank, 2);
   db.close();
 });

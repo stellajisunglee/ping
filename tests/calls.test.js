@@ -1222,3 +1222,28 @@ test('the habit numbers say whether Japanese fits into their day: answers, pick-
   const hours = Object.values(habit.answeredHours);
   assert.deepEqual([hours.reduce((sum, hour) => sum + hour.rang, 0), hours.reduce((sum, hour) => sum + hour.answered, 0)], [3, 2]);
 });
+
+test("each change to the level, call window or pace is kept with when, and whether it was asked for on a call", () => {
+  const context = setup();
+  const { engine, user, clock } = context;
+  engine.updateSettings(user, { callStartHour: 18, callEndHour: 21 });
+  clock.now += 60_000;
+  engine.updateSettings(user, { proficiency: 'new', speed: 0.85, thinkingTime: 'long' });
+  const levelChosenAt = user.levelChosenAt;
+  engine.updateSettings(user, { formality: 'formal' }); // no change: already formal
+  const call = engine.callBack(user);
+  engine.sessionDetails(user, call.id);
+  engine.markConnected(user, call.id);
+  clock.now += 60_000;
+  engine.updateSettings(user, { proficiency: 'N5' }); // asked for on the call
+  assert.deepEqual(user.settingsChanges.map(({ field, from, to, duringCall }) => [field, from, to, duringCall]), [
+    ['callStartHour', 10, 18, false],
+    ['callEndHour', 20, 21, false],
+    ['proficiency', 'N5', 'new', false],
+    ['speed', 1, 0.85, false],
+    ['thinkingTime', 'normal', 'long', false],
+    ['proficiency', 'new', 'N5', true],
+  ]);
+  assert.equal(user.levelChosenAt, levelChosenAt, 'the first time they chose a level is kept');
+  assert.deepEqual([...['callStartHour', 'callEndHour', 'frequency'].map((field) => engine.callLog().at(-1)[field])], [18, 21, 'daily'], 'each call logs the window as it started');
+});

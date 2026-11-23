@@ -55,6 +55,9 @@ const KEEP_RATINGS = 200;
 const KEEP_PROGRESS = 1000; // calls in a learner's progress history, and level estimates, outside admin and beta accounts
 const KEEP_HISTORY = 200; // calls in the Calls tab, outside admin and beta accounts
 const RECENT_CALLS = 100; // how many the Calls tab shows
+// Settings whose changes are kept over time (settingsChanges), the latest 500 outside admin and beta accounts.
+const TRACKED_SETTINGS = ['proficiency', 'formality', 'speed', 'thinkingTime', 'callStartHour', 'callEndHour', 'frequency', 'customDays', 'callsEnabled'];
+const KEEP_SETTINGS_CHANGES = 500;
 const RATIO_CALLS = 20; // calls in the "Japanese vs English" chart
 const HABIT_DAYS = 28; // the window the habit numbers look back over
 const DAY_MS = 86_400_000;
@@ -130,6 +133,9 @@ const newUserFields = () => ({
   name: null, // what Ping calls them, as they wrote it
   nameReading: null, // how Ping says it, in kana (ステラ), which goes into Ping's instructions and greeting
   onboarded: false, // finished the two onboarding pages (beta testers and Free users)
+  onboardedAt: null,
+  levelChosenAt: null, // when they first picked a level
+  settingsChanges: [], // { at, field, from, to, duringCall } for each change to a tracked setting
   progress: [], // one entry per call: speaking time, English share, Japanese characters, estimated level (numbers and levels only)
   levelEstimates: [], // the model's speaking-level estimate for each graded call, newest first, with its one-line reason
   callHistory: [], // the Calls tab: each call to or from a contact, with how it went. Kept after the call record is removed
@@ -227,6 +233,7 @@ export class CallEngine {
   finishOnboarding(user) {
     if (!user.name || !user.levelChosen) return false;
     user.onboarded = true;
+    user.onboardedAt ??= this.now();
     this.store.save();
     return true;
   }
@@ -234,13 +241,29 @@ export class CallEngine {
   updateSettings(user, change) {
     const before = user.settings;
     user.settings = applySettings(before, change);
-    if (PROFICIENCY_LEVELS.includes(change.proficiency)) user.levelChosen = true;
+    if (PROFICIENCY_LEVELS.includes(change.proficiency)) {
+      user.levelChosen = true;
+      user.levelChosenAt ??= this.now();
+    }
+    this.#recordSettingsChanges(user, before, user.settings);
     const scheduleChanged = SCHEDULE_FIELDS.some((field) => String(before[field]) !== String(user.settings[field]));
     if (user.settings.callsEnabled && (scheduleChanged || !user.nextCallAt || user.nextCallAt <= this.now())) {
       this.#schedule(user, { skipToday: this.#rangToday(user) });
     }
     this.store.save();
     return user.settings;
+  }
+
+  // Every change to a tracked setting, with when and whether it happened during a call (asked of Ping by voice), so
+  // the call window, level and pace a learner chose can be followed over time. Values only.
+  #recordSettingsChanges(user, before, after) {
+    const at = this.now();
+    const duringCall = Object.values(this.store.calls).some((call) => call.userId === user.id && call.connectedAt && !call.endedAt);
+    for (const field of TRACKED_SETTINGS) {
+      if (JSON.stringify(before[field]) === JSON.stringify(after[field])) continue;
+      user.settingsChanges.push({ at, field, from: before[field] ?? null, to: after[field] ?? null, duringCall });
+    }
+    if (!keepsEverything(user) && user.settingsChanges.length > KEEP_SETTINGS_CHANGES) user.settingsChanges.splice(0, user.settingsChanges.length - KEEP_SETTINGS_CHANGES);
   }
 
   deleteUser(user) {
@@ -1089,11 +1112,12 @@ export class CallEngine {
     call.assigned = manual ? 'manual' : 'random';
     if (!manual) user.comboCounts[comboKey(combo)] = (user.comboCounts[comboKey(combo)] ?? 0) + 1;
     // The settings as the call starts. Ids and setting values only: never a custom contact's name or topic.
-    const { proficiency, formality, thinkingTime, speed } = user.settings;
+    const { proficiency, formality, thinkingTime, speed, callStartHour, callEndHour, frequency } = user.settings;
     const topic = { topicMode: call.topicMode ?? 'randomized', scenarioId: call.scenarioId ?? null };
     // proficiency is the learner's own choice of JLPT level (the level picker, Manage Account, or asking Ping on a call),
     // as the call started: compare it with estimatedLevel.
-    this.#log(call, { contactId: call.contactId ?? null, questionId: call.questionId ?? null, ...topic, proficiency, formality, thinkingTime, speed });
+    // The call window and frequency as the call started, so calls can be compared with the hours a learner chose.
+    this.#log(call, { contactId: call.contactId ?? null, questionId: call.questionId ?? null, ...topic, proficiency, formality, thinkingTime, speed, callStartHour, callEndHour, frequency });
   }
 
   // Past KEEP_CALL_LOG entries, the oldest go first, except admin and beta testers' entries, which stay.

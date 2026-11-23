@@ -61,7 +61,7 @@ The **call log** keeps one entry per call that connected (`callLog` in the data 
 
 So calls stay comparable after the full call record is removed (7 days), each entry also keeps:
 - **The call:** `contactId`, `questionId`, and `endReason`, the first reason the phone reported (missing if it never reported one, for example when the app was closed).
-- **Settings as the call started:** `proficiency`, `formality`, `thinkingTime`, `speed`. A change made during the call, or a reconnect, doesn't rewrite them.
+- **Settings as the call started:** `proficiency`, `formality`, `thinkingTime`, `speed`, and the call window and frequency (`callStartHour`, `callEndHour`, `frequency`). A change made during the call, or a reconnect, doesn't rewrite them.
 - **Build:** `buildCommit`, from Render's `RENDER_GIT_COMMIT`; null where it isn't set, like a laptop.
 - **Prompt:** `promptVersion` (`PROMPT_VERSION` in `server/prompt.js`). Raise it whenever what a contact is told changes; `tests/instructions-snapshot.test.js` fails until you do.
 - **What the engine was actually sent,** from the call's first session (`callConfig` in `server/experiment.js`):
@@ -206,12 +206,15 @@ In the SQLite file each fact is stored once (`scripts/build-db.js`), even where 
 
 | Table | One row per |
 | --- | --- |
-| `learners` | account: invite code, plan, joined, chosen level, call hours |
+| `learners` | account: invite code, plan, joined, chosen level, call hours, when they chose a level and finished onboarding, whether they gave a name (the name itself stays out) |
 | `calls` | call, connected or not: who started it, outcome, hour, pick-up time, length, level chosen at the time, test ring or not |
 | `call_setup` | connected call: engine, turn mode, topic, settings, build, prompt version, what the engine was sent |
 | `turn_metrics`, `learning_metrics` | connected call: the phone's timing numbers, and the learner's Japanese |
 | `ratings`, `level_estimates` | rated or graded call, with the comment or the model's reason |
+| `settings_changes` | change to a tracked setting (level, call window, frequency, pace, formality, calls on or off): when, from, to, and whether it was asked for during a call |
 | `words`, `sentences`, `scenario_checks`, `recordings`, `transcript_lines`, `feedback` | as named |
+
+Levels also come as numbers (`selfLevelRank`, `levelRank`, `estimatedLevelRank`: 0 completely new, 1 N5 … 5 N1, with the old beginner, intermediate and advanced at 1, 3 and 5), so they sort and compare. Each connected call's `call_setup` row has the call window and frequency as it started.
 
 Two views do the usual joins: `call_facts` (one row per call with everything, plus talk share, average turn and Japanese minutes) and `learner_weeks` (each learner's weeks since joining: Ping's calls, answered, calls they started, and unplanned Japanese minutes). `node scripts/pull-data.js --from <DATA_DIR>` builds the same file from a local folder instead of the server.
 

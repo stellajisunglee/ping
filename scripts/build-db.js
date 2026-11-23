@@ -4,7 +4,8 @@
 // Uses Node's built-in SQLite, so there's nothing to install.
 //
 // Tables: learners, calls (every call, connected or not), call_setup, turn_metrics, learning_metrics, ratings,
-// level_estimates, words, sentences, scenario_checks, recordings, transcript_lines, feedback.
+// level_estimates, settings_changes, words, sentences, scenario_checks, recordings, transcript_lines, feedback.
+// Levels also come as numbers (selfLevelRank, levelRank: 0 completely new, 1 N5 ... 5 N1) so they sort and compare.
 // Views: call_facts (one row per call with everything joined), learner_weeks (each learner's weeks since joining).
 
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -12,6 +13,11 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { METRIC_FIELDS } from '../public/turn-metrics.js';
 import { LEARNING_FIELDS } from '../public/learning-metrics.js';
+
+// Levels as numbers, so they sort and compare: 0 completely new, 1 N5 ... 5 N1. The three levels from before JLPT keep
+// their place (beginner 1, intermediate 3, advanced 5).
+export const LEVEL_RANK = { new: 0, N5: 1, N4: 2, N3: 3, N2: 4, N1: 5, beginner: 1, intermediate: 3, advanced: 5 };
+const rank = (level) => LEVEL_RANK[level] ?? null;
 
 const iso = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
 const value = (v) => (v === undefined || v === null ? null : typeof v === 'boolean' ? Number(v) : typeof v === 'object' ? JSON.stringify(v) : v);
@@ -56,10 +62,11 @@ export function buildDatabase(exported, dbPath, { audioPath = () => null } = {})
   const counts = {};
   db.exec('BEGIN');
 
-  counts.learners = table(db, 'learners', ['userId', 'role', 'joinedWith', 'plan', 'joinedAt', 'timeZone', 'selfLevel', 'formality', 'speed', 'thinkingTime', 'callStartHour', 'callEndHour', 'frequency', 'callsEnabled', 'recordingOff', 'levelChosen', 'hasSubscription', 'policyVersion', 'streakCurrent', 'streakBest', 'connectedCalls'],
+  counts.learners = table(db, 'learners', ['userId', 'role', 'joinedWith', 'plan', 'joinedAt', 'timeZone', 'selfLevel', 'selfLevelRank', 'formality', 'speed', 'thinkingTime', 'callStartHour', 'callEndHour', 'frequency', 'callsEnabled', 'recordingOff', 'levelChosen', 'levelChosenAt', 'onboarded', 'onboardedAt', 'nameGiven', 'hasSubscription', 'policyVersion', 'streakCurrent', 'streakBest', 'connectedCalls'],
     users.map((user) => ({
       userId: user.id, role: user.role, joinedWith: user.joinedWith, plan: user.plan, joinedAt: iso(user.joinedAt), timeZone: user.timeZone,
-      selfLevel: user.settings?.proficiency, formality: user.settings?.formality, speed: user.settings?.speed, thinkingTime: user.settings?.thinkingTime,
+      selfLevel: user.settings?.proficiency, selfLevelRank: rank(user.settings?.proficiency),
+      levelChosenAt: iso(user.levelChosenAt), onboarded: Boolean(user.onboarded), onboardedAt: iso(user.onboardedAt), nameGiven: Boolean(user.name), // the name itself stays out formality: user.settings?.formality, speed: user.settings?.speed, thinkingTime: user.settings?.thinkingTime,
       callStartHour: user.settings?.callStartHour, callEndHour: user.settings?.callEndHour, frequency: user.settings?.frequency, callsEnabled: user.settings?.callsEnabled,
       recordingOff: Boolean(user.recordingOff), levelChosen: user.levelChosen, hasSubscription: user.hasSubscription, policyVersion: user.policyVersion,
       streakCurrent: user.streak?.current, streakBest: user.streak?.best, connectedCalls: user.connectedCalls,
@@ -73,16 +80,16 @@ export function buildDatabase(exported, dbPath, { audioPath = () => null } = {})
       seen.add(entry.callId);
       callRows.push({
         callId: entry.callId, userId: user.id, contactId: entry.contactId, direction: entry.direction, startedBy: entry.direction === 'incoming' ? 'ping' : 'learner',
-        at: iso(entry.at), localHour: entry.localHour, selfLevel: entry.selfLevel ?? logged.get(entry.callId)?.proficiency, outcome: entry.outcome,
+        at: iso(entry.at), localHour: entry.localHour, selfLevel: entry.selfLevel ?? logged.get(entry.callId)?.proficiency, selfLevelRank: rank(entry.selfLevel ?? logged.get(entry.callId)?.proficiency), outcome: entry.outcome,
         connected: entry.outcome === 'connected', seconds: entry.seconds ?? logged.get(entry.callId)?.seconds, pickupSeconds: entry.pickupSeconds, test: Boolean(entry.test),
       });
     }
   }
   for (const entry of callLog) {
     if (seen.has(entry.callId)) continue;
-    callRows.push({ callId: entry.callId, userId: entry.userId, contactId: entry.contactId, direction: entry.direction, startedBy: entry.direction === 'incoming' ? 'ping' : 'learner', at: iso(entry.at), localHour: null, selfLevel: entry.proficiency, outcome: 'connected', connected: true, seconds: entry.seconds, pickupSeconds: null, test: false });
+    callRows.push({ callId: entry.callId, userId: entry.userId, contactId: entry.contactId, direction: entry.direction, startedBy: entry.direction === 'incoming' ? 'ping' : 'learner', at: iso(entry.at), localHour: null, selfLevel: entry.proficiency, selfLevelRank: rank(entry.proficiency), outcome: 'connected', connected: true, seconds: entry.seconds, pickupSeconds: null, test: false });
   }
-  counts.calls = table(db, 'calls', ['callId', 'userId', 'contactId', 'direction', 'startedBy', 'at', 'localHour', 'selfLevel', 'outcome', 'connected', 'seconds', 'pickupSeconds', 'test'], callRows, 'callId');
+  counts.calls = table(db, 'calls', ['callId', 'userId', 'contactId', 'direction', 'startedBy', 'at', 'localHour', 'selfLevel', 'selfLevelRank', 'outcome', 'connected', 'seconds', 'pickupSeconds', 'test'], callRows, 'callId');
 
   const setupColumns = ['callId', ...new Set(callLog.flatMap((entry) => Object.keys(entry)).filter((key) => !NOT_SETUP.has(key)))];
   counts.call_setup = table(db, 'call_setup', setupColumns, callLog, 'callId');
@@ -91,7 +98,10 @@ export function buildDatabase(exported, dbPath, { audioPath = () => null } = {})
   counts.learning_metrics = table(db, 'learning_metrics', ['callId', ...LEARNING_FIELDS], withAny(LEARNING_FIELDS), 'callId');
 
   counts.ratings = table(db, 'ratings', ['callId', 'userId', 'at', 'cutOffs', 'naturalness', 'comment'], users.flatMap((user) => (user.ratings ?? []).map((r) => ({ ...r, userId: user.id, at: iso(r.at) }))), 'callId');
-  counts.level_estimates = table(db, 'level_estimates', ['callId', 'userId', 'at', 'level', 'vocabulary', 'grammar', 'confidence', 'reason'], users.flatMap((user) => (user.levelEstimates ?? []).map((e) => ({ ...e, userId: user.id, at: iso(e.at) }))), 'callId');
+  counts.level_estimates = table(db, 'level_estimates', ['callId', 'userId', 'at', 'level', 'levelRank', 'vocabulary', 'grammar', 'confidence', 'reason'], users.flatMap((user) => (user.levelEstimates ?? []).map((e) => ({ ...e, levelRank: rank(e.level), userId: user.id, at: iso(e.at) }))), 'callId');
+  // Each change to a tracked setting (level, call window, frequency, pace, ...), with whether it was asked for on a call.
+  counts.settings_changes = table(db, 'settings_changes', ['userId', 'at', 'field', 'fromValue', 'toValue', 'duringCall'],
+    users.flatMap((user) => (user.settingsChanges ?? []).map((change) => ({ userId: user.id, at: iso(change.at), field: change.field, fromValue: change.from, toValue: change.to, duringCall: Boolean(change.duringCall) }))));
   counts.words = table(db, 'words', ['wordId', 'userId', 'kanji', 'kana', 'romaji', 'english', 'savedAt'], users.flatMap((user) => (user.words ?? []).map((w) => ({ ...w, wordId: w.id, userId: user.id, savedAt: iso(w.at) }))));
   counts.sentences = table(db, 'sentences', ['sentenceId', 'userId', 'japanese', 'romaji', 'english', 'word', 'savedAt'], users.flatMap((user) => (user.sentences ?? []).map((s) => ({ ...s, sentenceId: s.id, userId: user.id, savedAt: iso(s.at) }))));
   counts.scenario_checks = table(db, 'scenario_checks', ['callId', 'scenarioId', 'checkpointId', 'result', 'at'], scenarioChecks.map((c) => ({ ...c, at: iso(c.at) })));
@@ -106,7 +116,7 @@ export function buildDatabase(exported, dbPath, { audioPath = () => null } = {})
       ${METRIC_FIELDS.map((field) => `t."${field}"`).join(', ')},
       ${LEARNING_FIELDS.map((field) => `l."${field}"`).join(', ')},
       r.cutOffs, r.naturalness, r.comment,
-      e.level AS estimatedLevel, e.vocabulary AS estimatedVocabulary, e.grammar AS estimatedGrammar, e.confidence AS levelConfidence,
+      e.level AS estimatedLevel, e.levelRank AS estimatedLevelRank, e.vocabulary AS estimatedVocabulary, e.grammar AS estimatedGrammar, e.confidence AS levelConfidence,
       CASE WHEN t.userSpeechMs IS NOT NULL AND t.userSpeechMs + t.agentSpeechMs > 0 THEN ROUND(100.0 * t.userSpeechMs / (t.userSpeechMs + t.agentSpeechMs)) END AS userCallSharePercent,
       CASE WHEN t.userSpeechMs IS NOT NULL AND t.userTurns > 0 THEN ROUND(1.0 * t.userSpeechMs / t.userTurns) END AS avgTurnMs,
       CASE WHEN t.userSpeechMs IS NOT NULL AND l.englishTurnPercent IS NOT NULL THEN ROUND(t.userSpeechMs * (100 - l.englishTurnPercent) / 100.0) END AS japaneseMs
