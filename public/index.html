@@ -19,14 +19,19 @@
     <main id="screen-install" class="screen centered" hidden>
       <img class="logo" src="/icons/icon-192.png" alt="ping" />
       <h1>Add Ping to your Home Screen</h1>
-      <p>iPhones only allow notifications from apps on the Home Screen, and Ping's calls arrive as notifications.</p>
-      <ol class="steps">
-        <li>Tap the <strong>Share</strong> button in Safari</li>
+      <p>Ping is an app that calls you, so it lives on your Home Screen. That's also the only place your phone lets it ring.</p>
+      <button id="install-button" class="primary" type="button" hidden>Install Ping</button>
+      <ol id="install-steps-ios" class="steps" hidden>
+        <li>Tap the <strong>Share</strong> button</li>
         <li>Choose <strong>Add to Home Screen</strong></li>
         <li>Open Ping from your Home Screen</li>
       </ol>
-      <button id="install-skip" class="text-link" type="button">Use Ping in Safari instead</button>
-      <p class="fine">In Safari you can call Ping, but Ping can't call you.</p>
+      <ol id="install-steps-android" class="steps" hidden>
+        <li>Tap the <strong>⋮</strong> menu in your browser</li>
+        <li>Choose <strong>Install app</strong> or <strong>Add to Home screen</strong></li>
+        <li>Open Ping from your Home screen</li>
+      </ol>
+      <p id="install-done" class="notice" role="status" hidden>Ping is installed. Open it from your Home Screen.</p>
     </main>
 
     <main id="screen-join" class="screen centered" hidden>

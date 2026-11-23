@@ -8,6 +8,7 @@ import { failedCallNotice, startCall } from './voice.js';
 import { summarizeLearning, wordEvents, wordLevels } from './learning-metrics.js';
 import { initProgress, renderProgress } from './progress.js';
 import { initOnboarding, renderWelcome, showConnecting } from './onboarding.js';
+import { deviceKind, isInstalled, needsInstall } from './device.js';
 import { initRecents, renderBadge } from './recents.js';
 
 const RING_FALLBACK_MS = 12_000; // the server decides a call was missed. This only covers its message getting lost.
@@ -27,10 +28,37 @@ const REVEAL_EVERY_MS = 80;
 
 const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-function isIosBrowserTab() {
-  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  const installed = window.navigator.standalone || matchMedia('(display-mode: standalone)').matches;
-  return ios && !installed;
+// On a phone, Ping only runs as the installed app. Android's own install prompt is kept for the Install button.
+const device = deviceKind(navigator);
+const installed = isInstalled({ standalone: window.navigator.standalone, displayStandalone: matchMedia('(display-mode: standalone)').matches });
+const mustInstall = needsInstall(device, installed);
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  if (mustInstall) renderInstall();
+});
+window.addEventListener('appinstalled', () => {
+  installPrompt = null;
+  if (mustInstall) renderInstall({ done: true });
+});
+
+// The install page: an Install button where the browser offers one (Android), otherwise the steps for this phone.
+function renderInstall({ done = false } = {}) {
+  $('install-button').hidden = done || !installPrompt;
+  $('install-steps-ios').hidden = done || device !== 'ios';
+  $('install-steps-android').hidden = done || device !== 'android' || Boolean(installPrompt);
+  $('install-done').hidden = !done;
+  show('install');
+}
+
+async function installApp() {
+  if (!installPrompt) return;
+  const prompt = installPrompt;
+  installPrompt = null;
+  await prompt.prompt();
+  const { outcome } = await prompt.userChoice;
+  renderInstall({ done: outcome === 'accepted' });
 }
 
 function base64UrlToBytes(value) {
@@ -255,12 +283,13 @@ async function chooseLevel(proficiency) {
   }
 }
 
-// Ping can be used in a plain browser tab: an iPhone's Safari, or a computer without notifications. There the
-// user can call Ping, but Ping can't call them, since calls arrive as notifications. The choice is kept per browser.
+// On a computer, Ping can be used in a plain browser tab without notifications (for admins and testing): the user can
+// call Ping, but Ping can't call them. Phones always run the installed app. The choice is kept per browser.
 const BROWSER_ONLY_KEY = 'ping-browser-only';
 const pushAllowed = () => 'Notification' in window && Notification.permission === 'granted';
 
 function browserOnly() {
+  if (device !== 'desktop') return false;
   try {
     return localStorage.getItem(BROWSER_ONLY_KEY) === 'yes';
   } catch {
@@ -280,11 +309,8 @@ function renderBrowserNote() {
   const callsOff = !pushAllowed();
   $('browser-note').hidden = !callsOff;
   if (!callsOff) return;
-  const ios = isIosBrowserTab();
-  $('browser-note-text').textContent = ios
-    ? "Ping can't call you in Safari, but you can call Ping. To get calls, add Ping to your Home Screen from the Share button."
-    : "Ping can't call you in this browser until notifications are on, but you can call Ping.";
-  $('browser-note-enable').hidden = ios;
+  $('browser-note-text').textContent = device === 'desktop' ? "Ping can't call you in this browser until notifications are on, but you can call Ping." : "Ping can't call you until notifications are on, but you can call Ping.";
+  $('browser-note-enable').hidden = false;
 }
 
 // Ringing
@@ -735,7 +761,10 @@ function bindEvents() {
   $('enable-button').addEventListener('click', enable);
   $('enable-skip').addEventListener('click', () => useBrowserOnly(goHome));
   $('level-back').addEventListener('click', renderWelcome);
-  $('install-skip').addEventListener('click', () => useBrowserOnly(() => show('join')));
+  $('install-button').addEventListener('click', installApp);
+  // The "just use this browser" link is for computers only; a phone needs notifications to be called.
+  $('enable-skip').hidden = device !== 'desktop';
+  $('enable-skip').nextElementSibling.hidden = device !== 'desktop';
   $('browser-note-enable').addEventListener('click', () => show('enable'));
   $('level-choices').addEventListener('click', (event) => {
     const choice = event.target.closest('[data-level]');
@@ -781,16 +810,16 @@ async function init() {
   state.config = await api('/api/config').catch(() => ({}));
   state.token = readToken();
 
-  // An iPhone's Safari tab is asked to add Ping to the Home Screen first, unless they chose to stay in Safari.
-  const firstScreen = () => (isIosBrowserTab() && !browserOnly() ? 'install' : 'join');
-  if (!state.token) return show(firstScreen());
+  // A phone in a browser tab adds Ping to its Home Screen first, whether or not it has an account here.
+  if (mustInstall) return renderInstall();
+  if (!state.token) return show('join');
 
   try {
     await refresh();
   } catch (error) {
     if (error.status === 401) {
       writeToken(null);
-      return show(firstScreen());
+      return show('join');
     }
     throw error;
   }
