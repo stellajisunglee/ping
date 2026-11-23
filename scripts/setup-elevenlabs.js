@@ -4,8 +4,8 @@
 // Creates Ping's four tools as client tools (the phone runs them) and an agent that: speaks Japanese, thinks with
 // gpt-4.1-mini (as Deepgram calls do), uses ElevenLabs' turn_v3 turn-taking set to "patient" for learners, sends
 // 24 kHz audio and takes 16 kHz audio (what Ping's phone code plays and records), lets each call override its prompt,
-// first message, language and speed, needs a signed URL, and keeps no audio or transcripts at ElevenLabs.
-// Prints ELEVENLABS_AGENT_ID to put in .env and on Render. Run it once; running it again makes another agent.
+// first message, language and speed, needs a signed URL, and keeps no audio, deleting transcripts straight away.
+// Prints ELEVENLABS_AGENT_ID to put in .env and on Render. Running it again reuses the tools but makes another agent.
 // Field names follow elevenlabs.io/docs (agents create, tools, overrides, privacy). The tools endpoint's exact body
 // wasn't shown in the docs, so if ElevenLabs rejects it, the error is printed as is. --dry-run prints the requests.
 
@@ -17,8 +17,15 @@ const voiceId = process.env.ELEVENLABS_VOICE_ID ?? '';
 const llm = process.env.ELEVENLABS_LLM || 'gpt-4.1-mini';
 const dryRun = process.argv.includes('--dry-run');
 
+// ElevenLabs' tool schema refuses JSON Schema's additionalProperties, so it's taken out, at every level.
+const forElevenLabs = (schema) => {
+  if (Array.isArray(schema)) return schema.map(forElevenLabs);
+  if (!schema || typeof schema !== 'object') return schema;
+  return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== 'additionalProperties').map(([key, value]) => [key, forElevenLabs(value)]));
+};
+
 export const toolRequests = () =>
-  TOOLS.map(({ name, description, parameters }) => ({ tool_config: { type: 'client', name, description, expects_response: true, parameters } }));
+  TOOLS.map(({ name, description, parameters }) => ({ tool_config: { type: 'client', name, description, expects_response: true, parameters: forElevenLabs(parameters) } }));
 
 export function agentRequest({ toolIds = [], voice = voiceId, model = llm } = {}) {
   return {
@@ -40,7 +47,9 @@ export function agentRequest({ toolIds = [], voice = voiceId, model = llm } = {}
     platform_settings: {
       auth: { enable_auth: true },
       overrides: { conversation_config_override: { agent: { first_message: true, language: true, prompt: { prompt: true } }, tts: { speed: true } } },
-      privacy: { record_voice: false, retention_days: 0, delete_audio: true, delete_transcript_and_pii: true, zero_retention_mode: true },
+      // Keep nothing: no voice recording, audio deleted, transcripts deleted straight away (retention_days 0). ElevenLabs'
+      // stricter zero_retention_mode refuses gpt-4.1-mini, so it's off.
+      privacy: { record_voice: false, retention_days: 0, delete_audio: true, delete_transcript_and_pii: true, zero_retention_mode: false },
     },
   };
 }
@@ -56,16 +65,32 @@ async function post(path, body) {
   return JSON.parse(text);
 }
 
+// Ping's tools already on the account, by name, so running the setup again doesn't make copies.
+async function existingTools() {
+  if (dryRun) return {};
+  const response = await fetch(`${API}/convai/tools`, { headers: { 'xi-api-key': key } });
+  if (!response.ok) return {};
+  const { tools = [] } = await response.json();
+  return Object.fromEntries(tools.map((tool) => [tool.tool_config?.name, tool.id]).filter(([name, id]) => name && id));
+}
+
 async function main() {
   if (!dryRun && (!key || !voiceId)) {
     console.error('Set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID (a Japanese voice from the Voice Library) in .env first.');
     process.exit(1);
   }
   const toolIds = [];
+  const existing = await existingTools();
   for (const request of toolRequests()) {
+    const { name } = request.tool_config;
+    if (existing[name]) {
+      toolIds.push(existing[name]);
+      console.log(`Using the existing tool ${name}: ${existing[name]}`);
+      continue;
+    }
     const tool = await post('/convai/tools', request);
     toolIds.push(tool.id ?? tool.tool_id);
-    if (!dryRun) console.log(`Created tool ${request.tool_config.name}: ${toolIds.at(-1)}`);
+    if (!dryRun) console.log(`Created tool ${name}: ${toolIds.at(-1)}`);
   }
   const agent = await post('/convai/agents/create', agentRequest({ toolIds }));
   if (dryRun) return;
