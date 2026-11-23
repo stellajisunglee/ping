@@ -14,6 +14,7 @@ Ping is a language-practice app that phones learners for short conversations in 
   - **Silence:** ends the turn when the pause reaches 0.8, 1.3 or 2.5 seconds, which are Ping's current settings.
   - **Smart Turn v3.2:** Pipecat's open model, run locally on the audio up to 200 ms into each pause. A probability of 0.5 or more means done.
   - **Deepgram Flux Multilingual:** each clip streamed at real-time speed with Japanese and English hints, at Deepgram's default settings and a more patient setting (eot_threshold 0.85, eot_timeout_ms 8000).
+  - **Cartesia Ink-2:** each clip streamed at real-time speed (Ink-2 detects Japanese itself), at Cartesia's default settings and the "Patient" profile its docs give for callers who pause to think (end threshold 0.1, eager end 0.3, end timeout 8000 ms). Only `turn.end` counts, since `turn.eager_end` is a hint that `turn.resume` can cancel. Added on 2026-11-23, with the other detectors' verdicts kept from the first run.
 - A turn ended inside a "thinking" pause is a cut-off. For "done" pauses, the time to catch runs from the start of the pause.
 
 ## Results
@@ -26,6 +27,27 @@ Ping is a language-practice app that phones learners for short conversations in 
 | smart_turn | v3.2 | 11% | 78% | 230 ms |
 | flux | default | 37% | 88% | 594 ms |
 | flux | patient | 17% | 72% | 1058 ms |
+| ink2 | default | 6% | 90% | 448 ms |
+| ink2 | patient | 2% | 75% | 1079 ms |
+
+### How sure we can be
+
+Every detector judged the same 100 thinking and 40 done pauses, so pairs can be compared pause by pause (exact McNemar test on the thinking pauses):
+
+| Comparison | Only the first cut off | Only the second cut off | p |
+| --- | --- | --- | --- |
+| Ink-2 default vs Flux default | 2 | 33 | <0.001 |
+| Ink-2 default vs Flux patient | 3 | 14 | 0.013 |
+| Ink-2 default vs Smart Turn | 4 | 9 | 0.27 |
+| Ink-2 patient vs silence 2.5s | 2 | 4 | 0.69 |
+
+- **Ink-2 beats Flux** at both of Flux's settings, on cut-offs and on catches. With these pauses, that isn't chance.
+- **Ink-2 at its defaults looks better than Smart Turn** (6% vs 11% cut-offs, 90% vs 78% caught), but 100 pauses can't tell them apart. The 95% intervals overlap: 3–12% vs 6–19%. Smart Turn also decides sooner (230 ms vs 448 ms), though its number leaves out a voice detector and Ink-2's includes the network.
+- **Ink-2's Patient profile cut off as rarely as 2.5 seconds of silence** (2% vs 4%, also not distinguishable) **while catching far more finished turns** (75% vs 48%), about 1.1 seconds after they ended instead of 2.5.
+
+## What it means for Ping
+
+Ink-2 is the strongest detector here on Japanese learner speech, and it's the only streaming service that beat Smart Turn on these pauses. It isn't a drop-in change: Ping's default calls run on OpenAI's speech-to-speech model, while Ink-2 is speech to text, so using it means a cascaded call (Ink-2, then a language model, then a voice), like Ping's Deepgram and ElevenLabs calls. In a cascaded call, the transcript is needed anyway, so its turn detection comes with no extra service. Smart Turn stays free and keeps audio on the phone. The next step is real calls, not more of these clips.
 
 ## Limitations
 
@@ -33,4 +55,6 @@ Ping is a language-practice app that phones learners for short conversations in 
 - The difficulty was staged: hard answers were chosen on purpose, which may not match how learners pause in real calls.
 - Labels are one person's judgment of their own pauses.
 - Smart Turn's time to catch counts its 200 ms trigger plus measured inference time, but not the voice detector it needs in a real pipeline. Missing a done pause there would normally fall back to a timeout.
-- Flux times include network delay, because events are timed when they arrive.
+- Flux and Ink-2 times include network delay, because events are timed when they arrive.
+- Each streaming detector was run once. Streaming timing varies a little from run to run, so a pause near a threshold could flip on a rerun.
+- Ink-2's Japanese support is new (2026), and Cartesia publishes no Japanese turn-detection figures to compare with.
