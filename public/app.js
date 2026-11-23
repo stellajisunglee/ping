@@ -8,7 +8,7 @@ import { failedCallNotice, startCall } from './voice.js';
 import { summarizeLearning, wordEvents, wordLevels } from './learning-metrics.js';
 import { initProgress, renderProgress } from './progress.js';
 import { initOnboarding, renderWelcome, showConnecting } from './onboarding.js';
-import { deviceKind, isInstalled, needsInstall } from './device.js';
+import { deviceKind, isInstalled, isTextField, needsInstall } from './device.js';
 import { initRecents, renderBadge } from './recents.js';
 
 const RING_FALLBACK_MS = 12_000; // the server decides a call was missed. This only covers its message getting lost.
@@ -748,9 +748,11 @@ function cancelOutgoing() {
 // Getting going
 
 function bindEvents() {
-  // A ringtone can only play through audio that a tap set up, so the first taps prepare it for later calls.
+  // A ringtone can only play through audio that a tap set up, so the first taps prepare it for later calls. Never on a
+  // tap or key press in a text field: in the iPhone Home Screen app, starting audio as a field gains focus can stop the
+  // keyboard from opening, and if the audio never reaches "running" that would happen on every tap.
   for (const type of ['touchend', 'click', 'keydown']) {
-    document.addEventListener(type, () => audioUnlocked() || unlockAudio(), { capture: true, passive: true });
+    document.addEventListener(type, (event) => isTextField(event.target) || audioUnlocked() || unlockAudio(), { capture: true, passive: true });
   }
   document.addEventListener('click', (event) => {
     const link = event.target.closest('[data-go]');

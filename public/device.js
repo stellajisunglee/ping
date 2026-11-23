@@ -15,3 +15,6 @@ export const isInstalled = ({ standalone = false, displayStandalone = false } = 
 
 // A phone in a browser tab has to add Ping to its Home Screen first.
 export const needsInstall = (kind, installed) => kind !== 'desktop' && !installed;
+
+// Whether a tap or key press landed in something the user types into, where the app mustn't start audio (app.js).
+export const isTextField = (target) => Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));

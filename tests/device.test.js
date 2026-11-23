@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deviceKind, isInstalled, needsInstall } from '../public/device.js';
+import { deviceKind, isInstalled, isTextField, needsInstall } from '../public/device.js';
 
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1';
 const ANDROID = 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36';
@@ -20,4 +20,12 @@ test('a phone in a browser tab must add Ping to its Home Screen; the installed a
   assert.equal(needsInstall('ios', isInstalled({ standalone: true })), false);
   assert.equal(needsInstall('android', isInstalled({ displayStandalone: true })), false);
   assert.equal(needsInstall('desktop', isInstalled({})), false);
+});
+
+test('taps in a text field are told apart, so they never start audio', () => {
+  const inside = (selector) => ({ closest: (query) => (query.split(', ').includes(selector) ? {} : null) });
+  assert.equal(isTextField(inside('input')), true);
+  assert.equal(isTextField(inside('textarea')), true);
+  assert.equal(isTextField({ closest: () => null }), false, 'a button');
+  assert.equal(isTextField(null), false);
 });
