@@ -566,6 +566,7 @@ function beginCall(callId, contactName = 'Ping', scenarioId = null) {
   activeCall = startCall({
     callId,
     api,
+    level: state.me.settings.proficiency,
     audio: $('remote-audio'),
     onStatus: (status, maxSeconds) => {
       if (status !== 'connected') return;

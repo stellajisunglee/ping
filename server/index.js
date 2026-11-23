@@ -18,6 +18,7 @@ import { createOpenAI } from './openai.js';
 import { isValidTimeZone } from './schedule.js';
 import { cleanMetrics, metricsProblems } from '../public/turn-metrics.js';
 import { cleanLearning } from '../public/learning-metrics.js';
+import { cleanTurnData } from '../public/turn-records.js';
 import { buildSession, NOT_NOW_GOODBYES, PROMPT_VERSION, smartTurnRules, TIME_UP_LINES, turnDetection, voiceMessageFor } from './tutor.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -588,6 +589,15 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
     if (method === 'GET' && detailsRoute) {
       const details = engine.callDetails(user, detailsRoute[1]);
       return details ? json(res, 200, details) : json(res, 404, { error: 'Call not found.' });
+    }
+
+    // Each reply's timing and each request for help, by type: numbers and type names only, like the timing summary.
+    const turnsRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/turns$/);
+    if (method === 'POST' && turnsRoute) {
+      const data = cleanTurnData(await readJson(req));
+      if (!data) return json(res, 400, { error: 'Invalid turn records.' });
+      if (!engine.saveTurns(user, turnsRoute[1], data)) return json(res, 404, { error: 'Call not found.' });
+      return json(res, 201, {});
     }
 
     // Numbers about the learner's Japanese, worked out on the phone from the call's transcript. Every user's are

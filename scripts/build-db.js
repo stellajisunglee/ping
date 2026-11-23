@@ -4,7 +4,7 @@
 // Uses Node's built-in SQLite, so there's nothing to install.
 //
 // Tables: learners, calls (every call, connected or not), call_setup, turn_metrics, learning_metrics, ratings,
-// level_estimates, settings_changes, words, sentences, scenario_checks, recordings, transcript_lines, feedback.
+// level_estimates, settings_changes, turns, help_events, words, sentences, scenario_checks, recordings, transcript_lines, feedback.
 // Levels also come as numbers (selfLevelRank, levelRank: 0 completely new, 1 N5 ... 5 N1) so they sort and compare.
 // Views: call_facts (one row per call with everything joined), learner_weeks (each learner's weeks since joining).
 
@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { METRIC_FIELDS } from '../public/turn-metrics.js';
 import { LEARNING_FIELDS } from '../public/learning-metrics.js';
+import { TURN_FIELDS } from '../public/turn-records.js';
 
 // Levels as numbers, so they sort and compare: 0 completely new, 1 N5 ... 5 N1. The three levels from before JLPT keep
 // their place (beginner 1, intermediate 3, advanced 5).
@@ -30,7 +31,9 @@ const NOT_SETUP = new Set([
   'cutOffs', 'naturalness', 'commented',
   'estimatedLevel', 'estimatedVocabulary', 'estimatedGrammar', 'levelConfidence',
   'userCallSharePercent', 'avgTurnMs',
+  'turns', 'help', 'helpRequestsByTools',
 ]);
+const isHelpCount = (key) => key.startsWith('help_');
 
 function table(db, name, columns, rows, key = null) {
   db.exec(`CREATE TABLE ${name} (${columns.map((column) => `"${column}"${column === key ? ' PRIMARY KEY' : ''}`).join(', ')})`);
@@ -91,7 +94,7 @@ export function buildDatabase(exported, dbPath, { audioPath = () => null } = {})
   }
   counts.calls = table(db, 'calls', ['callId', 'userId', 'contactId', 'direction', 'startedBy', 'at', 'localHour', 'selfLevel', 'selfLevelRank', 'outcome', 'connected', 'seconds', 'pickupSeconds', 'test'], callRows, 'callId');
 
-  const setupColumns = ['callId', ...new Set(callLog.flatMap((entry) => Object.keys(entry)).filter((key) => !NOT_SETUP.has(key)))];
+  const setupColumns = ['callId', ...new Set(callLog.flatMap((entry) => Object.keys(entry)).filter((key) => !NOT_SETUP.has(key) && !isHelpCount(key)))];
   counts.call_setup = table(db, 'call_setup', setupColumns, callLog, 'callId');
   const withAny = (fields) => callLog.filter((entry) => fields.some((field) => entry[field] !== undefined));
   counts.turn_metrics = table(db, 'turn_metrics', ['callId', ...METRIC_FIELDS], withAny(METRIC_FIELDS), 'callId');
@@ -99,6 +102,9 @@ export function buildDatabase(exported, dbPath, { audioPath = () => null } = {})
 
   counts.ratings = table(db, 'ratings', ['callId', 'userId', 'at', 'cutOffs', 'naturalness', 'comment'], users.flatMap((user) => (user.ratings ?? []).map((r) => ({ ...r, userId: user.id, at: iso(r.at) }))), 'callId');
   counts.level_estimates = table(db, 'level_estimates', ['callId', 'userId', 'at', 'level', 'levelRank', 'vocabulary', 'grammar', 'confidence', 'reason'], users.flatMap((user) => (user.levelEstimates ?? []).map((e) => ({ ...e, levelRank: rank(e.level), userId: user.id, at: iso(e.at) }))), 'callId');
+  // One row per reply the contact gave, and one per time the learner asked for help, by type (public/turn-records.js).
+  counts.turns = table(db, 'turns', ['callId', ...TURN_FIELDS], callLog.flatMap((entry) => (entry.turns ?? []).map((turn) => ({ ...turn, callId: entry.callId }))));
+  counts.help_events = table(db, 'help_events', ['callId', 'type', 'atMs', 'turn'], callLog.flatMap((entry) => (entry.help ?? []).map((event) => ({ ...event, callId: entry.callId }))));
   // Each change to a tracked setting (level, call window, frequency, pace, ...), with whether it was asked for on a call.
   counts.settings_changes = table(db, 'settings_changes', ['userId', 'at', 'field', 'fromValue', 'toValue', 'duringCall'],
     users.flatMap((user) => (user.settingsChanges ?? []).map((change) => ({ userId: user.id, at: iso(change.at), field: change.field, fromValue: change.from, toValue: change.to, duringCall: Boolean(change.duringCall) }))));

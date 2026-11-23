@@ -5,6 +5,7 @@
 // the same as on OpenAI. No browser globals are read at import time, so the tests can pass stand-ins.
 
 import { summarizeTurns } from './turn-metrics.js';
+import { turnRecords } from './turn-records.js';
 
 const INPUT_RATE = 16000; // what the phone sends: 16-bit samples, one channel
 const OUTPUT_RATE = 24000; // what Deepgram sends back
@@ -120,6 +121,7 @@ export function startDeepgramCall({
   const maxSeconds = session.maxSeconds;
   const turnLog = [];
   const timers = [];
+  let level = session.settings?.proficiency ?? null; // to tell a request for easier Japanese from harder
   let ended = false;
   let connectedAt = null;
   let micStream = null;
@@ -148,6 +150,7 @@ export function startDeepgramCall({
     const endedAt = now();
     Promise.resolve()
       .then(() => api(`/api/calls/${callId}/metrics`, { method: 'POST', body: summarizeTurns(turnLog, { connectedAt, endedAt, engine: 'deepgram-agent' }) }))
+      .then(() => api(`/api/calls/${callId}/turns`, { method: 'POST', body: turnRecords(turnLog, { connectedAt, engine: 'deepgram-agent' }) }))
       .catch((error) => console.warn('Could not send turn metrics', error));
   }
 
@@ -232,6 +235,7 @@ export function startDeepgramCall({
   const TOOLS = {
     async update_settings(change) {
       const { settings, agent } = await api('/api/settings', { method: 'PATCH', body: change });
+      level = settings.proficiency ?? level;
       if (agent) {
         send({ type: 'UpdateSpeak', speak: agent.speak });
         send({ type: 'UpdateListen', listen: agent.listen });
@@ -255,6 +259,11 @@ export function startDeepgramCall({
 
   async function runTools(functions) {
     for (const call of functions.filter((fn) => fn.client_side !== false)) {
+      let args = {};
+      try {
+        args = JSON.parse(call.arguments || '{}');
+      } catch {}
+      turnLog.push({ type: 'tool', name: call.name, args, level, at: now() });
       let output;
       try {
         output = await TOOLS[call.name](JSON.parse(call.arguments || '{}'));

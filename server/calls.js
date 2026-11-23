@@ -6,6 +6,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { canCall, cleanContact, contactList, findContact, isPaid, MAX_CUSTOM_CONTACTS, PING, planLimits, PLANS, selectedContact } from './contacts.js';
 import { recordCallDay, streakToShow } from './progress.js';
 import { hourWeights, localDay, localDayNumber, localParts, nextCallTime } from './schedule.js';
+import { HELP_TYPES } from '../public/turn-records.js';
 import { applySettings, DEFAULT_SETTINGS, LEGACY_LEVELS, PROFICIENCY_LEVELS } from './settings.js';
 import { addSentence, addStarterStack, addWord, applyDowngrade, cleanSentence, cleanSentenceWords, cleanWord } from './stack.js';
 import { pickQuestion, questionById, TURN_MODES } from './tutor.js';
@@ -68,6 +69,9 @@ const KEEP_CALL_LOG = 5000;
 const MIN_SECONDS_TO_CONNECT = 10;
 const SCHEDULE_FIELDS = ['frequency', 'customDays', 'callStartHour', 'callEndHour'];
 const RENAMED_PLANS = { plus: 'premium', pro: 'platinum' };
+
+// help_lookup, help_slower ... in the call log: one count per kind of help (HELP_TYPES in public/turn-records.js).
+export const helpField = (type) => `help_${type.replaceAll('-', '_')}`;
 
 export const hashToken = (token) => createHash('sha256').update(token).digest('hex');
 
@@ -819,6 +823,17 @@ export class CallEngine {
     const before = user.sentences.length;
     user.sentences = user.sentences.filter((sentence) => sentence.id !== sentenceId);
     if (user.sentences.length === before) return false;
+    this.store.save();
+    return true;
+  }
+
+  // One timing record per reply the contact gave, and each time the learner asked for help, by type
+  // (public/turn-records.js). Kept in the call's log entry, with a count of each kind of help beside it.
+  saveTurns(user, callId, { turns, help }) {
+    const call = this.store.calls[callId];
+    if (!call || call.userId !== user.id || !call.connectedAt) return false;
+    const counts = Object.fromEntries(HELP_TYPES.map((type) => [helpField(type), help.filter((event) => event.type === type).length]));
+    this.#log(call, { turns, help, helpRequestsByTools: help.length, ...counts });
     this.store.save();
     return true;
   }

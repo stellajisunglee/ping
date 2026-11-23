@@ -104,6 +104,12 @@ The **Calls tab** lists recent calls to and from contacts, like a phone's recent
 - **Words:** words the user didn't understand, saved by the voice model. Each plan keeps the latest ones up to its limit (25 on Free, 100 on Premium, no limit on Platinum), replacing the oldest. Anyone can remove a word.
 - **Sentences:** example sentences, looked up one word at a time and stored only if the user saves them, on any plan. They have their own limit, the same number as words. Each shows its Japanese, romaji and English translation, like a word. Sentences saved before romaji was added show without it. Swipe left to remove. Tapping a sentence lists the words in it that have kanji, each with its reading, romaji and meaning, as written in the sentence and in dictionary form (食べに → 食べる). Any of them can be added to Words, which follows the same plan limit, so a full list drops its oldest word. The list is looked up the first time a sentence is opened and kept with the sentence after that.
 
+### Per-turn timing and help by type
+
+After every connected call the phone also sends one record per reply the contact gave and one event per time the learner asked for help (`POST /api/calls/:id/turns`, `public/turn-records.js`). Numbers and short type names only. Each reply record has: when it started (`atMs`, from the call connecting), how long the learner spoke before it, how long they took to start answering, the estimated wait before the turn was called over (`endWaitMs`), the gap the learner heard (`gapMs`), how long the reply played, what ended the learner's turn (`vad`, `smartTurn`, `backup`, `flux` or `model`), whether the learner cut in within 1.5 s (`cutOff`) or talked over it, aizuchi carried through, and the engine's own latency where it reports one. Lined up with a recorded call's audio, these are labeled turn-taking data from Japanese learners.
+
+Help events come from the tools the contact calls: `lookup` (a word's meaning), `slower`, `faster`, `normal-speed`, `more-time`, `less-time`, `easier`, `harder` (a level change, told apart by the level before it), `formality`, `stop-calls`, `start-calls`, `culture-question` and `end-call`, each with when and which reply it followed. The call log keeps both lists and a count of each type (`help_lookup`, `help_slower`, …); the SQLite export puts them in `turns` and `help_events`.
+
 ### Learning progress
 
 After every call that connected, the phone works out numbers about the learner's Japanese from the call's transcript and sends only the numbers (`POST /api/calls/:id/learning`, `public/learning-metrics.js`), on any plan, recorded or not:
@@ -211,6 +217,7 @@ In the SQLite file each fact is stored once (`scripts/build-db.js`), even where 
 | `call_setup` | connected call: engine, turn mode, topic, settings, build, prompt version, what the engine was sent |
 | `turn_metrics`, `learning_metrics` | connected call: the phone's timing numbers, and the learner's Japanese |
 | `ratings`, `level_estimates` | rated or graded call, with the comment or the model's reason |
+| `turns`, `help_events` | reply the contact gave (its timing), and request for help by type |
 | `settings_changes` | change to a tracked setting (level, call window, frequency, pace, formality, calls on or off): when, from, to, and whether it was asked for during a call |
 | `words`, `sentences`, `scenario_checks`, `recordings`, `transcript_lines`, `feedback` | as named |
 

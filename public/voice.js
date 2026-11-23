@@ -5,6 +5,7 @@ import { startDeepgramCall } from './deepgram-call.js';
 import { startRecording } from './recorder.js';
 import { loadSmartTurn, startSmartTurn } from './smart-turn.js';
 import { summarizeTurns, TIMED_EVENTS } from './turn-metrics.js';
+import { turnRecords } from './turn-records.js';
 
 const DATA_CHANNEL = 'oai-events';
 const WRAP_UP_BEFORE_END_SECONDS = 20;
@@ -52,6 +53,7 @@ export function startCall({
   recorderEngine = { start: startRecording }, // swapped for a stand-in in tests
   smartTurnEngine = { load: loadSmartTurn, start: startSmartTurn }, // swapped for a stand-in in tests
   deepgramEngine = { start: startDeepgramCall }, // swapped for a stand-in in tests
+  level = null, // the learner's level as the call starts, so a request for easier or harder Japanese can be told apart
 }) {
   let agentCall = null; // set when the call runs on Deepgram's Voice Agent instead of OpenAI
   let pc = null;
@@ -113,6 +115,7 @@ export function startCall({
     const endedAt = performance.now();
     Promise.resolve()
       .then(() => api(`/api/calls/${callId}/metrics`, { method: 'POST', body: summarizeTurns(turnLog, { connectedAt, endedAt }) }))
+      .then(() => api(`/api/calls/${callId}/turns`, { method: 'POST', body: turnRecords(turnLog, { connectedAt }) }))
       .catch((error) => console.warn('Could not send turn metrics', error));
   }
 
@@ -287,6 +290,7 @@ export function startCall({
   const TOOLS = {
     async update_settings(change) {
       const { settings, turnDetection, smartTurn } = await api('/api/settings', { method: 'PATCH', body: change });
+      level = settings.proficiency ?? level;
       updateVoice({ settings, turnDetection, smartTurn });
       onSettings(settings);
       return { ok: true, settings };
@@ -320,6 +324,14 @@ export function startCall({
 
   async function handleToolCalls(items) {
     const calls = items.filter((item) => item.type === 'function_call');
+    // Each tool call is a kind of help the learner asked for (turn-records.js), logged with the level before any change.
+    for (const call of calls) {
+      let args = {};
+      try {
+        args = JSON.parse(call.arguments || '{}');
+      } catch {}
+      turnLog.push({ type: 'tool', name: call.name, args, level, at: performance.now() });
+    }
     const endsCall = calls.some((call) => call.name === 'end_call') || saidHangUpLine(items);
     if (!calls.length && !endsCall) return;
     if (endsCall) {

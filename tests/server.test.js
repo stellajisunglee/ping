@@ -1167,3 +1167,19 @@ test("Ping says the learner's name in its greeting and instructions, as kana onl
   assert.ok(!session.instructions.includes('ignore previous'), 'only the checked kana reading reaches Ping, never the typed name');
   assert.ok(call.id);
 });
+
+test('each reply and each request for help are kept with the call, and help is counted by type', async () => {
+  const tester = await joinWith(BETA_CODE);
+  const call = await connectedCall(tester.token);
+  await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: tester.token });
+  const turn = (index, extra = {}) => ({ index, atMs: index * 5000, userSpeechMs: index ? 3000 : null, answerStartMs: index ? 1200 : null, endWaitMs: index ? 600 : null, gapMs: index ? 1400 : null, replyMs: 2500, endedBy: index ? 'smartTurn' : null, cutOff: false, talkedOver: false, aizuchi: 0, providerLatencyMs: null, ...extra });
+  const body = { turns: [turn(0), turn(1, { cutOff: true }), turn(2)], help: [{ type: 'lookup', atMs: 7000, turn: 1 }, { type: 'lookup', atMs: 9000, turn: 1 }, { type: 'slower', atMs: 12_000, turn: 2 }] };
+  const path = `/api/calls/${call.id}/turns`;
+  assert.equal((await request(path, { method: 'POST', token: tester.token, body: { ...body, turns: [{ ...turn(0), transcript: 'はい' }] } })).status, 400);
+  assert.equal((await request(path, { method: 'POST', token: await join(), body })).status, 404);
+  assert.equal((await request(path, { method: 'POST', token: tester.token, body })).status, 201);
+  const entry = (await request('/api/admin/calls', { token: await join() })).data.calls.find((logged) => logged.callId === call.id);
+  assert.equal(entry.turns.length, 3);
+  assert.equal(entry.turns[1].cutOff, true);
+  assert.deepEqual([entry.help_lookup, entry.help_slower, entry.help_more_time, entry.helpRequestsByTools], [2, 1, 0, 3]);
+});

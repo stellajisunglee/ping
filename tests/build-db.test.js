@@ -34,7 +34,10 @@ const exported = {
     }],
     callLog: [
       { callId: 'c1', userId: 'u1', joinedWith: 'beta', at: joined + DAY, direction: 'incoming', engine: 'gpt-realtime', turnMode: 'silence', proficiency: 'N4', callStartHour: 18, callEndHour: 21, frequency: 'daily', seconds: 150, userSpeechMs: 60_000, agentSpeechMs: 60_000, userTurns: 6, replyGapMedianMs: 2000, suspectedCutoffs: 0, englishTurnPercent: 25, japaneseChars: 120, naturalness: 4, cutOffs: 1, estimatedLevel: 'N4', userCallSharePercent: 50 },
-      { callId: 'c3', userId: 'u1', joinedWith: 'beta', at: joined + 9 * DAY, direction: 'outgoing', engine: 'deepgram-agent', turnMode: null, proficiency: 'N4', seconds: 90, userSpeechMs: 30_000, agentSpeechMs: 30_000, userTurns: 4, englishTurnPercent: 0 },
+      { callId: 'c3', userId: 'u1', joinedWith: 'beta', help_lookup: 1, helpRequestsByTools: 1,
+        turns: [{ index: 0, atMs: 500, userSpeechMs: null, answerStartMs: null, endWaitMs: null, gapMs: null, replyMs: 2000, endedBy: null, cutOff: false, talkedOver: false, aizuchi: 0, providerLatencyMs: 900 }],
+        help: [{ type: 'lookup', atMs: 4000, turn: 0 }],
+        at: joined + 9 * DAY, direction: 'outgoing', engine: 'deepgram-agent', turnMode: null, proficiency: 'N4', seconds: 90, userSpeechMs: 30_000, agentSpeechMs: 30_000, userTurns: 4, englishTurnPercent: 0 },
       { callId: 'old', userId: 'u1', joinedWith: 'beta', at: joined + 3 * DAY, direction: 'incoming', engine: 'gpt-realtime', turnMode: 'smartTurn', proficiency: 'beginner', seconds: 60 },
     ],
     scenarioChecks: [],
@@ -78,5 +81,17 @@ test('the call window, level changes and onboarding come out cleanly, with level
   assert.deepEqual(setup, { callStartHour: 18, callEndHour: 21, frequency: 'daily' });
   assert.equal(db.prepare("SELECT selfLevelRank FROM calls WHERE callId = 'old'").get().selfLevelRank, 1, 'beginner, from before JLPT, ranks with N5');
   assert.equal(db.prepare("SELECT estimatedLevelRank FROM call_facts WHERE callId = 'c1'").get().estimatedLevelRank, 2);
+  db.close();
+});
+
+test('per-turn records and help events get their own tables, out of call_setup', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'ping-db-')), 'ping.sqlite');
+  const counts = buildDatabase(exported, path);
+  assert.deepEqual([counts.turns, counts.help_events], [1, 1]);
+  const db = new DatabaseSync(path);
+  assert.deepEqual({ ...db.prepare('SELECT callId, replyMs, providerLatencyMs, cutOff FROM turns').get() }, { callId: 'c3', replyMs: 2000, providerLatencyMs: 900, cutOff: 0 });
+  assert.deepEqual({ ...db.prepare('SELECT type, turn FROM help_events').get() }, { type: 'lookup', turn: 0 });
+  const setupColumns = db.prepare('PRAGMA table_info(call_setup)').all().map((column) => column.name);
+  assert.ok(!setupColumns.includes('turns') && !setupColumns.includes('help_lookup'));
   db.close();
 });
