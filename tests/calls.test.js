@@ -11,7 +11,7 @@ import { Store } from '../server/store.js';
 const SUBSCRIPTION = { endpoint: 'https://push.example/1', keys: { p256dh: 'a', auth: 'b' } };
 const NOON_IN_TOKYO = Date.UTC(2026, 9, 31, 3);
 
-function setup({ pushResult = { gone: false }, store = new Store(), dailyCallLimit, joinedWith = 'beta' } = {}) {
+function setup({ pushResult = { gone: false }, store = new Store(), dailyCallLimit, joinedWith = 'free' } = {}) {
   const clock = { now: NOON_IN_TOKYO };
   const pushes = [];
   const engine = new CallEngine({
@@ -214,14 +214,16 @@ test('admins and YC reviewers can call as often as they like, past the plan and 
   assert.equal(context.engine.callBack(reviewer).maxSeconds, PLAN_LIMITS.premium.perCall * 60);
 });
 
-test('beta testers keep their plan limits', () => {
+test('beta testers are on Platinum with no plan limit on calls a day, but the daily safety cap still holds', () => {
   const context = setup({ dailyCallLimit: 6 });
-  const tester = joinAs(context, 'beta', 'beta', 'premium');
+  const tester = joinAs(context, 'beta', 'beta', 'platinum');
   tester.lastCallAt = context.clock.now - 86_400_000; // past the free first call
-  const { unlimited, callsLeft } = context.engine.calling(tester);
-  assert.equal(unlimited, null);
-  assert.ok(callsLeft <= PLAN_LIMITS.premium.callsPerDay);
-  for (let index = 0; index < callsLeft; index += 1) context.engine.callBack(tester);
+  const calling = context.engine.calling(tester);
+  assert.deepEqual([calling.unlimited, calling.dailyCap, calling.perCallMinutes], ['beta', 6, 10]);
+  for (let index = 0; index < 6; index += 1) context.engine.callBack(tester);
+  const capped = context.engine.calling(tester);
+  assert.equal(capped.canCall, false);
+  assert.match(capped.reason, /all 6 calls for today/);
   assert.throws(() => context.engine.callBack(tester), LimitError);
 });
 
@@ -1067,7 +1069,7 @@ test('a new account has picked no level until it sets one, by the picker, Settin
 
 test("admin and beta testers' calls, ratings and call log entries never expire; everyone else's do", async () => {
   const store = new Store();
-  const tester = setup({ store });
+  const tester = setup({ store, joinedWith: 'beta' });
   const reviewer = { user: tester.engine.register('Asia/Tokyo', 'beta', 'yc').user };
   const testerCall = placeCall(tester, { seconds: 60, reason: 'hung-up' });
   const reviewerCall = placeCall({ ...tester, user: reviewer.user }, { seconds: 60, reason: 'hung-up' });
@@ -1084,7 +1086,7 @@ test("admin and beta testers' calls, ratings and call log entries never expire; 
 
 test("past 5,000 entries the call log drops the oldest of other accounts' entries, never a tester's", () => {
   const store = new Store();
-  const context = setup({ store });
+  const context = setup({ store, joinedWith: 'beta' });
   const reviewer = context.engine.register('Asia/Tokyo', 'beta', 'yc').user;
   const entry = (index, userId) => ({ callId: `c${index}`, userId, at: index });
   store.callLog = [entry(0, context.user.id), ...Array.from({ length: 4999 }, (_, index) => entry(index + 1, reviewer.id))];
@@ -1153,6 +1155,7 @@ test("a call's details include what the learner said in Japanese, and its transc
   const details = engine.callDetails(user, call.id);
   assert.deepEqual([details.japaneseMinutes, details.japaneseChars, details.newWords, details.lines.length], [0.5, 80, 2, 2]);
   assert.equal(engine.progress(user).totalMinutes, 0.5);
+  assert.deepEqual(engine.progress(user).calls.map((entry) => entry.japanesePercent), [50], 'the "Japanese vs English" view: half the turns in Japanese');
   engine.deleteCallData(call.id);
   assert.equal(engine.callDetails(user, call.id), null, 'an admin deleting the call removes it from the Calls tab too');
 });

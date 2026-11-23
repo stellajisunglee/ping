@@ -29,21 +29,26 @@ export function pickQuestion(lastQuestionId, random = Math.random) {
 
 export const questionById = (id) => QUESTIONS.find((question) => question.id === id) ?? QUESTIONS[0];
 
-export function greetingFor({ localHour, calledBack, contact, formality }) {
+// What a contact calls the learner: their name with さん on formal calls, the name alone on casual ones.
+export const addressFor = ({ learnerName, formality }) => (learnerName ? (formality === 'formal' ? `${learnerName}さん` : learnerName) : null);
+
+export function greetingFor({ localHour, calledBack, contact, formality, learnerName = null }) {
   const formal = formality === 'formal';
   const intro = formal ? `もしもし、${contact.spokenName}です！` : `もしもし、${contact.spokenName}だよ！`;
   const thanks = formal ? 'ありがとうございます！' : 'ありがとう！';
-  if (calledBack) return `${intro}折り返してくれて、${thanks}`;
+  const address = addressFor({ learnerName, formality });
+  const name = address ? `${address}、` : '';
+  if (calledBack) return `${intro}${name}折り返してくれて、${thanks}`;
   const morning = formal ? 'おはようございます' : 'おはよう';
   const hello = localHour < 11 ? morning : localHour < 18 ? 'こんにちは' : 'こんばんは';
   const goodTime = formal ? '今、お時間大丈夫ですか？' : '今、話せる？';
-  return `${intro}${hello}！${goodTime}`;
+  return `${intro}${name}${hello}！${goodTime}`;
 }
 
 // The words a contact says first, for engines that speak a fixed greeting themselves (Deepgram's Voice Agent).
 // When the user called, Ping's question follows straight away, as it does on OpenAI.
-export function openingWords({ question, contact = PING, formality = 'formal', calledBack, localHour }) {
-  const greeting = greetingFor({ localHour, calledBack, contact, formality });
+export function openingWords({ question, contact = PING, formality = 'formal', calledBack, localHour, learnerName = null }) {
+  const greeting = greetingFor({ localHour, calledBack, contact, formality, learnerName });
   if (!calledBack || contact.id !== PING.id) return greeting;
   return `${greeting}${formality === 'formal' ? question.japanese : question.casual}`;
 }

@@ -3,8 +3,8 @@
 export const MIN_SPEED = 0.6;
 export const MAX_SPEED = 1.5;
 export const LANGUAGES = ['ja'];
-// JLPT levels, easiest first. N5 is just starting, N1 near-fluent.
-export const PROFICIENCY_LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
+// JLPT levels, easiest first, after 'new' (completely new to Japanese, below N5). N5 is just starting, N1 near-fluent.
+export const PROFICIENCY_LEVELS = ['new', 'N5', 'N4', 'N3', 'N2', 'N1'];
 // The three levels Ping had before JLPT, for accounts saved then. Each keeps its old place on the scale,
 // and the user is asked to pick a JLPT level before they next reach Home.
 export const LEGACY_LEVELS = { beginner: 'N5', intermediate: 'N3', advanced: 'N1' };

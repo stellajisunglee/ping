@@ -29,6 +29,10 @@ Pages are served "cross-origin isolated" (`Cross-Origin-Opener-Policy` and `Cros
 
 Before Home, a new account picks its Japanese level, a JLPT level from N5 (just starting) to N1 (near-fluent), each with a short description for people who've never taken the JLPT. Ping's instructions say the level (`LEVEL_GUIDE`), and it can be changed later in Settings, Manage Account, or by asking Ping on a call. Each call records the level the learner had chosen as it started (`proficiency` in the call log, `selfLevel` in the Calls tab history and progress), to compare with the estimated speaking level.
 
+**Onboarding (beta testers and Free users, once).** Page 1 asks "What should Ping call you?", suggests how Ping will say it in katakana once they stop typing (`POST /api/name/reading`, OpenAI's text model; they can change it and tap "Hear it" to hear Ping's voice say 「ステラさん、こんにちは！」, `POST /api/name/hear`; both count as lookups), their call hours (saying they can also call Ping any time and change this later), and their plan: Platinum for beta testers, with up to 10 minutes a call and up to `DAILY_CALL_LIMIT` calls a day; Free for everyone else, with 3 minutes a call and 1 call a day, and an Upgrade button to a placeholder page (`screen-upgrade`) that lists what Premium and Platinum add, with "Coming soon". Page 2 is the level picker, which also offers "I'm completely new" (level `new`, below N5: Ping uses the simplest Japanese, speaks slowly and says each question in English too; picking it also sets speed 0.85 and long time to answer). Then everyone, admins and YC reviewers included, sees "Connecting to Ping" with moving voice waves for 5 seconds before Home. Accounts that joined before see the onboarding once, pre-filled. The name and its reading can be changed in Manage Account.
+
+**Ping says their name.** Only the kana reading (checked to be kana, at most 20 characters) goes into Ping's instructions and greeting, never the typed name: 「ステラさん」 on formal calls, 「ステラ」 on casual ones, in the greeting and now and then after (prompt version 3).
+
 **In a plain browser tab.** Ping can be used without installing it or turning on notifications: the iPhone's "Add to Home Screen" page has "Use Ping in Safari instead", and the notifications page has "Not now: just use Ping in this browser". The learner can then call Ping, see the Calls tab, their stack and progress, but Ping can't call them, since calls arrive as notifications. Home shows a card saying so, with how to get calls (add to the Home Screen on an iPhone, or "Turn on calls" elsewhere). The choice is kept per browser (`ping-browser-only` in `localStorage`).
 
 1. Each user gets a call at a random time inside the hours they set, on the days their call frequency allows. The default is daily, between 10:00 and 20:00 in their time zone. Once Ping has called them 3 times in the last 4 weeks, the time leans toward the hours they tend to answer: each hour of the window is weighted by (answered + 1) / (rang + 2), so an hour with no calls stays at even odds, one missed call only nudges it, and no hour of the window is ever ruled out (`hourWeights` in `server/schedule.js`). Admins' test rings don't count.
@@ -90,7 +94,7 @@ Home is the first screen after joining:
 - **The streak and this week,** Sunday to Saturday: a tick for each day with a connected call, 休 for days off in the schedule, and the best streak. Days still to come are empty.
 - **The last call,** if one connected in the past week: when, how long, and how many words it saved, with a button to see them.
 - **My Stack's Words and Sentences buttons,** with how many of each. Empty, they say how to fill them.
-- **Japanese you've spoken,** under My Stack: the minutes of Japanese spoken on calls in all, and a step chart of them adding up call by call (tap or move along it to read each call's total). After 5 graded calls it also says "Your speaking sounds about N4" (see "Learning progress").
+- **Japanese you've spoken,** under My Stack, with a switch (kept per phone) to **Japanese vs English**: for each of the last 20 calls, a bar split into the share of their turns in Japanese and mostly in English, and the average of the last 5 calls. The first view: the minutes of Japanese spoken on calls in all, and a step chart of them adding up call by call (tap or move along it to read each call's total). After 5 graded calls it also says "Your speaking sounds about N4" (see "Learning progress").
 
 **Does Japanese fit into their day?** For each learner, over the last 4 weeks (`habit` in `server/calls.js`), admins see in the plan page's Invite codes list: the share of Ping's calls they answered and how many seconds the phone rang first (from when the ring reached the phone), how many calls they started themselves, practice days a week (per week they've had the account), and the north star: minutes of Japanese this week from Ping's calls they answered, which they didn't have to plan. Each call in the history keeps the hour it rang in, its pick-up time, the level they'd chosen, and whether it was an admin's test ring, which the numbers leave out.
 
@@ -153,18 +157,21 @@ The invite code someone joins with decides which version they get. It can't be c
 | | Admin | Beta tester |
 | --- | --- | --- |
 | Invite code | `ADMIN_INVITE_CODE` | `BETA_INVITE_CODE` |
-| Plan | Can switch freely | Stays on Free |
+| Plan | Can switch freely | Platinum (10 minutes a call), and can't change it |
 | "Ring my phone in 10 seconds" (Settings, Admin tools) | Yes | No |
 | Record calls on this phone (Settings, Admin tools) | Yes | No |
 | Calls recorded for review (see "Call recordings") | Always | Always. YC reviewers can turn it off |
 | Call recordings page (Settings, Admin tools) | Yes | No |
-| Calls a day | No limit | The plan's limit |
+| Calls a day | No limit | No plan limit, but `DAILY_CALL_LIMIT` (10 on Render) caps them, which Home and the onboarding say |
+| Onboarding (name, call hours, plan; then level) | No, just the level picker | Yes, once. YC reviewers skip it |
 | Engine and turn detection | Randomized per call, or "Choose them myself" on the plan page | Randomized per call |
 | Call log (Settings, Admin tools) | Yes | No |
 | What's kept about their calls | Everything, until an admin deletes the call or the account is deleted | Everything, until an admin deletes the call or the account is deleted. YC reviewers' calls follow the usual limits |
 | OpenAI out of credit, or the contact can't talk | The call screen says why, with where to add credit when it's credit, then the call ends | The call screen says "Ping can't talk right now. Please try again later." (with the contact's name), then the call ends. No billing details |
 
 The server enforces both limits. Accounts created before there were two codes are admins.
+
+A fourth code, `FREE_INVITE_CODE`, is for everyone else until sign-up opens: those accounts start on Free (3 minutes a call, 1 call a day), go through the onboarding, and keep the usual data limits.
 
 A third code, `YC_INVITE_CODE`, is for YC reviewers. It gives the beta tester's version, so no admin settings, but on Premium instead of Free, with no limit on calls a day, and its accounts are counted separately. Reviewers start with 4 example words and 3 example sentences in their stack (`STARTER_STACK` in `server/stack.js`), so the stack isn't empty when they first look. Like other beta testers, reviewers can't change their plan. Which plan each code starts on is `PLAN_FOR_CODE` in `server/index.js`. Codes aren't case-sensitive.
 
@@ -235,7 +242,8 @@ Set these as environment variables, in `.env` locally or under the service's **E
 | `LEVEL_MODEL` | Estimates a learner's speaking level from a recorded call | `gpt-4.1-mini` |
 | `EXPORT_KEY` | Lets `npm run pull-data` download the data for analysis (see "Analyzing the data"). At least 32 random characters, the same on Render and in your laptop's `.env` | The export is off |
 | `DEEPGRAM_THINK_MODEL`, `DEEPGRAM_VOICE` | The model that writes Deepgram calls' replies, and their voice | `gpt-4.1-mini`, `flux-ayumi-ja` |
-| `DAILY_CALL_LIMIT` | How many calls a user can start per day, including test rings. Admins and YC reviewers aren't limited | No limit |
+| `DAILY_CALL_LIMIT` | How many calls a user can start per day, including test rings. Admins and YC reviewers aren't limited; for beta testers it's their only limit (10 for the beta) | No limit |
+| `FREE_INVITE_CODE` | The invite code for Free accounts, until sign-up opens | No one can join on Free |
 
 Other rules:
 
@@ -291,7 +299,7 @@ Ping is for adults in the US, and the Privacy Policy and Terms in the app are dr
 - Transcripts appear on the call screen. A recorded call's transcript is kept for review on any plan. On a paid plan, the text of the last 20 calls is also stored with the account to personalize later calls. A free-plan call that isn't recorded sends no transcript to the server.
 - The server stores each user's time zone, settings (including their JLPT level), plan, streak (with the day numbers of their last 14 practice days), contacts, stack, push subscription, voicemail list, recent call times and how each call went (for the Calls tab), learning progress numbers and level estimates, whether they've turned recording off, and which version of the Privacy Policy they've seen, in one JSON file. Calls are deleted from it after 7 days, except admin and beta testers' (see "Call recordings"). Recordings are separate files.
 - A comment left after a call is the one piece of free text Ping keeps besides recordings and transcripts. It's stored with the account and only admins can read it.
-- There are no names or emails, though a recording can include anything the user says. "Delete my account" removes everything for that user, recordings included.
+- The only name is the one they give Ping to call them, and how to say it in kana. The reading goes to the voice services in Ping's instructions; the typed name stays on Ping's server. There are no emails, though a recording can include anything the user says. "Delete my account" removes everything for that user, recordings included.
 - Feedback is stored without the sender's account, and also appears in the server logs.
 - Contacts say they're an AI if asked, and the join screen says so too.
 

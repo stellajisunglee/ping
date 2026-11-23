@@ -23,7 +23,7 @@ const SCREEN_TABS = {
   recordings: 'settings',
   'call-log': 'settings',
 };
-const SCREENS = [...Object.keys(SCREEN_TABS), 'install', 'join', 'level', 'enable', 'ringing', 'outgoing', 'call', 'rate'];
+const SCREENS = [...Object.keys(SCREEN_TABS), 'install', 'join', 'welcome', 'upgrade', 'connecting', 'level', 'enable', 'ringing', 'outgoing', 'call', 'rate'];
 const renderers = {};
 const TAB_ROOTS = ['home', 'calls', 'contacts', 'settings'];
 const BACK_SWIPE_DISTANCE = 70;
@@ -62,6 +62,7 @@ const callsText = (count) => `${count} more call${count === 1 ? '' : 's'}`;
 function callingStatus(calling) {
   if (calling.unlimited === 'admin') return null;
   if (calling.unlimited === 'yc') return 'As a YC reviewer, you can call as often as you like.';
+  if (calling.unlimited === 'beta' && calling.canCall) return calling.dailyCap ? `As a beta tester, you can make up to ${calling.dailyCap} calls a day.` : 'As a beta tester, you can call as often as you like.';
   if (!calling.canCall) return calling.reason;
   const ping = calling.keptForPing ? ", plus Ping's call" : '';
   if (calling.callsLeft && calling.callBackMissed) return `You can make ${callsText(calling.callsLeft)} today${ping}, and call back for the call you missed.`;

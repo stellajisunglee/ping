@@ -121,7 +121,7 @@ export function createOpenAI({ apiKey, baseUrl = 'https://api.openai.com/v1', te
           model: textModel,
           max_output_tokens: 600,
           input: [
-            { role: 'system', content: `Write ${EXAMPLE_COUNT} short, natural Japanese example sentences using the given word, for a JLPT ${proficiency} learner, each with its romaji (Hepburn, words separated by spaces) and an English translation. Use polite speech.` },
+            { role: 'system', content: `Write ${EXAMPLE_COUNT} short, natural Japanese example sentences using the given word, for ${proficiency === 'new' ? 'a complete beginner' : `a JLPT ${proficiency} learner`}, each with its romaji (Hepburn, words separated by spaces) and an English translation. Use polite speech.` },
             { role: 'user', content: JSON.stringify({ word: word.kanji || word.kana, reading: word.kana, meaning: word.english }) },
           ],
           text: { format: EXAMPLES_FORMAT },
@@ -132,6 +132,28 @@ export function createOpenAI({ apiKey, baseUrl = 'https://api.openai.com/v1', te
       const text = output.find((item) => item.type === 'message')?.content?.find((part) => part.type === 'output_text')?.text;
       if (!text) throw new Error('Example sentences came back empty');
       return JSON.parse(text).sentences.slice(0, EXAMPLE_COUNT);
+    },
+
+    // How Ping should say a learner's name, in kana: Stella → ステラ. A name already in Japanese comes back as its reading.
+    async nameReading(name) {
+      const response = await fetchImpl(`${baseUrl}/responses`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: textModel,
+          max_output_tokens: 60,
+          input: [
+            { role: 'system', content: 'Write how a Japanese speaker would naturally say this personal name, in katakana for a non-Japanese name (Stella → ステラ, Michael → マイケル, Jisung → ジソン) or in hiragana for a Japanese name written in kanji (田中 → たなか). Only the name: no honorific, no explanation.' },
+            { role: 'user', content: name },
+          ],
+          text: { format: { type: 'json_schema', name: 'name_reading', strict: true, schema: { type: 'object', properties: { reading: { type: 'string' } }, required: ['reading'], additionalProperties: false } } },
+        }),
+      });
+      if (!response.ok) throw new Error(`Name reading request failed (${response.status}): ${await response.text()}`);
+      const { output = [] } = await response.json();
+      const text = output.find((item) => item.type === 'message')?.content?.find((part) => part.type === 'output_text')?.text;
+      if (!text) throw new Error('Name reading came back empty');
+      return JSON.parse(text).reading;
     },
 
     // An estimate of the learner's speaking level from a recorded call's transcript ([{ from, text }]).

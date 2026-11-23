@@ -110,16 +110,124 @@ function renderLevel(progress) {
   }
 }
 
+// The "Japanese vs English" view: for each of the latest calls, a bar split into the share of the learner's turns in
+// Japanese (bottom) and mostly in English (top), with a 2px gap between them. Tap or move along it to read a call.
+function drawRatioChart(calls) {
+  const chart = svgEl('svg', { viewBox: `0 0 ${WIDTH} ${HEIGHT}`, class: 'progress-svg', role: 'img', tabindex: '0' });
+  const latest = calls.at(-1);
+  chart.setAttribute('aria-label', `Share of your turns in Japanese on your last ${calls.length} call${calls.length === 1 ? '' : 's'}, most recently ${latest.japanesePercent}%. Use the arrow keys to read each call.`);
+  const plotWidth = WIDTH - PAD.left - PAD.right;
+  const plotHeight = HEIGHT - PAD.top - PAD.bottom;
+  const baseline = PAD.top + plotHeight;
+  const slot = plotWidth / Math.max(calls.length, 8); // a few calls stay narrow instead of filling the width
+  const barWidth = Math.max(4, Math.min(22, slot - 4));
+  const GAP = 2;
+  const bars = calls.map((call, index) => {
+    const x = PAD.left + index * slot + (slot - barWidth) / 2;
+    const japanese = (call.japanesePercent / 100) * plotHeight;
+    const english = plotHeight - japanese;
+    const group = svgEl('g', { class: 'ratio-bar' });
+    if (english > GAP) group.append(svgEl('rect', { x, y: PAD.top, width: barWidth, height: english - GAP, rx: 2, class: 'ratio-english' }));
+    if (japanese > 0) group.append(svgEl('rect', { x, y: baseline - japanese, width: barWidth, height: japanese, rx: 2, class: 'ratio-japanese' }));
+    group.append(svgEl('rect', { x: PAD.left + index * slot, y: PAD.top, width: slot, height: plotHeight, class: 'ratio-hit' }));
+    chart.append(group);
+    return { ...call, group, cx: x + barWidth / 2 };
+  });
+  chart.prepend(svgEl('line', { x1: PAD.left, x2: WIDTH - PAD.right, y1: baseline, y2: baseline, class: 'progress-baseline' }));
+  const first = svgEl('text', { x: PAD.left, y: HEIGHT - 6, class: 'progress-axis' });
+  first.textContent = dateText(calls[0].at);
+  const last = svgEl('text', { x: bars.at(-1).cx, y: HEIGHT - 6, class: 'progress-axis', 'text-anchor': calls.length > 1 ? 'middle' : 'start' });
+  last.textContent = calls.length > 1 ? dateText(latest.at) : '';
+  chart.append(first, last);
+  return { chart, bars };
+}
+
+function attachRatioReadout(holder, { chart, bars }) {
+  const readout = el('p', { className: 'progress-readout', ariaLive: 'polite' });
+  let index = bars.length - 1;
+  const showBar = (next) => {
+    index = Math.max(0, Math.min(bars.length - 1, next));
+    bars.forEach((bar, at) => bar.group.classList.toggle('active', at === index));
+    const bar = bars[index];
+    readout.textContent = `${dateText(bar.at)}: ${bar.japanesePercent}% Japanese, ${100 - bar.japanesePercent}% English`;
+  };
+  const hide = () => {
+    bars.forEach((bar) => bar.group.classList.remove('active'));
+    readout.textContent = '';
+  };
+  const nearest = (event) => {
+    const box = chart.getBoundingClientRect();
+    const x = ((event.clientX - box.left) / box.width) * WIDTH;
+    let best = 0;
+    bars.forEach((bar, at) => {
+      if (Math.abs(bar.cx - x) < Math.abs(bars[best].cx - x)) best = at;
+    });
+    showBar(best);
+  };
+  chart.addEventListener('pointermove', nearest);
+  chart.addEventListener('pointerdown', nearest);
+  chart.addEventListener('pointerleave', hide);
+  chart.addEventListener('blur', hide);
+  chart.addEventListener('focus', () => showBar(index));
+  chart.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowLeft') showBar(index - 1);
+    else if (event.key === 'ArrowRight') showBar(index + 1);
+    else return;
+    event.preventDefault();
+  });
+  holder.append(readout);
+}
+
+// Which view the card shows, kept per phone.
+const VIEW_KEY = 'ping-progress-view';
+function currentView() {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'ratio' ? 'ratio' : 'minutes';
+  } catch {
+    return 'minutes';
+  }
+}
+
+function chooseView(view) {
+  try {
+    localStorage.setItem(VIEW_KEY, view);
+  } catch {}
+  renderProgress();
+}
+
 export function renderProgress() {
-  const progress = state.me.progress ?? { points: [], totalMinutes: 0, speakingLevel: null, gradedCalls: 0, callsUntilLevel: 5 };
-  $('progress-total').textContent = minutesText(progress.totalMinutes);
+  const progress = state.me.progress ?? { points: [], calls: [], totalMinutes: 0, speakingLevel: null, gradedCalls: 0, callsUntilLevel: 5 };
+  const view = currentView();
+  for (const button of document.querySelectorAll('.progress-view')) button.setAttribute('aria-pressed', String(button.dataset.view === view));
   const holder = $('progress-chart');
-  if (!progress.points.length) {
-    holder.replaceChildren(el('p', { className: 'muted', textContent: 'Your minutes of Japanese add up here, call by call.' }));
+  $('progress-legend').hidden = view !== 'ratio' || !progress.calls?.length;
+  if (view === 'ratio') {
+    const calls = progress.calls ?? [];
+    const recent = calls.slice(-5);
+    $('progress-title').textContent = 'Japanese vs English';
+    $('progress-total').textContent = recent.length ? `${Math.round(recent.reduce((sum, call) => sum + call.japanesePercent, 0) / recent.length)}%` : '–';
+    $('progress-unit').textContent = recent.length ? `in Japanese, last ${recent.length} call${recent.length === 1 ? '' : 's'}` : '';
+    if (!calls.length) holder.replaceChildren(el('p', { className: 'muted', textContent: 'After your first call, see how much of what you say is in Japanese.' }));
+    else {
+      const drawn = drawRatioChart(calls);
+      holder.replaceChildren(drawn.chart);
+      attachRatioReadout(holder, drawn);
+    }
   } else {
-    const drawn = drawChart(progress.points);
-    holder.replaceChildren(drawn.chart);
-    attachReadout(holder, drawn);
+    $('progress-title').textContent = "Japanese you've spoken";
+    $('progress-total').textContent = minutesText(progress.totalMinutes);
+    $('progress-unit').textContent = 'min';
+    if (!progress.points.length) {
+      holder.replaceChildren(el('p', { className: 'muted', textContent: 'Your minutes of Japanese add up here, call by call.' }));
+    } else {
+      const drawn = drawChart(progress.points);
+      holder.replaceChildren(drawn.chart);
+      attachReadout(holder, drawn);
+    }
   }
   renderLevel(progress);
+}
+
+export function initProgress() {
+  for (const button of document.querySelectorAll('.progress-view')) button.addEventListener('click', () => chooseView(button.dataset.view));
 }

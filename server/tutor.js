@@ -52,8 +52,8 @@ export const TOOLS = [
         },
         proficiency: {
           type: 'string',
-          enum: ['N5', 'N4', 'N3', 'N2', 'N1'],
-          description: "How hard your Japanese is, as a JLPT level: N5 is the easiest and N1 the hardest. To make it a little easier or harder, move one level from the user's current level.",
+          enum: ['new', 'N5', 'N4', 'N3', 'N2', 'N1'],
+          description: "How hard your Japanese is, as a JLPT level: 'new' (completely new to Japanese) is the easiest, then N5, and N1 the hardest. To make it a little easier or harder, move one level from the user's current level.",
         },
         callsEnabled: {
           type: 'boolean',
@@ -108,11 +108,11 @@ const SMART_TURN_PATIENCE = {
 
 export const smartTurnRules = (thinkingTime) => ({ ...(SMART_TURN_PATIENCE[thinkingTime] ?? SMART_TURN_PATIENCE.normal) });
 
-export function buildSession({ model, voice, question, settings, localHour, localDate, calledBack, contact = PING, memories = [], turnMode = 'silence' }) {
+export function buildSession({ model, voice, question, settings, localHour, localDate, calledBack, contact = PING, memories = [], turnMode = 'silence', learnerName = null }) {
   return {
     type: 'realtime',
     model,
-    instructions: buildInstructions({ question, localHour, localDate, calledBack, contact, settings, memories }),
+    instructions: buildInstructions({ question, localHour, localDate, calledBack, contact, settings, memories, learnerName }),
     output_modalities: ['audio'],
     max_output_tokens: 800, // keeps one runaway reply from running up the bill
     audio: {

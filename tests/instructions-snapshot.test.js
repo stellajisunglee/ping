@@ -21,7 +21,7 @@ const MEMORIES = ['週末は友達と京都に行きます。お寺を見たい�
 const settings = (change) => ({ ...DEFAULT_SETTINGS, ...change });
 // A fingerprint of every case's instructions and opening words, for each PROMPT_VERSION. Calls are compared by
 // prompt version in the call log, so the version has to change whenever the words do.
-const FINGERPRINTS = { 1: '7a173835eec3dd0a8458a1359fe44bdeab6ef07fcbc036eca1c371d79e289a85', 2: '83e4338da6407d17aeb67f92e8d0b79d7d8b14e5a53dfc9daae70b930fd98154' };
+const FINGERPRINTS = { 1: '7a173835eec3dd0a8458a1359fe44bdeab6ef07fcbc036eca1c371d79e289a85', 2: '83e4338da6407d17aeb67f92e8d0b79d7d8b14e5a53dfc9daae70b930fd98154', 3: '732346e51ff6ed235e431e62af22e1aac38cc4358e5586d419b998b8a751e371' };
 
 // Between them: Ping and a custom contact, every JLPT level and speech style, the contact calling or being
 // called back at each time of day (including after midnight), and memories or none.
@@ -33,14 +33,18 @@ export const CASES = [
   { name: 'ping-n2-formal-incoming-night', question: 'doing', localHour: 23, calledBack: false, settings: settings({ proficiency: 'N2', formality: 'formal' }) },
   { name: 'ping-n3-formal-callback-memories', question: 'did', localHour: 15, calledBack: true, settings: settings({ proficiency: 'N3', formality: 'formal' }), memories: MEMORIES },
   { name: 'custom-n5-formal-incoming', question: 'day', localHour: 10, calledBack: false, contact: YUKI, settings: settings({ proficiency: 'N5', formality: 'formal' }) },
+  { name: 'ping-named-n4-formal-incoming-evening', question: 'day', localHour: 19, calledBack: false, learnerName: 'ステラ', settings: settings({ proficiency: 'N4', formality: 'formal' }) },
+  { name: 'ping-named-new-casual-callback-morning', question: 'eat', localHour: 9, calledBack: true, learnerName: 'ステラ', settings: settings({ proficiency: 'new', formality: 'casual' }) },
+  { name: 'custom-named-n3-formal-incoming', question: 'day', localHour: 13, calledBack: false, learnerName: 'たなか', contact: YUKI, settings: settings({ proficiency: 'N3', formality: 'formal' }) },
   { name: 'custom-n1-casual-callback-memories', question: 'eat', localHour: 20, calledBack: true, contact: YUKI, settings: settings({ proficiency: 'N1', formality: 'casual' }), memories: MEMORIES },
 ];
 
-const inputsFor = ({ question, localHour, calledBack, contact, settings: caseSettings, memories }) => ({
+const inputsFor = ({ question, localHour, calledBack, contact, settings: caseSettings, memories, learnerName }) => ({
   question: questionById(question),
   localHour,
   localDate: LOCAL_DATE,
   calledBack,
+  ...(learnerName ? { learnerName } : {}),
   ...(contact ? { contact } : {}),
   settings: caseSettings,
   ...(memories ? { memories } : {}),
@@ -66,8 +70,8 @@ for (const testCase of CASES) {
 test('the opening words are unchanged', () => {
   const words = Object.fromEntries(
     CASES.map((testCase) => {
-      const { question, contact, settings: caseSettings, calledBack, localHour } = inputsFor(testCase);
-      return [testCase.name, openingWords({ question, contact, formality: caseSettings.formality, calledBack, localHour })];
+      const { question, contact, settings: caseSettings, calledBack, localHour, learnerName } = inputsFor(testCase);
+      return [testCase.name, openingWords({ question, contact, formality: caseSettings.formality, calledBack, localHour, learnerName })];
     }),
   );
   matchesSaved('opening-words.json', `${JSON.stringify(words, null, 2)}\n`);

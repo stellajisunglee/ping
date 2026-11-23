@@ -1,6 +1,7 @@
 // The Settings tab and the pages under it.
 
 import { $, api, clearWarning, el, fetchBlob, go, isAdmin, onShow, savedText, setError, show, state, writeToken } from './lib.js';
+import { renderAccountName } from './onboarding.js';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FREQUENCY_BUTTONS = { daily: 'Daily', 'every-other-day': 'Every other day', weekdays: 'Weekdays only', weekends: 'Weekends only', custom: 'Custom' };
@@ -488,6 +489,7 @@ async function changeLevel(proficiency) {
 
 // Manage Account's recording switch. Admin and beta tester accounts can't turn it off.
 function renderAccount() {
+  renderAccountName();
   $('proficiency-input').value = state.me.settings.proficiency;
   const { on, canTurnOff } = state.me.recording;
   $('recording-input').checked = on;

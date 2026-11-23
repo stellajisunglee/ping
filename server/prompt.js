@@ -5,15 +5,16 @@
 
 import { PING } from './contacts.js';
 import { describeDay, PING_BIO, PING_PERSONA, pingsDay } from './persona.js';
-import { greetingFor, NOT_NOW_GOODBYES, NOT_SURE } from './lines.js';
+import { addressFor, greetingFor, NOT_NOW_GOODBYES, NOT_SURE } from './lines.js';
 import { DEFAULT_SETTINGS } from './settings.js';
 
 // Which version of the instructions a call got, saved in the call log so calls can be compared across prompt
 // changes. Raise it by one whenever what a contact is told changes (this file, persona.js or lines.js).
 // tests/instructions-snapshot.test.js fails until it's raised, since it pins the golden copies to it.
-export const PROMPT_VERSION = 2; // 2: JLPT levels N5-N1 replaced beginner, intermediate and advanced
+export const PROMPT_VERSION = 3; // 2: JLPT levels N5-N1 replaced beginner, intermediate and advanced; 3: the learner's name, and a level for complete beginners
 
 const LEVEL_GUIDE = {
+  new: 'The user is completely new to Japanese. Use only the simplest words in very short sentences, and speak slowly. After each question, also say it in English, in a few words.',
   N5: 'The user is at about JLPT N5, just starting. Use only very common words and simple sentence patterns.',
   N4: 'The user is at about JLPT N4. Use common everyday words and simple sentence patterns.',
   N3: 'The user is at about JLPT N3. Use natural everyday sentences and ordinary vocabulary.',
@@ -40,15 +41,22 @@ const styleSection = ({ proficiency, formality }) => `${LEVEL_GUIDE[proficiency]
 // instructions grew, rule 6 (culture questions) started being skipped or answered at length, so every
 // sentence here has to earn its place. It also covers three things persona testing showed: life details in
 // Japanese above the learner's level, calling them 「ユーザーさん」, and answering frustration with a model sentence.
-function whoYouAreSection({ contact, formality }) {
+function whoYouAreSection({ contact, formality, learnerName }) {
   if (contact.id !== PING.id) return '';
   const { personality, firstPerson, fillers, cat } = PING_PERSONA;
   const register = formality === 'formal' ? 'On this call, use friendly, natural です/ます, never stiff or textbook-like.' : 'On this call, use casual タメ口.';
   return `WHO YOU ARE
 You're ${personality.slice(0, -1).join(', ')} and ${personality.at(-1)}, with honest opinions of your own, not relentlessly cheerful or agreeable. You tease yourself, ${cat.japaneseName} or everyday situations, never them or their Japanese, and stop when they're struggling.
-You speak everyday Japanese with natural fillers (${fillers.map((filler) => `「${filler}」`).join(', ')}) in short turns, and call yourself ${firstPerson}. ${register} Never call them ユーザー or ユーザーさん; usually use no form of address, and あなた only when it sounds natural.
+You speak everyday Japanese with natural fillers (${fillers.map((filler) => `「${filler}」`).join(', ')}) in short turns, and call yourself ${firstPerson}. ${register} ${learnerName ? 'Never call them ユーザー, ユーザーさん or あなた.' : 'Never call them ユーザー or ユーザーさん; usually use no form of address, and あなた only when it sounds natural.'}
 Tell them about your life in Japanese at their level: simplify or leave out details that need harder words or grammar.
 If they clearly sound frustrated, sad or discouraged, respond to the feeling first, before any rule below: no model sentence, no push to keep practicing, and language help only if they ask for it or clearly want it.`;
+}
+
+// Every contact uses the learner's name now and then, if they gave one at onboarding (as kana, so the voice says it right).
+function nameSection({ learnerName, formality }) {
+  const address = addressFor({ learnerName, formality });
+  if (!address) return '';
+  return `The user's name is ${learnerName}. Call them ${address} now and then, as a friend would, not in every sentence.`;
 }
 
 const languagesSection = () => 'Only ever speak Japanese or English. If they ask for another language, stay in Japanese or English.';
@@ -75,8 +83,8 @@ function openingQuestion({ question, contact, formality }) {
 }
 
 // When the contact calls, it first asks if it's a good time, like a friend would. When the user calls, it goes straight in.
-function openingSection({ question, contact, formality, calledBack, localHour }) {
-  const greeting = `When the call connects, say exactly: 「${greetingFor({ localHour, calledBack, contact, formality })}」`;
+function openingSection({ question, contact, formality, calledBack, localHour, learnerName }) {
+  const greeting = `When the call connects, say exactly: 「${greetingFor({ localHour, calledBack, contact, formality, learnerName })}」`;
   if (calledBack) return `OPENING\n${greeting}\nThen ${openingQuestion({ question, contact, formality })}`;
   const later = NOT_NOW_GOODBYES[formality === 'formal' ? 'formal' : 'casual'];
   return `OPENING
@@ -247,16 +255,16 @@ ${memories.map((memory) => `- ${JSON.stringify(memory)}`).join('\n')}`;
 
 // ---------- Putting it together ----------
 
-const SECTIONS = [identitySection, mannerSection, styleSection, whoYouAreSection, languagesSection, lifeSection, openingSection, turnsSection, memorySection];
+const SECTIONS = [identitySection, mannerSection, styleSection, nameSection, whoYouAreSection, languagesSection, lifeSection, openingSection, turnsSection, memorySection];
 
 function todayInUtc() {
   const now = new Date();
   return { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1, day: now.getUTCDate() };
 }
 
-export function buildInstructions({ question, localHour, localDate = todayInUtc(), calledBack, contact = PING, settings = DEFAULT_SETTINGS, memories = [] }) {
+export function buildInstructions({ question, localHour, localDate = todayInUtc(), calledBack, contact = PING, settings = DEFAULT_SETTINGS, memories = [], learnerName = null }) {
   const { proficiency, formality } = settings;
-  const context = { question, localHour, localDate, calledBack, contact, proficiency, formality, memories };
+  const context = { question, localHour, localDate, calledBack, contact, proficiency, formality, memories, learnerName };
   return SECTIONS.map((section) => section(context))
     .filter(Boolean)
     .join('\n\n');

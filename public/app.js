@@ -6,7 +6,8 @@ import { audioUnlocked, startRingtone, unlockAudio } from './ringtone.js';
 import { initStack, renderStackTiles } from './stack.js';
 import { failedCallNotice, startCall } from './voice.js';
 import { summarizeLearning, wordLevels } from './learning-metrics.js';
-import { renderProgress } from './progress.js';
+import { initProgress, renderProgress } from './progress.js';
+import { initOnboarding, renderWelcome, showConnecting } from './onboarding.js';
 import { initRecents, renderBadge } from './recents.js';
 
 const RING_FALLBACK_MS = 12_000; // the server decides a call was missed. This only covers its message getting lost.
@@ -87,7 +88,7 @@ async function join(event) {
     const result = await api('/api/register', { method: 'POST', body: { inviteCode: $('invite-code').value.trim(), timeZone: timeZone() } });
     writeToken(result.token);
     state.me = result;
-    show('level');
+    goHome();
   } catch (error) {
     setError('join-error', error.message);
   }
@@ -183,7 +184,7 @@ const POLICY_NOTICES = {
   },
   update: {
     title: 'Privacy Policy updated',
-    text: 'Ping now tracks your speaking progress, including an estimate of your level from recorded calls, and you can leave a comment after a call. The Privacy Policy has the details.',
+    text: 'Ping can now call you by name. Your name, and how to say it, are kept with your account. The Privacy Policy has the details.',
   },
 };
 
@@ -202,18 +203,51 @@ async function dismissPolicyNotice() {
   await api('/api/policy/seen', { method: 'POST' }).catch((error) => console.warn('Could not save that the notice was seen', error));
 }
 
-const showCallsTab = () => (state.me && !state.me.levelChosen ? show('level') : go('calls'));
+// Before Home: beta testers and Free users go through the two onboarding pages once; everyone picks a level; and
+// right after either, "Connecting to Ping" plays for a few seconds.
+let connectingNext = false;
+function beforeHome() {
+  if (!state.me) return false;
+  if (state.me.needsOnboarding) {
+    renderWelcome();
+    return true;
+  }
+  if (!state.me.levelChosen) {
+    showLevelPicker();
+    return true;
+  }
+  if (connectingNext) {
+    connectingNext = false;
+    showConnecting(() => go('home'));
+    return true;
+  }
+  return false;
+}
+
+// The level picker: page 2 of the onboarding, or on its own for admins, YC reviewers and accounts from before.
+function showLevelPicker() {
+  const onboarding = Boolean(state.me.needsOnboarding);
+  $('level-back').hidden = !onboarding;
+  $('level-step').hidden = !onboarding;
+  show('level');
+}
+
+const showCallsTab = () => beforeHome() || go('calls');
 
 // Everyone picks a JLPT level before they reach Home, including accounts from before there were JLPT levels.
-const goHome = () => (state.me && !state.me.levelChosen ? show('level') : go('home'));
+const goHome = () => beforeHome() || go('home');
 
 // The level picker, shown once before Home. Then notifications, if they aren't on yet.
 async function chooseLevel(proficiency) {
   setError('level-error', null);
   try {
-    const settings = await api('/api/settings', { method: 'PATCH', body: { proficiency } });
+    // Someone completely new also gets slower speech and more time to answer, which they can change later.
+    const change = proficiency === 'new' ? { proficiency, speed: 0.85, thinkingTime: 'long' } : { proficiency };
+    const settings = await api('/api/settings', { method: 'PATCH', body: change });
     state.me.settings = settings.settings;
     state.me.levelChosen = true;
+    if (state.me.needsOnboarding) state.me = await api('/api/onboarding/done', { method: 'POST' });
+    connectingNext = true;
     if (!pushAllowed() && !browserOnly()) return show('enable');
     goHome();
   } catch (error) {
@@ -694,6 +728,7 @@ function bindEvents() {
   $('join-form').addEventListener('submit', join);
   $('enable-button').addEventListener('click', enable);
   $('enable-skip').addEventListener('click', () => useBrowserOnly(goHome));
+  $('level-back').addEventListener('click', renderWelcome);
   $('install-skip').addEventListener('click', () => useBrowserOnly(() => show('join')));
   $('browser-note-enable').addEventListener('click', () => show('enable'));
   $('level-choices').addEventListener('click', (event) => {
@@ -731,6 +766,8 @@ async function init() {
   initStack();
   initContacts({ onCall: callContact });
   initRecents({ onCall: callContact });
+  initOnboarding({ onWelcomeDone: showLevelPicker });
+  initProgress();
   initSettings();
   bindEvents();
   enableSwipeBack();
@@ -756,7 +793,9 @@ async function init() {
     // Browsers can replace a subscription at any time, so send the current one on every open.
     await subscribeToPush().catch((error) => console.warn('Could not refresh the push subscription', error));
   } else if (!browserOnly()) {
-    return show(state.me.levelChosen ? 'enable' : 'level');
+    // Onboarding and the level come first; turning on notifications after them.
+    if (state.me.needsOnboarding || !state.me.levelChosen) return goHome();
+    return show('enable');
   }
 
   const params = new URLSearchParams(location.search);

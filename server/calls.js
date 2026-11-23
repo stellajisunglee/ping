@@ -26,6 +26,19 @@ const BROKEN_CALL_REASONS = new Set(['dropped', 'failed', 'unavailable']);
 // Who can call as often as they like: admins testing the app, and YC reviewers trying it.
 // 'admin' or 'yc', so the app can say why, or null.
 export const unlimitedCalls = (user) => (user.role === 'admin' ? 'admin' : user.joinedWith === 'yc' ? 'yc' : null);
+// Beta testers are on Platinum with no plan limit on calls a day, but DAILY_CALL_LIMIT still caps them.
+const noPlanLimit = (user) => unlimitedCalls(user) ?? (user.joinedWith === 'beta' ? 'beta' : null);
+
+// Beta testers and Free users go through the two onboarding pages (name, call hours and plan; then their level) once.
+// Admins and YC reviewers skip them.
+export const needsOnboarding = (user) => user.role !== 'admin' && user.joinedWith !== 'yc' && !user.onboarded;
+
+// What Ping calls the learner: their name as they wrote it, and how to say it, in kana.
+export const MAX_NAME_LENGTH = 30;
+export const MAX_READING_LENGTH = 20;
+const KANA_READING = /^[\p{Script=Katakana}\p{Script=Hiragana}ー・ ]+$/u;
+export const cleanName = (value) => (typeof value === 'string' && value.trim() ? value.trim().replace(/\s+/g, ' ').slice(0, MAX_NAME_LENGTH) : null);
+export const cleanReading = (value) => (typeof value === 'string' && KANA_READING.test(value.trim()) ? value.trim().slice(0, MAX_READING_LENGTH) : null);
 
 const LATE_CALL_LIMIT_MS = 5 * 60_000; // past this a due call is rescheduled, so downtime can't ring someone at 3am
 const TEST_RING_DELAY_MS = 10_000; // time to start a screen recording or lock the phone
@@ -42,6 +55,7 @@ const KEEP_RATINGS = 200;
 const KEEP_PROGRESS = 1000; // calls in a learner's progress history, and level estimates, outside admin and beta accounts
 const KEEP_HISTORY = 200; // calls in the Calls tab, outside admin and beta accounts
 const RECENT_CALLS = 100; // how many the Calls tab shows
+const RATIO_CALLS = 20; // calls in the "Japanese vs English" chart
 const HABIT_DAYS = 28; // the window the habit numbers look back over
 const DAY_MS = 86_400_000;
 // A speaking level is shown once this many calls have been graded, as the middle of the latest this many.
@@ -59,7 +73,7 @@ export class PlanError extends Error {}
 
 // The Privacy Policy's version. 2: calls are recorded. 3: Deepgram joins OpenAI as a voice service.
 // Accounts that saw an older version get a one-time notice on Home about what changed since.
-export const POLICY_VERSION = 4; // 2: calls recorded, 3: Deepgram named, 4: post-call comments, testers' data kept, learning numbers and level estimates
+export const POLICY_VERSION = 5; // 2: calls recorded, 3: Deepgram named, 4: post-call comments, testers' data kept, learning numbers and level estimates, 5: their name
 const RECORDING_POLICY = 2;
 export const policyNoticeFor = (seen = 0) => (seen >= POLICY_VERSION ? null : seen < RECORDING_POLICY ? 'recording' : 'update');
 // Admins and beta testers record every call as part of testing. YC reviewers and everyone else
@@ -113,6 +127,9 @@ const newUserFields = () => ({
   ratings: [], // the 1-5 taps after each call: how often Ping cut them off, and how natural it felt
   policyVersion: 0, // the Privacy Policy version they've seen. 0: joined before calls were recorded
   levelChosen: false, // whether they've picked their JLPT level. Everyone picks one before they first reach Home
+  name: null, // what Ping calls them, as they wrote it
+  nameReading: null, // how Ping says it, in kana (ステラ), which goes into Ping's instructions and greeting
+  onboarded: false, // finished the two onboarding pages (beta testers and Free users)
   progress: [], // one entry per call: speaking time, English share, Japanese characters, estimated level (numbers and levels only)
   levelEstimates: [], // the model's speaking-level estimate for each graded call, newest first, with its one-line reason
   callHistory: [], // the Calls tab: each call to or from a contact, with how it went. Kept after the call record is removed
@@ -141,7 +158,8 @@ export class CallEngine {
         ...user,
         role: user.role ?? 'admin', // accounts from before there were two invite codes
         joinedWith: user.joinedWith ?? user.role ?? 'admin',
-        plan: RENAMED_PLANS[user.plan] ?? user.plan ?? 'free',
+        // Beta testers are on Platinum now; accounts from when they started on Free move up.
+        plan: user.joinedWith === 'beta' && (user.plan ?? 'free') === 'free' ? 'platinum' : (RENAMED_PLANS[user.plan] ?? user.plan ?? 'free'),
         settings: withJlptLevel({ ...DEFAULT_SETTINGS, ...user.settings }),
         missedCallToReturn: user.missedCallToReturn ?? (user.lastMissedAt ?? 0) > (user.lastCallAt ?? 0),
         usage: { ownCalls: 0, ...user.usage },
@@ -192,6 +210,25 @@ export class CallEngine {
     if (timeZone) user.timeZone = timeZone;
     if (!user.nextCallAt || user.nextCallAt <= this.now()) this.#schedule(user, { skipToday: this.#rangToday(user) });
     this.store.save();
+  }
+
+  // The learner's name and how Ping says it. Returns false if the name is missing or the reading isn't kana.
+  setProfile(user, { name, nameReading }) {
+    const cleanedName = cleanName(name);
+    const reading = nameReading ? cleanReading(nameReading) : null;
+    if (!cleanedName || (nameReading && !reading)) return false;
+    user.name = cleanedName;
+    user.nameReading = reading;
+    this.store.save();
+    return true;
+  }
+
+  // The second onboarding page is done. Needs a name and a level first.
+  finishOnboarding(user) {
+    if (!user.name || !user.levelChosen) return false;
+    user.onboarded = true;
+    this.store.save();
+    return true;
   }
 
   updateSettings(user, change) {
@@ -388,6 +425,7 @@ export class CallEngine {
     return {
       question: questionById(call.questionId),
       settings: user.settings,
+      learnerName: user.nameReading ?? null, // how Ping says their name, or null
       localHour: local.hour,
       localDate: { year: local.year, month: local.month, day: local.day },
       calledBack: call.direction === 'outgoing',
@@ -422,9 +460,13 @@ export class CallEngine {
     const callBackMissed = user.missedCallToReturn;
     const firstCall = !user.lastCallAt; // a new account can try a call before Ping's first one
     const retryAfterDrop = Boolean(this.#usageToday(user).retryAfterDrop);
-    const unlimited = unlimitedCalls(user);
-    const canCall = Boolean(unlimited) || firstCall || callBackMissed || retryAfterDrop || callsLeft > 0;
-    return { perCallMinutes: perCall, callsPerDay, callsLeft, keptForPing, callBackMissed, retryAfterDrop, firstCall, unlimited, canCall, reason: canCall ? null : this.#limitReason(user, keptForPing) };
+    const unlimited = noPlanLimit(user);
+    // The daily safety cap, for everyone but admins and YC reviewers. Beta testers see it as their limit.
+    const dailyCap = unlimitedCalls(user) ? null : (this.dailyCallLimit ?? null);
+    const capReached = Boolean(dailyCap) && this.#usageToday(user).calls >= dailyCap;
+    const canCall = !capReached && (Boolean(unlimited) || firstCall || callBackMissed || retryAfterDrop || callsLeft > 0);
+    const reason = canCall ? null : capReached ? `You've made all ${dailyCap} calls for today. You can call again tomorrow.` : this.#limitReason(user, keptForPing);
+    return { perCallMinutes: perCall, callsPerDay, callsLeft, keptForPing, callBackMissed, retryAfterDrop, firstCall, unlimited, dailyCap, canCall, reason };
   }
 
   #limitReason(user, keptForPing) {
@@ -796,7 +838,13 @@ export class CallEngine {
       });
     const recent = user.levelEstimates.slice(0, LEVEL_SAMPLE).map((estimate) => JLPT_ORDER.indexOf(estimate.level));
     const speakingLevel = recent.length >= LEVEL_SAMPLE ? JLPT_ORDER[[...recent].sort((a, b) => a - b)[Math.floor(recent.length / 2)]] : null;
-    return { points, totalMinutes: points.at(-1)?.minutes ?? 0, speakingLevel, gradedCalls: user.levelEstimates.length, callsUntilLevel: Math.max(0, LEVEL_SAMPLE - user.levelEstimates.length) };
+    // Each call's share of the learner's turns in Japanese, for the "Japanese vs English" view, latest last.
+    const calls = [...user.progress]
+      .sort((a, b) => a.at - b.at)
+      .filter((entry) => entry.englishTurnPercent !== null && entry.englishTurnPercent !== undefined)
+      .slice(-RATIO_CALLS)
+      .map((entry) => ({ at: entry.at, japanesePercent: 100 - entry.englishTurnPercent }));
+    return { points, calls, totalMinutes: points.at(-1)?.minutes ?? 0, speakingLevel, gradedCalls: user.levelEstimates.length, callsUntilLevel: Math.max(0, LEVEL_SAMPLE - user.levelEstimates.length) };
   }
 
   // One entry per call in the learner's own progress history, filled in as the timing, learning numbers and level

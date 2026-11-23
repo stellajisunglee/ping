@@ -7,7 +7,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { dirname, extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from './store.js';
-import { CallEngine, cleanComment, cleanRating, cleanTranscript, LimitError, PlanError, policyNoticeFor, recordingLocked, recordsCalls } from './calls.js';
+import { CallEngine, cleanComment, cleanName, cleanRating, cleanReading, needsOnboarding, cleanTranscript, LimitError, PlanError, policyNoticeFor, recordingLocked, recordsCalls } from './calls.js';
 import { audioExtension, Recordings } from './recordings.js';
 import { callConfig, ENGINES, RANDOM_MIX } from './experiment.js';
 import { SCENARIOS } from './scenarios.js';
@@ -36,7 +36,7 @@ const MAX_WRONG_CODES_PER_MINUTE = 10;
 const MAX_TRACKED_IPS = 10_000;
 // The invite codes come only from the environment, never from this file, so the code can be public.
 // A code that isn't set lets no one join with it. The yc code is for YC reviewers: the beta tester's version on Premium, counted separately.
-const PLAN_FOR_CODE = { yc: 'premium' }; // codes not listed start on Free
+const PLAN_FOR_CODE = { yc: 'premium', beta: 'platinum' }; // codes not listed (admin, free) start on Free
 const STARTER_STACK_CODES = new Set(['yc']); // accounts that start with a few example words and sentences
 
 const CONTENT_TYPES = {
@@ -216,6 +216,9 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       clearAt: user.clearAt,
       settings: user.settings,
       levelChosen: user.levelChosen, // false until they pick a JLPT level, which the app asks for before Home
+      name: user.name,
+      nameReading: user.nameReading,
+      needsOnboarding: needsOnboarding(user), // beta testers and Free users see the two onboarding pages once
       progress: engine.progress(user),
       recentCalls: engine.recentCalls(user),
       hasSubscription: Boolean(user.subscription),
@@ -401,6 +404,36 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       const body = await readJson(req);
       const call = engine.callBack(user, typeof body.contactId === 'string' ? body.contactId : null);
       return json(res, 201, callState(call));
+    }
+
+    // The learner's name, and how Ping says it, from onboarding or Manage Account.
+    if (method === 'PUT' && pathname === '/api/profile') {
+      const body = await readJson(req);
+      if (!engine.setProfile(user, body)) return json(res, 400, { error: 'Please write your name, and its reading in katakana or hiragana.' });
+      return json(res, 200, publicUser(user));
+    }
+
+    if (method === 'POST' && pathname === '/api/onboarding/done') {
+      if (!engine.finishOnboarding(user)) return json(res, 400, { error: 'Please add your name and choose your level first.' });
+      return json(res, 200, publicUser(user));
+    }
+
+    // Suggests how Ping should say their name, and lets them hear it in Ping's voice. Both count as lookups.
+    if (method === 'POST' && pathname === '/api/name/reading') {
+      const name = cleanName((await readJson(req)).name);
+      if (!name) return json(res, 400, { error: 'Please write your name first.' });
+      engine.countLookup(user);
+      const reading = cleanReading(await openai.nameReading(name));
+      return json(res, 200, { reading });
+    }
+    if (method === 'POST' && pathname === '/api/name/hear') {
+      const reading = cleanReading((await readJson(req)).reading);
+      if (!reading) return json(res, 400, { error: 'Write how to say your name in katakana or hiragana.' });
+      engine.countLookup(user);
+      const audio = await openai.speak(`${reading}さん、こんにちは！`, voice);
+      res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': audio.length, 'Cache-Control': 'no-store', ...SECURITY_HEADERS });
+      res.end(audio);
+      return;
     }
 
     if (method === 'PUT' && pathname === '/api/plan') {
@@ -771,6 +804,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         admin: process.env.ADMIN_INVITE_CODE ?? '',
         beta: process.env.BETA_INVITE_CODE ?? '',
         yc: process.env.YC_INVITE_CODE ?? '',
+        free: process.env.FREE_INVITE_CODE ?? '', // everyone else: Free, until sign-up opens
       },
       vapidPublicKey: VAPID_PUBLIC_KEY,
       exportKey: process.env.EXPORT_KEY ?? '',

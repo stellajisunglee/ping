@@ -2,6 +2,7 @@
   color-scheme: light dark;
   --background: #f1f7fc;
   --chart-line: #3a8acb; /* validated against --surface with the dataviz checks */
+  --chart-english: #c4701c; /* with --chart-line, passes the colour-blind and contrast checks */
   --surface: #ffffff;
   --text: #1b2a38;
   --muted: #5b6e81;
@@ -22,6 +23,7 @@
   :root {
     --background: #101a23;
     --chart-line: #3d9be6;
+    --chart-english: #cc7a28;
     --surface: #182531;
     --text: #e8f1f9;
     --muted: #9db0c2;
@@ -1672,4 +1674,185 @@ textarea {
 
 .browser-note .small {
   align-self: flex-start;
+}
+
+/* Onboarding: name, call hours and plan; the upgrade placeholder; "Connecting to Ping" */
+.screen.onboarding {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.onboarding-step {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.onboarding h2 {
+  margin: 12px 0 0;
+  font-size: 1.05rem;
+}
+
+.reading-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reading-controls,
+.hours-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reading-controls input {
+  flex: 1;
+  min-width: 0;
+}
+
+.hours-row select {
+  flex: 1;
+}
+
+.plan-summary ul,
+#upgrade-plans ul {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+  color: var(--muted);
+}
+
+.plan-summary p {
+  margin: 0;
+}
+
+.plan-summary .small {
+  align-self: flex-start;
+}
+
+.connecting {
+  position: relative;
+  overflow: hidden;
+}
+
+.connecting-waves {
+  position: absolute;
+  inset: 30% 0 auto;
+  width: 100%;
+  height: 220px;
+  pointer-events: none;
+}
+
+.connecting-waves .wave {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  animation: wave-flow var(--seconds) linear infinite, wave-breathe calc(var(--seconds) * 1.3) ease-in-out infinite alternate;
+  transform-origin: center;
+}
+
+.connecting-avatar,
+.connecting h1,
+.connecting p {
+  position: relative;
+}
+
+@keyframes wave-flow {
+  to {
+    transform: translateX(var(--shift));
+  }
+}
+
+@keyframes wave-breathe {
+  from {
+    scale: 1 0.6;
+  }
+  to {
+    scale: 1 1.15;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connecting-waves .wave {
+    animation: none;
+  }
+}
+
+/* The progress card's two views */
+.progress-views {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--background);
+}
+
+.progress-view {
+  flex: 1;
+  min-height: 34px;
+  white-space: nowrap;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.progress-view[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 12%);
+}
+
+.progress-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.progress-legend .key {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.progress-legend .key.english {
+  margin-left: 10px;
+}
+
+.key.japanese,
+.ratio-japanese {
+  fill: var(--chart-line);
+  background: var(--chart-line);
+}
+
+.key.english,
+.ratio-english {
+  fill: var(--chart-english);
+  background: var(--chart-english);
+}
+
+.ratio-hit {
+  fill: transparent;
+}
+
+.ratio-bar.active .ratio-japanese,
+.ratio-bar.active .ratio-english {
+  stroke: var(--text);
+  stroke-width: 1.5;
+}
+
+.progress-head {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+
+#welcome-form {
+  margin-top: 8px;
 }
