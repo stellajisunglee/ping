@@ -4,7 +4,7 @@
 // Uses Node's built-in SQLite, so there's nothing to install.
 //
 // Tables: learners, calls (every call, connected or not), call_setup, turn_metrics, learning_metrics, ratings,
-// level_estimates, settings_changes, turns, help_events, words, sentences, scenario_checks, recordings, transcript_lines, feedback.
+// level_estimates, settings_changes, turns, help_events, words (with each one's progress), word_events, sentences, scenario_checks, recordings, transcript_lines, feedback.
 // Levels also come as numbers (selfLevelRank, levelRank: 0 completely new, 1 N5 ... 5 N1) so they sort and compare.
 // Views: call_facts (one row per call with everything joined), learner_weeks (each learner's weeks since joining).
 
@@ -31,7 +31,7 @@ const NOT_SETUP = new Set([
   'cutOffs', 'naturalness', 'commented',
   'estimatedLevel', 'estimatedVocabulary', 'estimatedGrammar', 'levelConfidence',
   'userCallSharePercent', 'avgTurnMs',
-  'turns', 'help', 'helpRequestsByTools',
+  'turns', 'help', 'helpRequestsByTools', 'wordEvents',
 ]);
 const isHelpCount = (key) => key.startsWith('help_');
 
@@ -108,7 +108,14 @@ export function buildDatabase(exported, dbPath, { audioPath = () => null } = {})
   // Each change to a tracked setting (level, call window, frequency, pace, ...), with whether it was asked for on a call.
   counts.settings_changes = table(db, 'settings_changes', ['userId', 'at', 'field', 'fromValue', 'toValue', 'duringCall'],
     users.flatMap((user) => (user.settingsChanges ?? []).map((change) => ({ userId: user.id, at: iso(change.at), field: change.field, fromValue: change.from, toValue: change.to, duringCall: Boolean(change.duringCall) }))));
-  counts.words = table(db, 'words', ['wordId', 'userId', 'kanji', 'kana', 'romaji', 'english', 'savedAt'], users.flatMap((user) => (user.words ?? []).map((w) => ({ ...w, wordId: w.id, userId: user.id, savedAt: iso(w.at) }))));
+  // Each saved word with its progress (server/word-progress.js): stage, times it came back, times the learner used it.
+  counts.words = table(db, 'words', ['wordId', 'userId', 'kanji', 'kana', 'romaji', 'english', 'savedAt', 'stage', 'comebacks', 'lastComebackAt', 'usedCount', 'firstUsedAt', 'lastUsedAt', 'lookedUpAgain'],
+    users.flatMap((user) => (user.words ?? []).map((w) => ({
+      ...w, wordId: w.id, userId: user.id, savedAt: iso(w.at),
+      stage: w.progress?.stage ?? 'met', comebacks: w.progress?.comebacks ?? 0, lastComebackAt: iso(w.progress?.lastComebackAt), usedCount: w.progress?.usedCount ?? 0,
+      firstUsedAt: iso(w.progress?.firstUsedAt), lastUsedAt: iso(w.progress?.lastUsedAt), lookedUpAgain: w.progress?.lookedUpAgain ?? 0,
+    }))));
+  counts.word_events = table(db, 'word_events', ['callId', 'wordId', 'event'], callLog.flatMap((entry) => (entry.wordEvents ?? []).map((event) => ({ ...event, callId: entry.callId }))));
   counts.sentences = table(db, 'sentences', ['sentenceId', 'userId', 'japanese', 'romaji', 'english', 'word', 'savedAt'], users.flatMap((user) => (user.sentences ?? []).map((s) => ({ ...s, sentenceId: s.id, userId: user.id, savedAt: iso(s.at) }))));
   counts.scenario_checks = table(db, 'scenario_checks', ['callId', 'scenarioId', 'checkpointId', 'result', 'at'], scenarioChecks.map((c) => ({ ...c, at: iso(c.at) })));
   counts.recordings = table(db, 'recordings', ['callId', 'userId', 'audio', 'audioFile', 'lineCount', 'learnerLines'], exported.recordings.map((r) => ({ ...r, audioFile: audioPath(r), lineCount: r.lines?.length ?? 0, learnerLines: r.lines?.filter((line) => line.from === 'you').length ?? 0 })), 'callId');

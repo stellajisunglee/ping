@@ -29,9 +29,9 @@ export const agentListen = (settings) => ({
 export const agentSpeak = (settings, voice) => ({ provider: { type: 'deepgram', version: 'v2', model: voice, speed: voiceSpeed(settings.speed) } });
 
 // The Settings message the phone sends when it connects: Ping's own instructions, persona and tools.
-export function agentSettings({ question, settings, localHour, localDate, calledBack, contact, memories = [], thinkModel, voice, learnerName = null }) {
+export function agentSettings({ question, settings, localHour, localDate, calledBack, contact, memories = [], thinkModel, voice, learnerName = null, comebackWords = [] }) {
   const greeting = openingWords({ question, contact, formality: settings.formality, calledBack, localHour, learnerName });
-  const instructions = buildInstructions({ question, localHour, localDate, calledBack, contact, settings, memories, learnerName });
+  const instructions = buildInstructions({ question, localHour, localDate, calledBack, contact, settings, memories, learnerName, comebackWords });
   return {
     type: 'Settings',
     experimental: true, // so AgentStartedSpeaking reports how long thinking and speaking took

@@ -129,6 +129,19 @@ export function summarizeLearning({ lines = [], stackWords = [], newWords = 0, l
   };
 }
 
+// Which words already in the stack the contact said (came back) and the learner said (used) on a call, as word ids.
+// A word matches by its kanji, or by its kana when that's at least two characters, so short kana like い can't match by
+// accident. lookedUpIds are words they asked about again on the call.
+export function wordEvents({ lines = [], stackWords = [], lookedUpIds = [] }) {
+  const said = (from) => lines.filter((line) => line.from === from && typeof line.text === 'string').map((line) => line.text).join('\n');
+  const contact = said('contact');
+  const learner = said('you');
+  const forms = (word) => [word.kanji, word.kana && word.kana.length >= 2 ? word.kana : null].filter(Boolean);
+  const matches = (text) => stackWords.filter((word) => word.id && forms(word).some((form) => text.includes(form))).map((word) => word.id);
+  const known = new Set(stackWords.map((word) => word.id));
+  return { cameBack: matches(contact), used: matches(learner), lookedUp: [...new Set(lookedUpIds)].filter((id) => known.has(id)) };
+}
+
 const validValue = (field, value) =>
   value === null ? MAY_BE_EMPTY.has(field) : Number.isInteger(value) && value >= 0 && value <= (PERCENT_FIELDS.has(field) ? 100 : MAX_COUNT);
 

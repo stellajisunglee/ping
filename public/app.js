@@ -5,7 +5,7 @@ import { initSettings, keepRecording, recordCallsOn, showScenarioPanel } from '.
 import { audioUnlocked, startRingtone, unlockAudio } from './ringtone.js';
 import { initStack, renderStackTiles } from './stack.js';
 import { failedCallNotice, startCall } from './voice.js';
-import { summarizeLearning, wordLevels } from './learning-metrics.js';
+import { summarizeLearning, wordEvents, wordLevels } from './learning-metrics.js';
 import { initProgress, renderProgress } from './progress.js';
 import { initOnboarding, renderWelcome, showConnecting } from './onboarding.js';
 import { initRecents, renderBadge } from './recents.js';
@@ -530,10 +530,13 @@ async function loadWordLevels() {
 
 // Numbers about the learner's Japanese on this call, worked out here from the transcript. Only the numbers are
 // sent, on every call that connected, whether or not it was recorded.
-async function sendLearning(callId, { stackWords, newWords }) {
+async function sendLearning(callId, { stackWords, newWords, lookedUpIds }) {
   const segmenter = 'Segmenter' in Intl ? new Intl.Segmenter('ja', { granularity: 'word' }) : null;
-  const learning = summarizeLearning({ lines: heardLines(), stackWords, newWords, levels: await loadWordLevels(), segmenter });
+  const lines = heardLines();
+  const learning = summarizeLearning({ lines, stackWords, newWords, levels: await loadWordLevels(), segmenter });
   await api(`/api/calls/${callId}/learning`, { method: 'POST', body: learning }).catch((error) => console.warn('Could not save the learning numbers', error));
+  // Each saved word's progress: which came back, which they used, which they asked about again. Word ids only.
+  await api(`/api/calls/${callId}/words`, { method: 'POST', body: wordEvents({ lines, stackWords, lookedUpIds }) }).catch((error) => console.warn('Could not save word progress', error));
 }
 
 // scenarioId: an admin's controlled test call, which shows its checklist above the transcript.
@@ -559,6 +562,7 @@ function beginCall(callId, contactName = 'Ping', scenarioId = null) {
   let connected = false;
   const stackWords = [...(state.me.words ?? [])]; // the stack as the call starts, to count which saved words get used
   let newWords = 0;
+  const lookedUpIds = []; // saved words they asked about again on this call
   // Admins can keep a copy on the phone for demo videos. Accounts with recording on upload it for review.
   const keepOnPhone = recordCallsOn();
   const forReview = Boolean(state.me.recording?.on);
@@ -593,6 +597,7 @@ function beginCall(callId, contactName = 'Ping', scenarioId = null) {
     },
     onWordAdded: (word, { alreadySaved = false } = {}) => {
       if (!alreadySaved) newWords += 1;
+      else if (word?.id) lookedUpIds.push(word.id);
       const note = alreadySaved ? '*already in your stack*' : '*added to stack*';
       addTranscriptNode(el('p', { className: 'line note', textContent: `${word.kanji || word.kana} ${note}` }));
     },
@@ -614,7 +619,7 @@ function beginCall(callId, contactName = 'Ping', scenarioId = null) {
       // doesn't use up the day's call.
       await api(`/api/calls/${callId}/ended`, { method: 'POST', body: { reason } }).catch((error) => console.warn('Could not end the call', error));
       await saveTranscript(callId, forReview);
-      if (connected) await sendLearning(callId, { stackWords, newWords });
+      if (connected) await sendLearning(callId, { stackWords, newWords, lookedUpIds });
       await refresh().catch(() => {});
       const couldntTalk = reason === 'unavailable';
       const ended = couldntTalk ? failedCallNotice({ admin: isAdmin(), outOfCredit, contactName }) : endedNotice(reason);

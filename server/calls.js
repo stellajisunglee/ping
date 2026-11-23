@@ -7,6 +7,7 @@ import { canCall, cleanContact, contactList, findContact, isPaid, MAX_CUSTOM_CON
 import { recordCallDay, streakToShow } from './progress.js';
 import { hourWeights, localDay, localDayNumber, localParts, nextCallTime } from './schedule.js';
 import { HELP_TYPES } from '../public/turn-records.js';
+import { applyWordEvents, dueWords } from './word-progress.js';
 import { applySettings, DEFAULT_SETTINGS, LEGACY_LEVELS, PROFICIENCY_LEVELS } from './settings.js';
 import { addSentence, addStarterStack, addWord, applyDowngrade, cleanSentence, cleanSentenceWords, cleanWord } from './stack.js';
 import { pickQuestion, questionById, TURN_MODES } from './tutor.js';
@@ -446,6 +447,11 @@ export class CallEngine {
     call.sessions += 1;
     call.recorded ??= recordsCalls(user); // decided once, when the call first connects
     if (!call.engine) this.#assignCombo(call, user); // likewise, and logged with the above
+    // Saved words due to come back on this call, picked once, so a reconnect brings back the same ones.
+    if (!call.comebackWordIds) {
+      call.comebackWordIds = dueWords(user.words, this.now()).map((word) => word.id);
+      this.#log(call, { wordsBroughtBack: call.comebackWordIds.length });
+    }
     this.store.save();
     const contact = this.#contactOf(call, user);
     const local = localParts(this.now(), user.timeZone);
@@ -458,6 +464,7 @@ export class CallEngine {
       calledBack: call.direction === 'outgoing',
       contact,
       memories: this.#memories(user, contact),
+      comebackWords: call.comebackWordIds.map((id) => user.words.find((word) => word.id === id)).filter(Boolean).map(({ id, kanji, kana, english }) => ({ id, kanji, kana, english })),
       engine: call.engine,
       turnMode: call.turnMode,
       maxSeconds: secondsLeft,
@@ -825,6 +832,21 @@ export class CallEngine {
     if (user.sentences.length === before) return false;
     this.store.save();
     return true;
+  }
+
+  // Which saved words came back on the call, which the learner used, and which they asked about again, as word ids
+  // the phone matched in the transcript. Updates each word's progress; the call log keeps the events.
+  saveWordEvents(user, callId, { cameBack, used, lookedUp }) {
+    const call = this.store.calls[callId];
+    if (!call || call.userId !== user.id || !call.connectedAt || call.wordEventsSaved) return false;
+    const known = new Set(user.words.map((word) => word.id));
+    const only = (ids) => [...new Set(ids)].filter((id) => known.has(id));
+    const events = applyWordEvents(user.words, { cameBack: only(cameBack), used: only(used), lookedUp: only(lookedUp) }, this.now());
+    call.wordEventsSaved = true;
+    const count = (name) => events.filter((event) => event.event === name).length;
+    this.#log(call, { wordEvents: events, wordsCameBack: count('came-back') + count('understood'), wordsUnderstood: count('understood'), wordsUsed: count('used') });
+    this.store.save();
+    return events;
   }
 
   // One timing record per reply the contact gave, and each time the learner asked for help, by type

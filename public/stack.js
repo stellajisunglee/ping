@@ -32,13 +32,27 @@ function showLimitNote(id, noun) {
   $(id).querySelector('p').textContent = note ?? '';
 }
 
+// Where a saved word is on its way from met to used (server/word-progress.js), in a few words.
+const STAGE_NAMES = { met: 'Saved', 'came-back': 'Came back', understood: 'Understood', used: 'You used it' };
+export function stageText(progress = {}) {
+  const stage = STAGE_NAMES[progress.stage] ?? STAGE_NAMES.met;
+  if (progress.stage === 'used' && progress.usedCount > 1) return `${stage} ${progress.usedCount} times`;
+  if (progress.comebacks && progress.stage !== 'used') return `${stage} · heard again ${progress.comebacks} time${progress.comebacks === 1 ? '' : 's'}`;
+  return stage;
+}
+
 function renderWords() {
   const list = $('words-list');
   const { words } = state.me;
   $('words-empty').hidden = words.length > 0;
   list.replaceChildren(
     ...words.map((word) => {
-      const button = el('button', { type: 'button', className: 'row-button', lang: 'ja', textContent: word.kanji || word.kana });
+      const button = el(
+        'button',
+        { type: 'button', className: 'row-button word-row' },
+        el('span', { lang: 'ja', textContent: word.kanji || word.kana }),
+        el('span', { className: `word-stage stage-${word.progress?.stage ?? 'met'}`, textContent: STAGE_NAMES[word.progress?.stage] ?? STAGE_NAMES.met }),
+      );
       button.addEventListener('click', () => {
         currentWordId = word.id;
         go('word');
@@ -56,6 +70,7 @@ function renderWord() {
   $('word-kana').textContent = word.kana;
   $('word-romaji').textContent = word.romaji;
   $('word-english').textContent = word.english;
+  $('word-stage').textContent = stageText(word.progress);
   $('word-examples').replaceChildren();
   setError('word-error', null);
   // Hidden once its sentences are showing, so it has to come back for the next word.

@@ -1856,3 +1856,30 @@ textarea {
 #welcome-form {
   margin-top: 8px;
 }
+
+/* Each saved word's progress, from saved to used */
+.word-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.word-stage {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--background);
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.word-stage.stage-understood,
+.word-stage.stage-used {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.word-stage.stage-used {
+  background: color-mix(in srgb, var(--answer) 18%, var(--surface));
+}

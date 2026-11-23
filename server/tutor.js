@@ -108,11 +108,11 @@ const SMART_TURN_PATIENCE = {
 
 export const smartTurnRules = (thinkingTime) => ({ ...(SMART_TURN_PATIENCE[thinkingTime] ?? SMART_TURN_PATIENCE.normal) });
 
-export function buildSession({ model, voice, question, settings, localHour, localDate, calledBack, contact = PING, memories = [], turnMode = 'silence', learnerName = null }) {
+export function buildSession({ model, voice, question, settings, localHour, localDate, calledBack, contact = PING, memories = [], turnMode = 'silence', learnerName = null, comebackWords = [] }) {
   return {
     type: 'realtime',
     model,
-    instructions: buildInstructions({ question, localHour, localDate, calledBack, contact, settings, memories, learnerName }),
+    instructions: buildInstructions({ question, localHour, localDate, calledBack, contact, settings, memories, learnerName, comebackWords }),
     output_modalities: ['audio'],
     max_output_tokens: 800, // keeps one runaway reply from running up the bill
     audio: {

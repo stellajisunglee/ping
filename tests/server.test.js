@@ -1183,3 +1183,23 @@ test('each reply and each request for help are kept with the call, and help is c
   assert.equal(entry.turns[1].cutOff, true);
   assert.deepEqual([entry.help_lookup, entry.help_slower, entry.help_more_time, entry.helpRequestsByTools], [2, 1, 0, 3]);
 });
+
+test("Ping brings back saved words that are due, and each word's progress follows what the phone saw", async () => {
+  const tester = await joinWith(BETA_CODE);
+  const user = engine.userForToken(tester.token);
+  const saved = (await request('/api/stack/words', { method: 'POST', token: tester.token, body: { kanji: '散歩', kana: 'さんぽ', romaji: 'sanpo', english: 'a walk' } })).data.word;
+  user.words.find((w) => w.id === saved.id).at -= 2 * 86_400_000; // saved two days ago
+  const call = await connectedCall(tester.token);
+  await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: tester.token });
+  assert.match(minted.at(-1).session.instructions, /WORDS TO BRING BACK\nOn earlier calls they saved these words: 散歩 \(さんぽ\), "a walk"/);
+
+  const path = `/api/calls/${call.id}/words`;
+  assert.equal((await request(path, { method: 'POST', token: tester.token, body: { cameBack: 'all' } })).status, 400);
+  const { data } = await request(path, { method: 'POST', token: tester.token, body: { cameBack: [saved.id, 'someone-elses'], used: [saved.id], lookedUp: [] } });
+  assert.deepEqual(data.events.map((event) => event.event), ['understood', 'used']);
+  assert.equal((await request(path, { method: 'POST', token: tester.token, body: { used: [saved.id] } })).status, 404, 'once per call');
+  const word = (await request('/api/me', { token: tester.token })).data.words.find((w) => w.id === saved.id);
+  assert.deepEqual([word.progress.stage, word.progress.comebacks, word.progress.usedCount], ['used', 1, 1]);
+  const entry = (await request('/api/admin/calls', { token: await join() })).data.calls.find((logged) => logged.callId === call.id);
+  assert.deepEqual([entry.wordsBroughtBack, entry.wordsCameBack, entry.wordsUnderstood, entry.wordsUsed], [1, 1, 1, 1]);
+});

@@ -591,6 +591,18 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       return details ? json(res, 200, details) : json(res, 404, { error: 'Call not found.' });
     }
 
+    // Which saved words came back, were used, or were asked about again on the call: word ids only.
+    const wordsRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/words$/);
+    if (method === 'POST' && wordsRoute) {
+      const body = await readJson(req);
+      const ids = (list) => (Array.isArray(list) && list.length <= 500 && list.every((id) => typeof id === 'string' && id.length <= 64) ? list : null);
+      const [cameBack, used, lookedUp] = [ids(body.cameBack ?? []), ids(body.used ?? []), ids(body.lookedUp ?? [])];
+      if (!cameBack || !used || !lookedUp) return json(res, 400, { error: 'Invalid word events.' });
+      const events = engine.saveWordEvents(user, wordsRoute[1], { cameBack, used, lookedUp });
+      if (!events) return json(res, 404, { error: 'Call not found.' });
+      return json(res, 201, { events });
+    }
+
     // Each reply's timing and each request for help, by type: numbers and type names only, like the timing summary.
     const turnsRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/turns$/);
     if (method === 'POST' && turnsRoute) {

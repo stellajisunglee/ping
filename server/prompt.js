@@ -11,7 +11,7 @@ import { DEFAULT_SETTINGS } from './settings.js';
 // Which version of the instructions a call got, saved in the call log so calls can be compared across prompt
 // changes. Raise it by one whenever what a contact is told changes (this file, persona.js or lines.js).
 // tests/instructions-snapshot.test.js fails until it's raised, since it pins the golden copies to it.
-export const PROMPT_VERSION = 3; // 2: JLPT levels N5-N1 replaced beginner, intermediate and advanced; 3: the learner's name, and a level for complete beginners
+export const PROMPT_VERSION = 4; // 4: saved words brought back; 2: JLPT levels N5-N1 replaced beginner, intermediate and advanced; 3: the learner's name, and a level for complete beginners
 
 const LEVEL_GUIDE = {
   new: 'The user is completely new to Japanese. Use only the simplest words in very short sentences, and speak slowly. After each question, also say it in English, in a few words.',
@@ -255,16 +255,26 @@ ${memories.map((memory) => `- ${JSON.stringify(memory)}`).join('\n')}`;
 
 // ---------- Putting it together ----------
 
-const SECTIONS = [identitySection, mannerSection, styleSection, nameSection, whoYouAreSection, languagesSection, lifeSection, openingSection, turnsSection, memorySection];
+// Saved words due to come back (server/word-progress.js): the contact uses each once, naturally, so the learner hears
+// it again. The English is shortened and kept to plain text, since it comes from the learner's stack.
+const plainMeaning = (english) => String(english ?? '').replace(/[^\p{L}\p{N} ,.'-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+function wordsSection({ comebackWords }) {
+  if (!comebackWords?.length) return '';
+  const list = comebackWords.map(({ kanji, kana, english }) => `${kanji || kana}${kanji ? ` (${kana})` : ''}, "${plainMeaning(english)}"`).join('; ');
+  return `WORDS TO BRING BACK
+On earlier calls they saved these words: ${list}. Once each, where it fits naturally, use it in a sentence at their level, so they hear it again. Don't quiz them on it, point it out, or force it.`;
+}
+
+const SECTIONS = [identitySection, mannerSection, styleSection, nameSection, whoYouAreSection, languagesSection, lifeSection, openingSection, turnsSection, wordsSection, memorySection];
 
 function todayInUtc() {
   const now = new Date();
   return { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1, day: now.getUTCDate() };
 }
 
-export function buildInstructions({ question, localHour, localDate = todayInUtc(), calledBack, contact = PING, settings = DEFAULT_SETTINGS, memories = [], learnerName = null }) {
+export function buildInstructions({ question, localHour, localDate = todayInUtc(), calledBack, contact = PING, settings = DEFAULT_SETTINGS, memories = [], learnerName = null, comebackWords = [] }) {
   const { proficiency, formality } = settings;
-  const context = { question, localHour, localDate, calledBack, contact, proficiency, formality, memories, learnerName };
+  const context = { question, localHour, localDate, calledBack, contact, proficiency, formality, memories, learnerName, comebackWords };
   return SECTIONS.map((section) => section(context))
     .filter(Boolean)
     .join('\n\n');
