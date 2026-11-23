@@ -63,7 +63,8 @@ async function request(path, { method = 'GET', token, body } = {}) {
 const join = async () => (await request('/api/register', { method: 'POST', body: { inviteCode: INVITE_CODE, timeZone: 'Asia/Tokyo' } })).data.token;
 
 before(async () => {
-  engine = new CallEngine({ store: new Store(), sendPush: async () => ({ gone: false }) });
+  // GPT-Live has its own tests below; here calls run on OpenAI's Realtime API (or fall back to it), whose sessions the tests inspect.
+  engine = new CallEngine({ store: new Store(), sendPush: async () => ({ gone: false }), engineReady: (name) => name !== 'gpt-live' });
   ({ server } = createApp({ engine, openai, config: { buildCommit: COMMIT, inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE, yc: YC_CODE, free: FREE_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null, recordingsDir: mkdtempSync(joinPath(tmpdir(), 'ping-recordings-')) } }));
   await new Promise((resolve) => server.listen(0, resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -666,17 +667,17 @@ test('a comment left with the rating is kept with that call, for admins only, an
 test('every caller is randomized across the mix, balanced per person, and each call keeps its assignment', async () => {
   const tester = await joinWith(BETA_CODE);
   const assigned = [];
-  for (let index = 0; index < 8; index += 1) {
+  for (let index = 0; index < 10; index += 1) {
     const call = await connectedCall(tester.token);
     const { data: again } = await request(`/api/calls/${call.id}/session`, { method: 'POST', token: tester.token }); // a reconnect
     const stored = engine.store.calls[call.id];
     assert.equal(again.turnMode, stored.turnMode, 'a reconnect keeps the same turn mode');
     assigned.push(stored.assigned);
   }
-  // Eight calls split evenly across the four. This server has no Deepgram key, so its two Deepgram calls
-  // fell back to OpenAI instead of failing.
-  assert.deepEqual(engine.userForToken(tester.token).comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'gpt-realtime|semantic': 2, 'deepgram-agent|': 2 });
-  assert.deepEqual(assigned.toSorted(), ['fallback', 'fallback', 'random', 'random', 'random', 'random', 'random', 'random']);
+  // Ten calls split evenly across the five this test server runs (GPT-Live has its own tests). It has no Deepgram or
+  // ElevenLabs key, so their four calls fell back to OpenAI instead of failing.
+  assert.deepEqual(engine.userForToken(tester.token).comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'gpt-realtime|semantic': 2, 'deepgram-agent|': 2, 'elevenlabs|': 2 });
+  assert.deepEqual(assigned.toSorted(), ['fallback', 'fallback', 'fallback', 'fallback', 'random', 'random', 'random', 'random', 'random', 'random']);
 });
 
 test('an admin can pick the engine and turn mode instead, and only real combinations', async () => {
@@ -855,9 +856,9 @@ test('a controlled scenario opens with the same question on OpenAI and Deepgram,
   await request('/api/topic-setup', { method: 'PUT', token, body: { topicMode: 'randomized' } });
 });
 
-test('the page may connect to Deepgram, and nowhere else new', async () => {
+test('the page may connect to Deepgram and ElevenLabs, and nowhere else new', async () => {
   const response = await fetch(baseUrl + '/');
-  assert.match(response.headers.get('content-security-policy'), /connect-src 'self' https:\/\/api\.openai\.com wss:\/\/agent\.deepgram\.com;/);
+  assert.match(response.headers.get('content-security-policy'), /connect-src 'self' https:\/\/api\.openai\.com wss:\/\/agent\.deepgram\.com wss:\/\/api\.elevenlabs\.io;/);
 });
 
 test("the phone says why a call ended, and a call that dropped straight away doesn't use up a Free user's call", async () => {
@@ -891,7 +892,7 @@ const CONFIG_FIELDS = ['buildCommit', 'promptVersion', 'realtimeModel', 'transcr
 test('every randomized call logs its ids, settings, build, prompt version, how it ended and what it actually ran on', async () => {
   const token = await join(); // an admin, randomized like everyone else but with no daily limit
   const entries = [];
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < 5; index += 1) { // one of each of the five this server runs
     const call = await connectedCall(token);
     await request(`/api/calls/${call.id}/connected`, { method: 'POST', token });
     await request(`/api/calls/${call.id}/ended`, { method: 'POST', token, body: { reason: 'hung-up' } });
@@ -902,7 +903,7 @@ test('every randomized call logs its ids, settings, build, prompt version, how i
     assert.deepEqual([entry.contactId, entry.proficiency, entry.formality, entry.thinkingTime, entry.speed, entry.endReason], ['ping', 'N5', 'formal', 'normal', 1, 'hung-up']);
     assert.ok(QUESTIONS.some((question) => question.id === entry.questionId));
     assert.deepEqual([entry.buildCommit, entry.promptVersion], [COMMIT.toLowerCase(), PROMPT_VERSION]);
-    // This server has no Deepgram key, so all four ran on OpenAI.
+    // This server has no Deepgram or ElevenLabs key, so all five ran on OpenAI.
     assert.deepEqual(
       [entry.engine, entry.realtimeModel, entry.voice, entry.voiceSpeed, entry.transcriptionModel, entry.thinkModel, entry.listenModel, entry.eotThreshold],
       ['gpt-realtime', 'gpt-realtime', 'marin', 1, 'gpt-transcribe', null, null, null],
@@ -916,9 +917,10 @@ test('every randomized call logs its ids, settings, build, prompt version, how i
   assert.deepEqual(turns(byCombo.semantic), ['semantic_vad', null, 'low', null, null]);
   assert.deepEqual(turns(byCombo.fallback), ['server_vad', silenceMs('normal', 1), null, null, null]);
   assert.deepEqual(
-    [byCombo.fallback.turnMode, byCombo.fallback.fallbackFromEngine, byCombo.fallback.fallbackFromTurnMode, byCombo.fallback.fallbackFromAssigned],
-    ['silence', 'deepgram-agent', null, 'random'],
+    [byCombo.fallback.turnMode, byCombo.fallback.fallbackFromTurnMode, byCombo.fallback.fallbackFromAssigned],
+    ['silence', null, 'random'],
   );
+  assert.ok(['deepgram-agent', 'elevenlabs'].includes(byCombo.fallback.fallbackFromEngine), 'this server has neither key, so either falls back');
   assert.equal(byCombo.silence.fallbackFromEngine, undefined, 'only a fallback says what it fell back from');
 
   // Ids, settings and model names only: no keys, codes, instructions or words from the call.
@@ -1202,4 +1204,76 @@ test("Ping brings back saved words that are due, and each word's progress follow
   assert.deepEqual([word.progress.stage, word.progress.comebacks, word.progress.usedCount], ['used', 1, 1]);
   const entry = (await request('/api/admin/calls', { token: await join() })).data.calls.find((logged) => logged.callId === call.id);
   assert.deepEqual([entry.wordsBroughtBack, entry.wordsCameBack, entry.wordsUnderstood, entry.wordsUsed], [1, 1, 1, 1]);
+});
+
+// GPT-Live and ElevenLabs
+
+test('a GPT-Live call: the phone\'s offer goes to OpenAI with Ping\'s session, and a refusal falls back to the Realtime API', async () => {
+  const { createLiveSession } = openai;
+  const sent = [];
+  openai.createLiveSession = async (session, sdp) => {
+    sent.push({ session, sdp });
+    if (sdp.includes('fail')) throw new Error('GPT-Live is down');
+    return { id: 'live_1', sdp: 'v=0 answer' };
+  };
+  const liveEngine = new CallEngine({ store: new Store(), sendPush: async () => ({ gone: false }), engineReady: (name) => name === 'gpt-live' });
+  const { server: app } = createApp({ engine: liveEngine, openai, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null } });
+  await new Promise((resolve) => app.listen(0, resolve));
+  const url = `http://127.0.0.1:${app.address().port}`;
+  const post = async (path, token, body) => {
+    const response = await fetch(url + path, { method: 'POST', headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
+    return { status: response.status, data: await response.json().catch(() => null) };
+  };
+  try {
+    const { token } = await (await fetch(`${url}/api/register`, { method: 'POST', body: JSON.stringify({ inviteCode: BETA_CODE, timeZone: 'Asia/Tokyo' }) })).json();
+    const call = (await post('/api/calls', token)).data;
+    const session = (await post(`/api/calls/${call.id}/session`, token)).data;
+    assert.deepEqual([session.engine, session.turnMode, session.clientSecret], ['gpt-live', null, undefined]);
+    assert.equal((await post(`/api/calls/${call.id}/live`, token, { sdp: 'not an offer' })).status, 400);
+    const answer = await post(`/api/calls/${call.id}/live`, token, { sdp: 'v=0 offer' });
+    assert.deepEqual(answer.data, { sdp: 'v=0 answer' });
+    const { session: live } = sent.at(-1);
+    assert.equal(live.model, 'gpt-live-1.1');
+    assert.equal(live.audio.output.voice, 'harema');
+    assert.match(live.instructions, /TOOLS ON THIS CALL/);
+    assert.match(live.input[0].content[0].text, /^Greet the user now, in Japanese\. Say exactly: 「もしもし、ピンです！/);
+    assert.deepEqual(live.delegation.responses.tools.map((tool) => tool.name), ['add_to_stack', 'update_settings', 'back_to_conversation', 'end_call']);
+    assert.equal(liveEngine.callLog().find((entry) => entry.callId === call.id).turnDetection, 'full-duplex');
+
+    const second = (await post('/api/calls', token)).data;
+    await post(`/api/calls/${second.id}/session`, token);
+    const refused = await post(`/api/calls/${second.id}/live`, token, { sdp: 'v=0 fail' });
+    assert.deepEqual([refused.status, refused.data.fallback], [409, true]);
+    assert.equal(liveEngine.store.calls[second.id].assigned, 'fallback');
+    const again = (await post(`/api/calls/${second.id}/session`, token)).data;
+    assert.deepEqual([again.engine, again.turnMode, again.clientSecret], ['gpt-realtime', 'silence', 'ek_test'], 'the phone starts again on the Realtime API');
+  } finally {
+    openai.createLiveSession = createLiveSession;
+    app.close();
+  }
+});
+
+test('an ElevenLabs call gets a signed URL and overrides that make the agent Ping; without keys it falls back', async () => {
+  const elevenEngine = new CallEngine({ store: new Store(), sendPush: async () => ({ gone: false }), engineReady: (name) => name === 'elevenlabs' });
+  const elevenlabs = { hasKey: true, signedUrl: async () => 'wss://api.elevenlabs.io/v1/convai/conversation?agent_id=agent_1&conversation_signature=abc' };
+  const { server: app } = createApp({ engine: elevenEngine, openai, elevenlabs, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null } });
+  await new Promise((resolve) => app.listen(0, resolve));
+  const url = `http://127.0.0.1:${app.address().port}`;
+  const post = async (path, token, body) => (await fetch(url + path, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) })).json();
+  try {
+    const { token } = await (await fetch(`${url}/api/register`, { method: 'POST', body: JSON.stringify({ inviteCode: BETA_CODE, timeZone: 'Asia/Tokyo' }) })).json();
+    await fetch(`${url}/api/settings`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ speed: 0.6 }) });
+    const call = await post('/api/calls', token);
+    const session = await post(`/api/calls/${call.id}/session`, token);
+    assert.deepEqual([session.engine, session.turnMode], ['elevenlabs', null]);
+    assert.match(session.signedUrl, /^wss:\/\/api\.elevenlabs\.io\//);
+    assert.equal(session.overrides.agent.language, 'ja');
+    assert.match(session.overrides.agent.first_message, /^もしもし、ピンです！/);
+    assert.match(session.overrides.agent.prompt.prompt, /WHO YOU ARE/);
+    assert.equal(session.overrides.tts.speed, 0.7, "Ping's slowest speed is squeezed into ElevenLabs' range");
+    assert.equal(elevenEngine.callLog().find((entry) => entry.callId === call.id).turnDetection, 'elevenlabs');
+  } finally {
+    app.close();
+  }
+  // The main test server has no ElevenLabs keys, so its ElevenLabs calls fall back (see the randomization test above).
 });

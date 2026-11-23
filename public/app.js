@@ -184,7 +184,7 @@ const POLICY_NOTICES = {
   },
   update: {
     title: 'Privacy Policy updated',
-    text: 'Ping can now call you by name. Your name, and how to say it, are kept with your account. The Privacy Policy has the details.',
+    text: 'Some calls now run on ElevenLabs, another voice AI service, as well as OpenAI and Deepgram, and Ping can call you by name. The Privacy Policy lists who handles your calls.',
   },
 };
 

@@ -12,7 +12,8 @@
     "build:icons": "node scripts/build-icons.js",
     "test": "node --test",
     "eval": "node --env-file-if-exists=.env evals/run.js",
-    "pull-data": "node --env-file-if-exists=.env scripts/pull-data.js"
+    "pull-data": "node --env-file-if-exists=.env scripts/pull-data.js",
+    "setup-elevenlabs": "node --env-file-if-exists=.env scripts/setup-elevenlabs.js"
   },
   "dependencies": {
     "web-push": "^3.6.7"

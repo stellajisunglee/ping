@@ -92,6 +92,19 @@ export function createOpenAI({ apiKey, baseUrl = 'https://api.openai.com/v1', te
     hasKey,
     sdpUrl: `${baseUrl}/realtime/calls`,
 
+    // GPT-Live: create the session with the phone's WebRTC offer, and return OpenAI's answer (server/live.js).
+    async createLiveSession(session, sdp, userId) {
+      const response = await fetchImpl(`${baseUrl}/live/sessions`, {
+        method: 'POST',
+        headers: { ...headers, 'OpenAI-Safety-Identifier': createHash('sha256').update(userId).digest('hex') },
+        body: JSON.stringify({ session, transport: { type: 'webrtc', sdp } }),
+      });
+      if (!response.ok) throw new Error(`GPT-Live session failed (${response.status}): ${await response.text()}`);
+      const result = await response.json();
+      if (!result.transport?.sdp) throw new Error('GPT-Live sent no answer');
+      return { id: result.session?.id ?? null, sdp: result.transport.sdp };
+    },
+
     async mintClientSecret(session, userId) {
       const response = await fetchImpl(`${baseUrl}/realtime/client_secrets`, {
         method: 'POST',

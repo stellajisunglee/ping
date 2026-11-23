@@ -10,16 +10,22 @@ export const ENGINES = {
   'gpt-realtime': { name: 'OpenAI gpt-realtime', turnModes: TURN_MODES },
   // Cascaded: Deepgram Flux hears and decides turns, an OpenAI model thinks, a Deepgram Flux voice speaks.
   'deepgram-agent': { name: 'Deepgram Voice Agent', turnModes: [] },
+  // Full duplex: listens while it speaks and decides when to talk itself (server/live.js).
+  'gpt-live': { name: 'OpenAI GPT-Live', turnModes: [] },
+  // Cascaded, with ElevenLabs' own turn-taking model (server/elevenlabs.js).
+  elevenlabs: { name: 'ElevenLabs Agents', turnModes: [] },
 };
 
-// What every caller is randomized across: the beta's four-way comparison. A new engine or mode joins only
-// after a few admin test calls and, for a new company, a Privacy Policy update. Deepgram is left out on a
-// server without its key (engineReady in calls.js).
+// What every caller is randomized across: the beta's six-way comparison. A new engine or mode joins only
+// after a few admin test calls and, for a new company, a Privacy Policy update. An engine whose keys aren't set
+// on the server is left out (engineReady in calls.js).
 export const RANDOM_MIX = [
   { engine: 'gpt-realtime', turnMode: 'silence' },
   { engine: 'gpt-realtime', turnMode: 'smartTurn' },
   { engine: 'gpt-realtime', turnMode: 'semantic' },
   { engine: 'deepgram-agent', turnMode: null },
+  { engine: 'gpt-live', turnMode: null },
+  { engine: 'elevenlabs', turnMode: null },
 ];
 
 // What a call falls back to when its engine can't start, so the caller still gets a call.
@@ -53,6 +59,14 @@ export function callConfig({ session, smartTurn = null }) {
     eotThreshold: null,
     eotTimeoutMs: null,
   };
+  // GPT-Live: full duplex, with a backend model for tools.
+  if (session?.delegation) {
+    return { ...config, realtimeModel: session.model ?? null, thinkModel: session.delegation.responses?.model ?? null, voice: session.audio?.output?.voice ?? null, turnDetection: 'full-duplex' };
+  }
+  // ElevenLabs Agents: the agent's own settings, with Ping's speed override.
+  if (session?.type === 'elevenlabs') {
+    return { ...config, thinkModel: session.llm ?? null, listenModel: 'elevenlabs', voice: session.voice ?? 'elevenlabs-agent', voiceSpeed: session.overrides?.tts?.speed ?? null, turnDetection: 'elevenlabs' };
+  }
   if (session?.type === 'Settings') {
     const { listen, think, speak } = session.agent ?? {};
     return {

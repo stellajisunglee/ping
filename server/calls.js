@@ -81,7 +81,7 @@ export class PlanError extends Error {}
 
 // The Privacy Policy's version. 2: calls are recorded. 3: Deepgram joins OpenAI as a voice service.
 // Accounts that saw an older version get a one-time notice on Home about what changed since.
-export const POLICY_VERSION = 5; // 2: calls recorded, 3: Deepgram named, 4: post-call comments, testers' data kept, learning numbers and level estimates, 5: their name
+export const POLICY_VERSION = 6; // 2: calls recorded, 3: Deepgram named, 4: post-call comments, testers' data kept, learning numbers and level estimates, 5: their name, 6: ElevenLabs named
 const RECORDING_POLICY = 2;
 export const policyNoticeFor = (seen = 0) => (seen >= POLICY_VERSION ? null : seen < RECORDING_POLICY ? 'recording' : 'update');
 // Admins and beta testers record every call as part of testing. YC reviewers and everyone else

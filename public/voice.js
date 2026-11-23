@@ -2,6 +2,8 @@
 
 import { classifyTurn, resumeNote } from './aizuchi.js';
 import { startDeepgramCall } from './deepgram-call.js';
+import { startElevenLabsCall } from './elevenlabs-call.js';
+import { startLiveCall } from './live-call.js';
 import { startRecording } from './recorder.js';
 import { loadSmartTurn, startSmartTurn } from './smart-turn.js';
 import { summarizeTurns, TIMED_EVENTS } from './turn-metrics.js';
@@ -53,6 +55,8 @@ export function startCall({
   recorderEngine = { start: startRecording }, // swapped for a stand-in in tests
   smartTurnEngine = { load: loadSmartTurn, start: startSmartTurn }, // swapped for a stand-in in tests
   deepgramEngine = { start: startDeepgramCall }, // swapped for a stand-in in tests
+  liveEngine = { start: startLiveCall }, // likewise
+  elevenLabsEngine = { start: startElevenLabsCall }, // likewise
   level = null, // the learner's level as the call starts, so a request for easier or harder Japanese can be told apart
 }) {
   let agentCall = null; // set when the call runs on Deepgram's Voice Agent instead of OpenAI
@@ -451,6 +455,7 @@ export function startCall({
     onStatus('connecting');
     const session = await api(`/api/calls/${callId}/session`, { method: 'POST' });
     if (session.engine === 'deepgram-agent') return connectToDeepgram(session);
+    if (session.engine === 'gpt-live' || session.engine === 'elevenlabs') return connectToAgent(session);
     const { clientSecret, sdpUrl, maxSeconds, turnMode, smartTurn, hangUpLines: lines = [] } = session;
     hangUpLines = lines.map(withoutPunctuation);
     smart.rules = smartTurn ?? null;
@@ -551,6 +556,53 @@ export function startCall({
         onEnded(reason);
       },
     });
+  }
+
+  // GPT-Live and ElevenLabs also run the whole call themselves, with the same callbacks. Both record both voices.
+  async function connectToAgent(session) {
+    if (ended) return;
+    microphone = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    if (ended) {
+      microphone.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    const options = {
+      callId,
+      api,
+      audio,
+      session,
+      microphone,
+      onStatus,
+      onLine,
+      onWordAdded,
+      onSpeaking,
+      onSettings,
+      onNeedsTap,
+      onContactAudio,
+      level,
+      startRecorder: record ? (streams) => recorderEngine.start({ streams }) : null,
+      reportRecording,
+      onEnded: (reason) => {
+        ended = true;
+        onEnded(reason);
+      },
+    };
+    if (session.engine === 'gpt-live') {
+      // If GPT-Live can't start, the server moves the call to OpenAI's Realtime API and the phone starts again.
+      agentCall = liveEngine.start({
+        ...options,
+        onFallback: () => {
+          agentCall = null;
+          microphone.getTracks().forEach((track) => track.stop());
+          connect().catch((error) => {
+            console.warn('Call failed', error);
+            end('failed');
+          });
+        },
+      });
+    } else {
+      agentCall = elevenLabsEngine.start(options);
+    }
   }
 
   connect().catch((error) => {

@@ -754,12 +754,13 @@ test('an ended call cannot be reopened', () => {
 
 test('random assignment goes to the least-used combination, and only real combinations are valid', async () => {
   const { pickCombo, validCombo, comboKey, RANDOM_MIX } = await import('../server/experiment.js');
-  assert.deepEqual(pickCombo({ 'gpt-realtime|silence': 3, 'gpt-realtime|smartTurn': 1, 'gpt-realtime|semantic': 2, 'deepgram-agent|': 2 }, () => 0), { engine: 'gpt-realtime', turnMode: 'smartTurn' });
-  assert.deepEqual(pickCombo({ 'gpt-realtime|silence': 1, 'gpt-realtime|smartTurn': 1, 'gpt-realtime|semantic': 1 }, () => 0), { engine: 'deepgram-agent', turnMode: null });
-  // A tie is broken at random: here semantic and Deepgram are both least used.
-  const tied = { 'gpt-realtime|silence': 1, 'gpt-realtime|smartTurn': 1 };
-  assert.deepEqual(pickCombo(tied, () => 0), { engine: 'gpt-realtime', turnMode: 'semantic' });
-  assert.deepEqual(pickCombo(tied, () => 0.99), { engine: 'deepgram-agent', turnMode: null });
+  const all = (count) => ({ 'gpt-realtime|silence': count, 'gpt-realtime|smartTurn': count, 'gpt-realtime|semantic': count, 'deepgram-agent|': count, 'gpt-live|': count, 'elevenlabs|': count });
+  assert.deepEqual(pickCombo({ ...all(3), 'gpt-realtime|smartTurn': 1 }, () => 0), { engine: 'gpt-realtime', turnMode: 'smartTurn' });
+  assert.deepEqual(pickCombo({ ...all(1), 'elevenlabs|': 0 }, () => 0), { engine: 'elevenlabs', turnMode: null });
+  // A tie is broken at random: here GPT-Live and ElevenLabs are both least used.
+  const tied = { ...all(1), 'gpt-live|': 0, 'elevenlabs|': 0 };
+  assert.deepEqual(pickCombo(tied, () => 0), { engine: 'gpt-live', turnMode: null });
+  assert.deepEqual(pickCombo(tied, () => 0.99), { engine: 'elevenlabs', turnMode: null });
   const first = RANDOM_MIX.map((combo) => comboKey(pickCombo({}, () => RANDOM_MIX.indexOf(combo) / RANDOM_MIX.length)));
   assert.deepEqual(first, RANDOM_MIX.map(comboKey), 'with no history, any combination can come first');
   assert.deepEqual(pickCombo({}, () => 0.9999), RANDOM_MIX.at(-1), 'a random number near 1 still picks a real combination');
@@ -770,10 +771,10 @@ test('random assignment goes to the least-used combination, and only real combin
 
 test("an engine that can't run here is left out of the random mix", async () => {
   const store = new Store();
-  const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO, engineReady: (name) => name !== 'deepgram-agent' });
+  const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO, engineReady: (name) => name === 'gpt-realtime' });
   const { user } = engine.register('Asia/Tokyo', 'beta', 'beta');
   const engines = [];
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < 6; index += 1) {
     const call = engine.callBack(user);
     engine.sessionDetails(user, call.id);
     engines.push(store.calls[call.id].engine);
@@ -782,14 +783,14 @@ test("an engine that can't run here is left out of the random mix", async () => 
   assert.ok(engines.every((name) => name === 'gpt-realtime'));
 });
 
-test('the random mix is the four beta configurations, and a new caller gets each of them once in their first four calls', async () => {
+test('the random mix is the six beta configurations, and a new caller gets each of them once in their first six calls', async () => {
   const { comboKey, RANDOM_MIX } = await import('../server/experiment.js');
-  assert.deepEqual(RANDOM_MIX.map(comboKey), ['gpt-realtime|silence', 'gpt-realtime|smartTurn', 'gpt-realtime|semantic', 'deepgram-agent|']);
+  assert.deepEqual(RANDOM_MIX.map(comboKey), ['gpt-realtime|silence', 'gpt-realtime|smartTurn', 'gpt-realtime|semantic', 'deepgram-agent|', 'gpt-live|', 'elevenlabs|']);
   const store = new Store();
   const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO }); // every engine can run
   const { user } = engine.register('Asia/Tokyo', 'beta', 'beta');
   const combos = [];
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < 6; index += 1) {
     const call = engine.callBack(user);
     engine.sessionDetails(user, call.id);
     combos.push(comboKey(store.calls[call.id]));
@@ -798,9 +799,9 @@ test('the random mix is the four beta configurations, and a new caller gets each
   assert.deepEqual(combos.toSorted(), RANDOM_MIX.map(comboKey).toSorted());
 });
 
-test('with no Deepgram key, the three OpenAI configurations still each come up, and no call goes to Deepgram', () => {
+test('with no Deepgram or ElevenLabs key, and GPT-Live left out, the three Realtime configurations still each come up', () => {
   const store = new Store();
-  const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO, engineReady: (name) => name !== 'deepgram-agent' });
+  const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO, engineReady: (name) => name === 'gpt-realtime' });
   const { user } = engine.register('Asia/Tokyo', 'beta', 'beta');
   const modes = [];
   for (let index = 0; index < 3; index += 1) {
@@ -813,15 +814,15 @@ test('with no Deepgram key, the three OpenAI configurations still each come up, 
   assert.ok(!('deepgram-agent|' in user.comboCounts));
 });
 
-test("an existing caller keeps their history, so semantic catches up first without resetting the others", () => {
+test("an existing caller keeps their history, so a new engine catches up first without resetting the others", () => {
   const store = new Store();
   const engine = new CallEngine({ store, sendPush: async () => ({ gone: false }), now: () => NOON_IN_TOKYO });
   const { user } = engine.register('Asia/Tokyo', 'beta', 'beta');
-  user.comboCounts = { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'deepgram-agent|': 2 }; // from before semantic joined
+  user.comboCounts = { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'gpt-realtime|semantic': 2, 'deepgram-agent|': 2, 'elevenlabs|': 1 }; // GPT-Live is new
   const call = engine.callBack(user);
   engine.sessionDetails(user, call.id);
-  assert.deepEqual([store.calls[call.id].engine, store.calls[call.id].turnMode], ['gpt-realtime', 'semantic']);
-  assert.deepEqual(user.comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'deepgram-agent|': 2, 'gpt-realtime|semantic': 1 });
+  assert.deepEqual([store.calls[call.id].engine, store.calls[call.id].turnMode], ['gpt-live', null], 'the newest engine catches up first');
+  assert.deepEqual(user.comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'gpt-realtime|semantic': 2, 'deepgram-agent|': 2, 'elevenlabs|': 1, 'gpt-live|': 1 });
 });
 
 // ---------- Trying again after a call breaks straight away ----------
@@ -997,7 +998,7 @@ test('the settings are logged as the call starts, and neither a later change nor
 
 test('a fallback keeps what the call was first assigned beside what it ran on', () => {
   const context = setup();
-  context.user.comboCounts = { 'gpt-realtime|silence': 1, 'gpt-realtime|smartTurn': 1, 'gpt-realtime|semantic': 1 }; // Deepgram is next
+  context.user.comboCounts = { 'gpt-realtime|silence': 1, 'gpt-realtime|smartTurn': 1, 'gpt-realtime|semantic': 1, 'gpt-live|': 1, 'elevenlabs|': 1 }; // Deepgram is next
   const call = context.engine.callBack(context.user);
   context.engine.sessionDetails(context.user, call.id);
   context.engine.fallBack(context.user, call.id);

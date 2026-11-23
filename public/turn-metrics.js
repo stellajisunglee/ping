@@ -69,6 +69,9 @@ const CORE_FIELDS = METRIC_FIELDS.slice(0, METRIC_FIELDS.indexOf('callSeconds') 
 const ENGINE_MEASURES = {
   'gpt-realtime': { aizuchi: true, providerLatency: false },
   'deepgram-agent': { aizuchi: false, providerLatency: true },
+  // These decide turns themselves and send no aizuchi or latency signals the phone can use.
+  'gpt-live': { aizuchi: false, providerLatency: false },
+  elevenlabs: { aizuchi: false, providerLatency: false },
 };
 
 export const FALLBACK_CODES = { load: 1, slow: 2, 'no-audio': 3 };

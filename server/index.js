@@ -19,6 +19,8 @@ import { isValidTimeZone } from './schedule.js';
 import { cleanMetrics, metricsProblems } from '../public/turn-metrics.js';
 import { cleanLearning } from '../public/learning-metrics.js';
 import { cleanTurnData } from '../public/turn-records.js';
+import { LIVE_BACKEND_MODEL, LIVE_MODEL, LIVE_VOICE, liveSession } from './live.js';
+import { createElevenLabs, elevenOverrides } from './elevenlabs.js';
 import { buildSession, NOT_NOW_GOODBYES, PROMPT_VERSION, smartTurnRules, TIME_UP_LINES, turnDetection, voiceMessageFor } from './tutor.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -29,7 +31,9 @@ export const buildCommit = (value) => (typeof value === 'string' && /^[0-9a-f]{7
 const TICK_MS = 1_000;
 const MAX_BODY_BYTES = 64_000; // room for a full call's transcript
 const MIN_EXPORT_KEY_LENGTH = 32; // EXPORT_KEY must be at least this long, or the data export stays off
-const MIN_GRADED_TURNS = 3; // learner lines a recorded call needs before its speaking level is estimated
+const MIN_GRADED_TURNS = 3;
+// What engines that take a note mid-call (GPT-Live, ElevenLabs) are told near the time limit.
+const TIME_UP_NOTE = 'Time is nearly up. Say a short warm goodbye in Japanese now, then end the call.'; // learner lines a recorded call needs before its speaking level is estimated
 const MAX_RECORDING_BYTES = 25_000_000; // a 10-minute call is about 10 MB from an iPhone
 const MAX_RECORDED_LINES = 400;
 const MAX_FEEDBACK_LENGTH = 2_000;
@@ -65,7 +69,7 @@ const SMART_TURN_FILES = new Set([
 
 const SECURITY_HEADERS = {
   // 'wasm-unsafe-eval' lets Smart Turn's WebAssembly compile. It doesn't allow eval() of JavaScript.
-  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.openai.com wss://agent.deepgram.com; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.openai.com wss://agent.deepgram.com wss://api.elevenlabs.io; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'",
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
   // These two make the page "cross-origin isolated", which browsers require before WebAssembly can use
@@ -138,7 +142,12 @@ export function diskUsage({ dataDir, recordingsBytes }) {
   return { recordingsBytes, storeBytes, diskBytes, freeBytes };
 }
 
-export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: '' }), config }) {
+export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: '' }), elevenlabs = createElevenLabs({ apiKey: '', agentId: '' }), config }) {
+  const liveModel = config.liveModel ?? LIVE_MODEL;
+  const liveVoice = config.liveVoice ?? LIVE_VOICE;
+  const liveBackendModel = config.liveBackendModel ?? LIVE_BACKEND_MODEL;
+  const elevenLlm = config.elevenLlm ?? 'gpt-4.1-mini'; // what the Ping agent was set up with, for the call log
+  const pendingLive = new Map(); // callId -> the GPT-Live session waiting for the phone's WebRTC offer
   const { inviteCodes, vapidPublicKey, model, voice, dataDir, exportKey = '' } = config;
   const deepgramThinkModel = config.deepgramThinkModel ?? 'gpt-4.1-mini';
   const deepgramVoice = config.deepgramVoice ?? 'flux-ayumi-ja';
@@ -591,6 +600,28 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       return details ? json(res, 200, details) : json(res, 404, { error: 'Call not found.' });
     }
 
+    // GPT-Live: the phone's WebRTC offer goes to OpenAI with the call's session, and OpenAI's answer comes back.
+    // If GPT-Live can't start a randomly assigned call, the call falls back and the phone starts again on OpenAI.
+    const liveRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/live$/);
+    if (method === 'POST' && liveRoute) {
+      const call = engine.store.calls[liveRoute[1]];
+      const live = pendingLive.get(liveRoute[1]);
+      if (!call || call.userId !== user.id || !live) return json(res, 404, { error: 'Call not found.' });
+      const { sdp } = await readJson(req);
+      if (typeof sdp !== 'string' || !sdp.startsWith('v=')) return json(res, 400, { error: 'Invalid offer.' });
+      try {
+        const answer = await openai.createLiveSession(live, sdp, user.id);
+        pendingLive.delete(liveRoute[1]);
+        return json(res, 200, { sdp: answer.sdp });
+      } catch (error) {
+        if (call.assigned === 'manual') return json(res, 503, { error: error.message });
+        console.warn(`GPT-Live couldn't start a call, so it fell back to OpenAI: ${error.message}`);
+        pendingLive.delete(liveRoute[1]);
+        engine.fallBack(user, liveRoute[1]);
+        return json(res, 409, { error: 'GPT-Live is unavailable.', fallback: true });
+      }
+    }
+
     // Which saved words came back, were used, or were asked about again on the call: word ids only.
     const wordsRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/words$/);
     if (method === 'POST' && wordsRoute) {
@@ -680,6 +711,32 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       if (!details) return json(res, 409, { error: 'This call has ended.' });
       const hangUpLines = details.calledBack ? [] : Object.values(NOT_NOW_GOODBYES);
       let agentToken = null;
+      // ElevenLabs: a signed URL for this call, or the fallback when it can't start.
+      let signedUrl = null;
+      if (details.engine === 'elevenlabs') {
+        const manual = engine.store.calls[session[1]]?.assigned === 'manual';
+        try {
+          if (!elevenlabs.hasKey) throw new Error('ElevenLabs is not set up yet.');
+          signedUrl = await elevenlabs.signedUrl();
+        } catch (error) {
+          if (manual) return json(res, 503, { error: error.message });
+          console.warn(`ElevenLabs couldn't start a call, so it fell back to OpenAI: ${error.message}`);
+          Object.assign(details, engine.fallBack(user, session[1]));
+        }
+      }
+      if (details.engine === 'elevenlabs') {
+        const overrides = elevenOverrides(details);
+        recordConfig(user, session[1], { session: { type: 'elevenlabs', llm: elevenLlm, overrides } });
+        return json(res, 200, { engine: details.engine, signedUrl, overrides, timeUpNote: TIME_UP_NOTE, maxSeconds: details.maxSeconds, hangUpLines, question: details.question, turnMode: null });
+      }
+      // GPT-Live: the session is created once the phone sends its WebRTC offer (POST /api/calls/:id/live).
+      if (details.engine === 'gpt-live') {
+        if (!openai.hasKey) return json(res, 503, { error: 'The voice engine is not set up yet.' });
+        const live = liveSession({ ...details, model: liveModel, voice: liveVoice, backendModel: liveBackendModel });
+        pendingLive.set(session[1], live);
+        recordConfig(user, session[1], { session: live });
+        return json(res, 200, { engine: details.engine, timeUpNote: TIME_UP_NOTE, maxSeconds: details.maxSeconds, hangUpLines, question: details.question, turnMode: null });
+      }
       if (details.engine === 'deepgram-agent') {
         const manual = engine.store.calls[session[1]]?.assigned === 'manual';
         try {
@@ -810,18 +867,30 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     store,
     sendPush,
     dailyCallLimit: Number(process.env.DAILY_CALL_LIMIT) || null,
-    engineReady: (name) => name !== 'deepgram-agent' || Boolean(process.env.DEEPGRAM_API_KEY),
+    // An engine joins the random mix only on a server with its keys.
+    engineReady: (name) =>
+      ({
+        'deepgram-agent': Boolean(process.env.DEEPGRAM_API_KEY),
+        'gpt-live': Boolean(process.env.OPENAI_API_KEY),
+        elevenlabs: Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_AGENT_ID),
+      })[name] ?? true,
   });
   const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '', baseUrl: process.env.OPENAI_BASE_URL, textModel: process.env.TEXT_MODEL, levelModel: process.env.LEVEL_MODEL });
   const deepgram = createDeepgram({ apiKey: process.env.DEEPGRAM_API_KEY ?? '' });
+  const elevenlabs = createElevenLabs({ apiKey: process.env.ELEVENLABS_API_KEY ?? '', agentId: process.env.ELEVENLABS_AGENT_ID ?? '' });
   const { server, ensureVoiceMessage } = createApp({
     engine,
     openai,
+    elevenlabs,
     deepgram,
     config: {
       buildCommit: process.env.RENDER_GIT_COMMIT,
       deepgramThinkModel: process.env.DEEPGRAM_THINK_MODEL,
       deepgramVoice: process.env.DEEPGRAM_VOICE,
+      liveModel: process.env.GPT_LIVE_MODEL,
+      liveVoice: process.env.GPT_LIVE_VOICE,
+      liveBackendModel: process.env.GPT_LIVE_BACKEND_MODEL,
+      elevenLlm: process.env.ELEVENLABS_LLM,
       inviteCodes: {
         admin: process.env.ADMIN_INVITE_CODE ?? '',
         beta: process.env.BETA_INVITE_CODE ?? '',
