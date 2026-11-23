@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from core import END_PAD_S, SAMPLE_RATE, Pause, append_label, drop_labels, find_pauses, flux_decisions, in_turns, labeling_order, next_free_clip_number, read_labels, release_within, with_beep, silence_decisions, summarize
+from core import END_PAD_S, SAMPLE_RATE, Pause, append_label, drop_labels, find_pauses, in_turns, labeling_order, next_free_clip_number, read_labels, release_within, with_beep, silence_decisions, streamed_decisions, summarize
 
 
 def tone(seconds: float) -> np.ndarray:
@@ -87,32 +87,32 @@ class SilenceBaseline(unittest.TestCase):
         self.assertEqual(by_setting[("1.3s", "done")]["catch_ms"], 1300)
 
 
-class FluxMatching(unittest.TestCase):
+class StreamedMatching(unittest.TestCase):
     def test_an_end_of_turn_inside_a_thinking_pause_is_a_cut_off(self):
-        rows = flux_decisions([THINKING, DONE], [2.5, 9.8], 10.0, "default")
+        rows = streamed_decisions([THINKING, DONE], [2.5, 9.8], 10.0, "flux", "default")
         self.assertTrue(rows[0]["ended"])
         self.assertTrue(rows[1]["ended"])
         self.assertEqual(rows[1]["catch_ms"], 800)
 
     def test_an_end_of_turn_arriving_just_after_speech_resumes_still_counts(self):
-        rows = flux_decisions([THINKING], [3.2], 10.0, "default")
+        rows = streamed_decisions([THINKING], [3.2], 10.0, "flux", "default")
         self.assertTrue(rows[0]["ended"])
 
     def test_a_final_pause_can_be_caught_in_the_padding_but_not_after_it(self):
-        caught = flux_decisions([DONE], [9.0 + 1.0 + END_PAD_S - 0.5], 10.0, "patient")
-        missed = flux_decisions([DONE], [9.0 + 1.0 + END_PAD_S + 0.5], 10.0, "patient")
+        caught = streamed_decisions([DONE], [9.0 + 1.0 + END_PAD_S - 0.5], 10.0, "flux", "patient")
+        missed = streamed_decisions([DONE], [9.0 + 1.0 + END_PAD_S + 0.5], 10.0, "flux", "patient")
         self.assertTrue(caught[0]["ended"])
         self.assertFalse(missed[0]["ended"])
 
     def test_no_end_of_turn_means_no_cut_off_and_no_catch(self):
-        rows = flux_decisions([THINKING, DONE], [], 10.0, "default")
+        rows = streamed_decisions([THINKING, DONE], [], 10.0, "flux", "default")
         self.assertEqual([row["ended"] for row in rows], [False, False])
 
 
 class Summary(unittest.TestCase):
     def test_rates_and_median_per_detector_and_setting(self):
         thinking = [Pause("a.wav", start, start + 1.0, "thinking") for start in (1.0, 3.0, 5.0, 7.0)]
-        rows = flux_decisions(thinking + [DONE], [1.5, 9.4], 10.0, "default")
+        rows = streamed_decisions(thinking + [DONE], [1.5, 9.4], 10.0, "flux", "default")
         [summary] = summarize(rows)
         self.assertEqual(summary["thinking_pauses"], 4)
         self.assertEqual(summary["cutoff_rate"], 0.25)

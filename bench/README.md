@@ -6,6 +6,7 @@ It compares:
 - **Silence,** Ping's current rule, at 0.8, 1.3 and 2.5 seconds.
 - **Smart Turn v3.2,** Pipecat's open model, run on your laptop for free.
 - **Deepgram Flux Multilingual,** at Deepgram's default and a more patient setting. This uses your Deepgram credit.
+- **Cartesia Ink-2,** Cartesia's speech-to-text with built-in turn detection, at Cartesia's default and its "Patient" profile. This uses your Cartesia credits.
 
 ## Set up
 
@@ -24,10 +25,11 @@ uv venv --python 3.12 --managed-python .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 ```
 
-For Deepgram, put your API key in `bench/.env`. The file already exists and git ignores it:
+For Deepgram and Cartesia, put your API keys in `bench/.env`. The file already exists and git ignores it:
 
 ```
 DEEPGRAM_API_KEY=your key here
+CARTESIA_API_KEY=your key here
 ```
 
 ## 1. Record
@@ -83,7 +85,9 @@ It prints a comparison table and writes:
 - `decisions.csv`: every detector's verdict on every pause, for digging into why
 - `RESULTS.md`: a draft write-up, created only if it doesn't exist yet, so your own edits are never overwritten
 
-Before streaming to Deepgram, it shows how many minutes of audio it will send and the estimated cost, and asks first. 18 clips cost well under $1. To run only the free detectors, use `.venv/bin/python run.py --skip-flux`.
+Before streaming to Deepgram or Cartesia, it shows how many minutes of audio it will send and the estimated cost, and asks first. For 18 clips, Flux costs well under $1 and Ink-2 about 3,500 credits (3 a second of audio). To run only the free detectors, use `.venv/bin/python run.py --skip-flux --skip-ink`.
+
+To add Ink-2 to results you already have, without rerunning or paying for Flux again, use `.venv/bin/python run.py --only-ink`. It keeps every other detector's verdicts from `decisions.csv` and replaces only Ink-2's.
 
 Smart Turn downloads its 9 MB model from Hugging Face on the first run.
 
@@ -99,11 +103,14 @@ Details:
 - **Flux:** each clip is streamed at real-time speed in 80 ms chunks, and every `EndOfTurn` event is timed from the start of the stream.
   - An event inside a "thinking" pause counts as a cut-off, including one that arrives up to 0.3 seconds after you started talking again.
   - Timeout-triggered ends count as catches.
+- **Ink-2:** the same, in 100 ms chunks, timing every `turn.end` event. `turn.eager_end` doesn't count, since it's only an early hint that a `turn.resume` can cancel; a voice agent replies on `turn.end`. Ink-2 has no language setting and detects Japanese itself.
+  - Default: Cartesia's defaults (end threshold 0.3, eager end 0.6, end timeout 5600 ms).
+  - Patient: the profile Cartesia's docs give for "callers who pause to think" (start 0.8, eager end 0.3, end 0.1, end timeout 8000 ms). Its score is the chance the speaker is still mid-turn, so a lower end threshold waits longer.
 - **Padding:** each clip gets 9 seconds of silence added at the end, longer than any detector's timeout, so the final pause can always be caught.
 
 ## Privacy
 
-Your recordings stay in `bench/audio/` on your computer, and git ignores them. Silence and Smart Turn never send audio anywhere. Flux streams each clip to Deepgram, which processes it under Deepgram's own data policy.
+Your recordings stay in `bench/audio/` on your computer, and git ignores them. Silence and Smart Turn never send audio anywhere. Flux streams each clip to Deepgram, and Ink-2 to Cartesia, each processed under that company's own data policy.
 
 ## Tests
 
@@ -111,4 +118,4 @@ Your recordings stay in `bench/audio/` on your computer, and git ignores them. S
 .venv/bin/python -m unittest discover -s .
 ```
 
-These check pause finding and scoring with generated audio, with no microphone or network needed.
+These check pause finding and scoring with generated audio, and Ink-2's streaming against a fake Cartesia server on your computer, with no microphone, network or credits needed.

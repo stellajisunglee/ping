@@ -221,8 +221,9 @@ def silence_decisions(pauses: list[Pause], clip_seconds: dict[str, float], thres
     return results
 
 
-def flux_decisions(pauses: list[Pause], end_of_turns_s: list[float], clip_seconds: float, setting: str) -> list[dict]:
-    """Matches the times Flux ended a turn, in seconds from the start of the stream, to one clip's pauses."""
+def streamed_decisions(pauses: list[Pause], end_of_turns_s: list[float], clip_seconds: float, detector: str, setting: str) -> list[dict]:
+    """Matches the times a streaming detector (Flux, Ink-2) ended a turn, in seconds from the start of the stream, to
+    one clip's pauses."""
     results = []
     for pause in pauses:
         if pause.label == "done":
@@ -232,7 +233,7 @@ def flux_decisions(pauses: list[Pause], end_of_turns_s: list[float], clip_second
         inside = [time for time in end_of_turns_s if pause.start_s <= time <= window_end]
         first = min(inside) if inside else None
         catch_ms = (first - pause.start_s) * 1000 if first is not None else None
-        results.append(decision("flux", setting, pause, first is not None, catch_ms))
+        results.append(decision(detector, setting, pause, first is not None, catch_ms))
     return results
 
 
@@ -258,6 +259,20 @@ def summarize(decisions: list[dict]) -> list[dict]:
             }
         )
     return summary
+
+
+def read_decisions(path: Path = DECISIONS_CSV) -> list[dict]:
+    """Reads decisions.csv back with its types, so one detector can be rerun without rerunning (or paying for) the rest."""
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+    for row in rows:
+        row["pause_start_s"] = float(row["pause_start_s"])
+        row["pause_end_s"] = float(row["pause_end_s"])
+        row["ended"] = row["ended"] == "True"
+        row["catch_ms"] = int(float(row["catch_ms"])) if row["catch_ms"] else None
+    return rows
 
 
 def load_env(path: Path = ENV_FILE) -> dict[str, str]:

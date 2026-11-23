@@ -1,7 +1,8 @@
 """Runs every end-of-turn detector on the labeled pauses and compares them.
 
-    python bench/run.py               # all detectors (asks before spending Deepgram credit)
-    python bench/run.py --skip-flux   # only the free, local ones
+    python bench/run.py               # all detectors (asks before spending Deepgram or Cartesia credit)
+    python bench/run.py --skip-flux --skip-ink   # only the free, local ones
+    python bench/run.py --only-ink     # add Cartesia Ink-2, keeping the other detectors' earlier verdicts
 
 Writes decisions.csv (every verdict), results.csv (the summary) and, the first time, a draft RESULTS.md."""
 
@@ -24,11 +25,12 @@ from core import (
     RESULTS_MD,
     SAMPLE_RATE,
     decision,
-    flux_decisions,
     load_env,
     read_clip,
+    read_decisions,
     read_labels,
     silence_decisions,
+    streamed_decisions,
     summarize,
 )
 
@@ -48,6 +50,20 @@ FLUX_CHUNK_S = 0.08  # Deepgram strongly recommends 80 ms chunks
 FLUX_SETTINGS = {"default": {}, "patient": {"eot_threshold": 0.85, "eot_timeout_ms": 8000}}
 FLUX_PRICE_PER_MINUTE = 0.0078  # Flux Multilingual, pay as you go
 FLUX_PARALLEL_STREAMS = 4
+
+# Cartesia's Ink-2 speech-to-text, which sends turn events as it transcribes (docs.cartesia.ai/use-the-api/stt/turns).
+# Ink-2 detects Japanese by itself: it has no language setting, and refuses language_hint.
+INK_URL = "wss://api.cartesia.ai/stt/turns/websocket"
+INK_VERSION = "2026-08-14"
+INK_CHUNK_S = 0.1  # Cartesia suggests chunks of about 100 ms
+# Cartesia's defaults, and the "Patient" profile its docs give for "callers who pause to think". The score is the
+# chance the user is still mid-turn, so a lower end threshold waits for stronger evidence they're done.
+INK_SETTINGS = {
+    "default": {},
+    "patient": {"turn_start_threshold": 0.8, "turn_eager_end_threshold": 0.3, "turn_end_threshold": 0.1, "turn_end_timeout_ms": 8000},
+}
+INK_CREDITS_PER_SECOND = 3
+INK_PARALLEL_STREAMS = 2
 
 
 class SmartTurn:
@@ -89,18 +105,17 @@ def smart_turn_decisions(pauses, clips) -> list[dict]:
     return results
 
 
-async def flux_end_of_turns(api_key: str, audio: np.ndarray, setting: dict) -> list[float]:
-    """Streams one clip at real-time speed and returns when each end of turn arrived, in seconds from the start."""
+async def stream_end_of_turns(url: str, headers: dict, audio: np.ndarray, chunk_s: float, close_message: dict, is_end_of_turn) -> list[float]:
+    """Streams one clip at real-time speed and returns when each end of turn arrived, in seconds from the start.
+    is_end_of_turn(event) says whether a JSON event is one, and raises on the service's errors."""
     import websockets
 
-    query = [("model", "flux-general-multi"), ("encoding", "linear16"), ("sample_rate", SAMPLE_RATE), ("language_hint", "ja"), ("language_hint", "en")]
-    query += list(setting.items())
     padded = np.concatenate([audio, np.zeros(int(END_PAD_S * SAMPLE_RATE), dtype=np.float32)])
     pcm = (np.clip(padded, -1, 1) * 32767).astype("<i2").tobytes()
-    chunk_bytes = int(FLUX_CHUNK_S * SAMPLE_RATE) * 2
+    chunk_bytes = int(chunk_s * SAMPLE_RATE) * 2
     end_of_turns = []
 
-    async with websockets.connect(f"{FLUX_URL}?{urlencode(query)}", additional_headers={"Authorization": f"Token {api_key}"}) as socket:
+    async with websockets.connect(url, additional_headers=headers) as socket:
         loop = asyncio.get_running_loop()
         started = loop.time()
 
@@ -108,45 +123,67 @@ async def flux_end_of_turns(api_key: str, audio: np.ndarray, setting: dict) -> l
             for index, offset in enumerate(range(0, len(pcm), chunk_bytes)):
                 await socket.send(pcm[offset : offset + chunk_bytes])
                 # Sleep to a schedule rather than a fixed time, so the stream never drifts slower than real time.
-                await asyncio.sleep(max(0, started + (index + 1) * FLUX_CHUNK_S - loop.time()))
+                await asyncio.sleep(max(0, started + (index + 1) * chunk_s - loop.time()))
             await asyncio.sleep(1.0)
-            await socket.send(json.dumps({"type": "CloseStream"}))
+            await socket.send(json.dumps(close_message))
 
         async def receive_events():
             try:
                 async for message in socket:
                     if isinstance(message, bytes):
                         continue
-                    event = json.loads(message)
-                    if event.get("type") == "Error":
-                        raise RuntimeError(f"Deepgram error: {event}")
-                    if event.get("type") == "TurnInfo" and event.get("event") == "EndOfTurn" and event.get("trigger") != "manual":
+                    if is_end_of_turn(json.loads(message)):
                         end_of_turns.append(loop.time() - started)
             except websockets.ConnectionClosed:
-                pass  # Deepgram closes without a status code after CloseStream
+                pass  # both services may close without a status code once the stream is closed
 
         await asyncio.gather(send_audio(), receive_events())
     return end_of_turns
 
 
-async def all_flux_decisions(api_key, pauses, clips) -> list[dict]:
-    limit = asyncio.Semaphore(FLUX_PARALLEL_STREAMS)
+def flux_end_of_turn(event: dict) -> bool:
+    if event.get("type") == "Error":
+        raise RuntimeError(f"Deepgram error: {event}")
+    return event.get("type") == "TurnInfo" and event.get("event") == "EndOfTurn" and event.get("trigger") != "manual"
+
+
+def ink_end_of_turn(event: dict) -> bool:
+    # turn.eager_end is only a hint (a turn.resume can follow it); a voice agent replies on turn.end.
+    if event.get("type") == "error":
+        raise RuntimeError(f"Cartesia error: {event}")
+    return event.get("type") == "turn.end"
+
+
+async def flux_end_of_turns(api_key: str, audio: np.ndarray, setting: dict) -> list[float]:
+    query = [("model", "flux-general-multi"), ("encoding", "linear16"), ("sample_rate", SAMPLE_RATE), ("language_hint", "ja"), ("language_hint", "en")]
+    query += list(setting.items())
+    return await stream_end_of_turns(f"{FLUX_URL}?{urlencode(query)}", {"Authorization": f"Token {api_key}"}, audio, FLUX_CHUNK_S, {"type": "CloseStream"}, flux_end_of_turn)
+
+
+async def ink_end_of_turns(api_key: str, audio: np.ndarray, setting: dict, url: str = INK_URL) -> list[float]:
+    query = [("model", "ink-2"), ("encoding", "pcm_s16le"), ("sample_rate", SAMPLE_RATE), ("cartesia_version", INK_VERSION)]
+    query += list(setting.items())
+    return await stream_end_of_turns(f"{url}?{urlencode(query)}", {"X-API-Key": api_key}, audio, INK_CHUNK_S, {"type": "close"}, ink_end_of_turn)
+
+
+async def all_streamed_decisions(detector, stream, settings, parallel, api_key, pauses, clips) -> list[dict]:
+    limit = asyncio.Semaphore(parallel)
     by_clip = {}
     for pause in pauses:
         by_clip.setdefault(pause.clip, []).append(pause)
 
     async def one(name, setting_name, setting):
         async with limit:
-            times = await flux_end_of_turns(api_key, clips[name], setting)
-            print(f"  flux {setting_name}: {name} done")
-            return flux_decisions(by_clip[name], times, len(clips[name]) / SAMPLE_RATE, setting_name)
+            times = await stream(api_key, clips[name], setting)
+            print(f"  {detector} {setting_name}: {name} done")
+            return streamed_decisions(by_clip[name], times, len(clips[name]) / SAMPLE_RATE, detector, setting_name)
 
-    jobs = [one(name, setting_name, setting) for name in by_clip for setting_name, setting in FLUX_SETTINGS.items()]
+    jobs = [one(name, setting_name, setting) for name in by_clip for setting_name, setting in settings.items()]
     return [row for rows in await asyncio.gather(*jobs) for row in rows]
 
 
-def flux_minutes(clips) -> float:
-    return sum(len(audio) / SAMPLE_RATE + END_PAD_S for audio in clips.values()) * len(FLUX_SETTINGS) / 60
+def streamed_seconds(clips, settings) -> float:
+    return sum(len(audio) / SAMPLE_RATE + END_PAD_S for audio in clips.values()) * len(settings)
 
 
 def write_csv(path, rows) -> None:
@@ -187,6 +224,7 @@ Ping is a language-practice app that phones learners for short conversations in 
   - **Silence:** ends the turn when the pause reaches 0.8, 1.3 or 2.5 seconds, which are Ping's current settings.
   - **Smart Turn v3.2:** Pipecat's open model, run locally on the audio up to 200 ms into each pause. A probability of 0.5 or more means done.
   - **Deepgram Flux Multilingual:** each clip streamed at real-time speed with Japanese and English hints, at Deepgram's default settings and a more patient setting (eot_threshold 0.85, eot_timeout_ms 8000).
+  - **Cartesia Ink-2:** each clip streamed at real-time speed (Ink-2 detects Japanese itself), at Cartesia's default settings and its "Patient" profile (end threshold 0.1, eager end 0.3, end timeout 8000 ms). Only turn.end counts.
 - A turn ended inside a "thinking" pause is a cut-off. For "done" pauses, the time to catch runs from the start of the pause.
 
 ## Results
@@ -199,15 +237,29 @@ Ping is a language-practice app that phones learners for short conversations in 
 - The difficulty was staged: hard answers were chosen on purpose, which may not match how learners pause in real calls.
 - Labels are one person's judgment of their own pauses.
 - Smart Turn's time to catch counts its 200 ms trigger plus measured inference time, but not the voice detector it needs in a real pipeline. Missing a done pause there would normally fall back to a timeout.
-- Flux times include network delay, because events are timed when they arrive.
+- Flux and Ink-2 times include network delay, because events are timed when they arrive.
 """
+
+
+def ask_to_stream(args, env, key, service, detector, stream, settings, parallel, cost, pauses, clips) -> list[dict]:
+    api_key = env.get(key)
+    if not api_key:
+        print(f"No {key} in bench/.env, so {detector} was skipped.")
+        return []
+    minutes = streamed_seconds(clips, settings) / 60
+    if not (args.yes or input(f"Stream {minutes:.1f} minutes of audio to {service}, {cost(minutes)}? [y/N] ").strip().lower() == "y"):
+        return []
+    print(f"Streaming to {service} at real-time speed...")
+    return asyncio.run(all_streamed_decisions(detector, stream, settings, parallel, api_key, pauses, clips))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--skip-flux", action="store_true", help="skip Deepgram Flux, which costs money")
+    parser.add_argument("--skip-ink", action="store_true", help="skip Cartesia Ink-2, which costs credits")
     parser.add_argument("--skip-smart-turn", action="store_true", help="skip Smart Turn")
-    parser.add_argument("--yes", action="store_true", help="don't ask before streaming to Deepgram")
+    parser.add_argument("--only-ink", action="store_true", help="run only Ink-2, keeping the other detectors' rows in decisions.csv")
+    parser.add_argument("--yes", action="store_true", help="don't ask before streaming to a paid service")
     args = parser.parse_args()
 
     pauses = read_labels()
@@ -216,21 +268,25 @@ def main() -> None:
         return
     clips = {name: read_clip(AUDIO_DIR / name) for name in sorted({pause.clip for pause in pauses})}
     print(f"{len(pauses)} labeled pauses in {len(clips)} clips.")
+    env = load_env()
+    ink = ("CARTESIA_API_KEY", "Cartesia", "ink2", ink_end_of_turns, INK_SETTINGS, INK_PARALLEL_STREAMS, lambda minutes: f"about {minutes * 60 * INK_CREDITS_PER_SECOND:,.0f} credits")
+    flux = ("DEEPGRAM_API_KEY", "Deepgram", "flux", flux_end_of_turns, FLUX_SETTINGS, FLUX_PARALLEL_STREAMS, lambda minutes: f"about ${minutes * FLUX_PRICE_PER_MINUTE:.2f}")
 
-    decisions = silence_decisions(pauses, {name: len(audio) / SAMPLE_RATE for name, audio in clips.items()}, SILENCE_THRESHOLDS_S)
-    if not args.skip_smart_turn:
-        print("Running Smart Turn locally...")
-        decisions += smart_turn_decisions(pauses, clips)
-    if not args.skip_flux:
-        api_key = load_env().get("DEEPGRAM_API_KEY")
-        if not api_key:
-            print("No DEEPGRAM_API_KEY in bench/.env, so Flux was skipped.")
-        else:
-            minutes = flux_minutes(clips)
-            question = f"Stream {minutes:.1f} minutes of audio to Deepgram, about ${minutes * FLUX_PRICE_PER_MINUTE:.2f}? [y/N] "
-            if args.yes or input(question).strip().lower() == "y":
-                print("Streaming to Deepgram Flux at real-time speed...")
-                decisions += asyncio.run(all_flux_decisions(api_key, pauses, clips))
+    if args.only_ink:
+        decisions = [row for row in read_decisions() if row["detector"] != "ink2"]
+        new = ask_to_stream(args, env, *ink, pauses, clips)
+        if not new:
+            return
+        decisions += new
+    else:
+        decisions = silence_decisions(pauses, {name: len(audio) / SAMPLE_RATE for name, audio in clips.items()}, SILENCE_THRESHOLDS_S)
+        if not args.skip_smart_turn:
+            print("Running Smart Turn locally...")
+            decisions += smart_turn_decisions(pauses, clips)
+        if not args.skip_flux:
+            decisions += ask_to_stream(args, env, *flux, pauses, clips)
+        if not args.skip_ink:
+            decisions += ask_to_stream(args, env, *ink, pauses, clips)
 
     summary = summarize(decisions)
     write_csv(DECISIONS_CSV, decisions)
