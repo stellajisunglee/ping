@@ -1277,3 +1277,10 @@ test('an ElevenLabs call gets a signed URL and overrides that make the agent Pin
   }
   // The main test server has no ElevenLabs keys, so its ElevenLabs calls fall back (see the randomization test above).
 });
+
+test('an invite code typed on a Japanese keyboard, or with spaces, still works', async () => {
+  const fullWidth = BETA_CODE.replace(/[!-~]/g, (char) => String.fromCharCode(char.charCodeAt(0) + 0xfee0)); // BETA → ＢＥＴＡ
+  const joined = await request('/api/register', { method: 'POST', body: { inviteCode: ` ${fullWidth.toUpperCase()} `, timeZone: 'Asia/Tokyo' } });
+  assert.equal(joined.status, 201);
+  assert.equal(joined.data.role, 'beta');
+});

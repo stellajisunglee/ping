@@ -208,7 +208,9 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
   const recordConfig = (user, callId, setup) => engine.recordConfig(user, callId, { buildCommit: commit, promptVersion: PROMPT_VERSION, ...callConfig(setup) });
 
   // Codes aren't case-sensitive, so "abc-123" works as well as "ABC-123".
-  const codeNameFor = (given) => Object.entries(inviteCodes).find(([, code]) => code && codesMatch(given.toLowerCase(), code.toLowerCase()))?.[0] ?? null;
+  // Codes match ignoring case, spaces, and full-width letters from a Japanese keyboard (ＢＥＴＡ is BETA).
+  const normalCode = (code) => code.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  const codeNameFor = (given) => Object.entries(inviteCodes).find(([, code]) => code && codesMatch(normalCode(given), normalCode(code)))?.[0] ?? null;
 
   const recentWrongCodes = (ip) => (registerAttempts.get(ip) ?? []).filter((at) => Date.now() - at < 60_000);
 
