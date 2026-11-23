@@ -37,9 +37,9 @@
     <main id="screen-join" class="screen centered" hidden>
       <h1><img class="logo" src="/icons/icon-192.png" alt="ping" /></h1>
       <p>An app that calls you once a day to practice speaking Japanese, just like a friend would.</p>
-      <form id="join-form" class="stack">
+      <form id="join-form" class="stack" novalidate>
         <label for="invite-code">Invite code</label>
-        <input id="invite-code" autocomplete="off" autocapitalize="off" spellcheck="false" required />
+        <input id="invite-code" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" />
         <button class="primary" type="submit">Join</button>
         <p id="join-error" class="error" role="alert" hidden></p>
       </form>

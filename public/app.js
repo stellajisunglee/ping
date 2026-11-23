@@ -8,7 +8,7 @@ import { failedCallNotice, startCall } from './voice.js';
 import { summarizeLearning, wordEvents, wordLevels } from './learning-metrics.js';
 import { initProgress, renderProgress } from './progress.js';
 import { initOnboarding, renderWelcome, showConnecting } from './onboarding.js';
-import { deviceKind, isInstalled, isTextField, needsInstall } from './device.js';
+import { codeToJoin, deviceKind, isInstalled, isTextField, needsInstall } from './device.js';
 import { initRecents, renderBadge } from './recents.js';
 
 const RING_FALLBACK_MS = 12_000; // the server decides a call was missed. This only covers its message getting lost.
@@ -112,8 +112,11 @@ async function enable() {
 async function join(event) {
   event.preventDefault();
   setError('join-error', null);
+  const inviteCode = codeToJoin($('invite-code').value, () => window.prompt('Enter your invite code'));
+  if (!inviteCode) return setError('join-error', 'Enter your invite code to join.');
+  $('invite-code').value = inviteCode;
   try {
-    const result = await api('/api/register', { method: 'POST', body: { inviteCode: $('invite-code').value.trim(), timeZone: timeZone() } });
+    const result = await api('/api/register', { method: 'POST', body: { inviteCode, timeZone: timeZone() } });
     writeToken(result.token);
     state.me = result;
     goHome();
@@ -760,6 +763,9 @@ function bindEvents() {
     if (event.target.closest('[data-back]')) goBack();
   });
   $('join-form').addEventListener('submit', join);
+  // Some iPhone Home Screen apps don't put the cursor in a field on a tap; focusing it during the tap itself does.
+  const focusCode = () => document.activeElement === $('invite-code') || $('invite-code').focus();
+  for (const target of [$('invite-code'), document.querySelector('label[for="invite-code"]')]) target.addEventListener('touchend', focusCode);
   $('enable-button').addEventListener('click', enable);
   $('enable-skip').addEventListener('click', () => useBrowserOnly(goHome));
   $('level-back').addEventListener('click', renderWelcome);

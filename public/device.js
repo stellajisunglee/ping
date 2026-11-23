@@ -18,3 +18,7 @@ export const needsInstall = (kind, installed) => kind !== 'desktop' && !installe
 
 // Whether a tap or key press landed in something the user types into, where the app mustn't start audio (app.js).
 export const isTextField = (target) => Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
+
+// The invite code to join with: what's in the box, or, if the box is empty (an iPhone Home Screen app can refuse to
+// put the cursor in it), what the user types into the phone's own pop-up, which ask() opens.
+export const codeToJoin = (typed, ask) => (typed ?? '').trim() || (ask() ?? '').trim();
