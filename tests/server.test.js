@@ -1284,3 +1284,13 @@ test('an invite code typed on a Japanese keyboard, or with spaces, still works',
   assert.equal(joined.status, 201);
   assert.equal(joined.data.role, 'beta');
 });
+
+test("an invite code typed with any kind of dash, or none, still works", async () => {
+  // The Japanese keyboard's "-" key types ー; other iPhone keyboards can give an en dash, an em dash or a minus sign.
+  for (const dash of ['ー', 'ｰ', '–', '—', '−', '－', '']) {
+    const joined = await request('/api/register', { method: 'POST', body: { inviteCode: BETA_CODE.replace('-', dash), timeZone: 'Asia/Tokyo' } });
+    assert.equal(joined.status, 201, `with ${JSON.stringify(dash)}`);
+  }
+  const wrong = await request('/api/register', { method: 'POST', body: { inviteCode: 'ーーー', timeZone: 'Asia/Tokyo' } });
+  assert.equal(wrong.status, 403, 'only dashes is not a code');
+});

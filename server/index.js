@@ -207,9 +207,10 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
   // Build, prompt version, and what the engine was actually sent, kept with the call's log entry.
   const recordConfig = (user, callId, setup) => engine.recordConfig(user, callId, { buildCommit: commit, promptVersion: PROMPT_VERSION, ...callConfig(setup) });
 
-  // Codes aren't case-sensitive, so "abc-123" works as well as "ABC-123".
-  // Codes match ignoring case, spaces, and full-width letters from a Japanese keyboard (ＢＥＴＡ is BETA).
-  const normalCode = (code) => code.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  // Codes match ignoring case, spaces, full-width letters from a Japanese keyboard (ＢＥＴＡ is BETA) and dashes of any
+  // kind, so "abc-123", "ABC 123" and "abc123" all work. iPhone keyboards don't always type a plain hyphen: the
+  // Japanese keyboard's "-" key types the long-vowel mark ー, and others give an en dash or a minus sign.
+  const normalCode = (code) => code.normalize('NFKC').replace(/[\s\p{Pd}\u2212\u30fc]/gu, '').toLowerCase();
   const codeNameFor = (given) => Object.entries(inviteCodes).find(([, code]) => code && codesMatch(normalCode(given), normalCode(code)))?.[0] ?? null;
 
   const recentWrongCodes = (ip) => (registerAttempts.get(ip) ?? []).filter((at) => Date.now() - at < 60_000);
