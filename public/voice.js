@@ -2,6 +2,7 @@
 
 import { classifyTurn, resumeNote } from './aizuchi.js';
 import { startDeepgramCall } from './deepgram-call.js';
+import { startCartesiaCall } from './cartesia-call.js';
 import { startElevenLabsCall } from './elevenlabs-call.js';
 import { startLiveCall } from './live-call.js';
 import { startRecording } from './recorder.js';
@@ -57,6 +58,7 @@ export function startCall({
   deepgramEngine = { start: startDeepgramCall }, // swapped for a stand-in in tests
   liveEngine = { start: startLiveCall }, // likewise
   elevenLabsEngine = { start: startElevenLabsCall }, // likewise
+  cartesiaEngine = { start: startCartesiaCall }, // likewise
   level = null, // the learner's level as the call starts, so a request for easier or harder Japanese can be told apart
 }) {
   let agentCall = null; // set when the call runs on Deepgram's Voice Agent instead of OpenAI
@@ -455,7 +457,7 @@ export function startCall({
     onStatus('connecting');
     const session = await api(`/api/calls/${callId}/session`, { method: 'POST' });
     if (session.engine === 'deepgram-agent') return connectToDeepgram(session);
-    if (session.engine === 'gpt-live' || session.engine === 'elevenlabs') return connectToAgent(session);
+    if (['gpt-live', 'elevenlabs', 'cartesia'].includes(session.engine)) return connectToAgent(session);
     const { clientSecret, sdpUrl, maxSeconds, turnMode, smartTurn, hangUpLines: lines = [] } = session;
     hangUpLines = lines.map(withoutPunctuation);
     smart.rules = smartTurn ?? null;
@@ -558,7 +560,7 @@ export function startCall({
     });
   }
 
-  // GPT-Live and ElevenLabs also run the whole call themselves, with the same callbacks. Both record both voices.
+  // GPT-Live, ElevenLabs and Cartesia also run the whole call themselves, with the same callbacks. All record both voices.
   async function connectToAgent(session) {
     if (ended) return;
     microphone = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
@@ -600,6 +602,8 @@ export function startCall({
           });
         },
       });
+    } else if (session.engine === 'cartesia') {
+      agentCall = cartesiaEngine.start(options);
     } else {
       agentCall = elevenLabsEngine.start(options);
     }

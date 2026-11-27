@@ -81,7 +81,7 @@ export class PlanError extends Error {}
 
 // The Privacy Policy's version. 2: calls are recorded. 3: Deepgram joins OpenAI as a voice service.
 // Accounts that saw an older version get a one-time notice on Home about what changed since.
-export const POLICY_VERSION = 6; // 2: calls recorded, 3: Deepgram named, 4: post-call comments, testers' data kept, learning numbers and level estimates, 5: their name, 6: ElevenLabs named
+export const POLICY_VERSION = 7; // 2: calls recorded, 3: Deepgram named, 4: post-call comments, testers' data kept, learning numbers and level estimates, 5: their name, 6: ElevenLabs named, 7: Cartesia named
 const RECORDING_POLICY = 2;
 export const policyNoticeFor = (seen = 0) => (seen >= POLICY_VERSION ? null : seen < RECORDING_POLICY ? 'recording' : 'update');
 // Admins and beta testers record every call as part of testing. YC reviewers and everyone else
@@ -592,6 +592,38 @@ export class CallEngine {
     this.#log(call, { engine: call.engine, turnMode: call.turnMode, assigned: call.assigned, ...original });
     this.store.save();
     return { engine: call.engine, turnMode: call.turnMode };
+  }
+
+  // Cartesia keeps every agent call it runs, so Ping remembers each one's Cartesia id until it's deleted there.
+  // A reconnect makes a new Cartesia call, so a call can have several.
+  addCartesiaCall(user, callId, cartesiaCallId) {
+    const call = this.store.calls[callId];
+    if (!call || call.userId !== user.id || typeof cartesiaCallId !== 'string') return false;
+    call.cartesiaCalls = [...(call.cartesiaCalls ?? []), cartesiaCallId];
+    this.store.save();
+    return true;
+  }
+
+  // Cartesia calls to delete there: those of calls that have ended, or started long enough ago that they must have
+  // (the longest call plus a margin, in case the phone never said it ended). With callId, only that call's. With
+  // userId, all of that user's, ended or not, for an account being deleted.
+  cartesiaCallsToDelete({ callId = null, userId = null, olderThanMs = 15 * 60_000 } = {}) {
+    const all = Object.values(this.store.calls);
+    if (userId) return all.filter((call) => call.userId === userId && call.cartesiaCalls?.length).flatMap((call) => call.cartesiaCalls.map((cartesiaCallId) => ({ callId: call.id, cartesiaCallId })));
+    const calls = callId ? [this.store.calls[callId]].filter(Boolean) : all;
+    return calls
+      .filter((call) => call.cartesiaCalls?.length && (call.endedAt || (call.startedAt ?? call.createdAt ?? 0) + olderThanMs < this.now()))
+      .flatMap((call) => call.cartesiaCalls.map((cartesiaCallId) => ({ callId: call.id, cartesiaCallId })));
+  }
+
+  // That Cartesia call is gone from Cartesia, so it's forgotten here.
+  cartesiaCallDeleted(callId, cartesiaCallId) {
+    const call = this.store.calls[callId];
+    if (!call?.cartesiaCalls) return false;
+    call.cartesiaCalls = call.cartesiaCalls.filter((id) => id !== cartesiaCallId);
+    if (!call.cartesiaCalls.length) delete call.cartesiaCalls;
+    this.store.save();
+    return true;
   }
 
   // What the call actually ran on (build, prompt version, models, voices and turn detection), from its first

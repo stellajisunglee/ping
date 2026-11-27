@@ -215,7 +215,7 @@ const POLICY_NOTICES = {
   },
   update: {
     title: 'Privacy Policy updated',
-    text: 'Some calls now run on ElevenLabs, another voice AI service, as well as OpenAI and Deepgram, and Ping can call you by name. The Privacy Policy lists who handles your calls.',
+    text: 'Some calls now run on Cartesia, another voice AI service, as well as OpenAI, Deepgram and ElevenLabs. The Privacy Policy lists who handles your calls.',
   },
 };
 

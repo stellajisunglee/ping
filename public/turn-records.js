@@ -47,7 +47,7 @@ export function helpTypes(name, args = {}, currentLevel = null) {
   return types;
 }
 
-const ENDED_BY = { 'deepgram-agent': 'flux', 'gpt-live': 'model', elevenlabs: 'model' };
+const ENDED_BY = { 'deepgram-agent': 'flux', 'gpt-live': 'model', elevenlabs: 'model', cartesia: 'model' };
 
 // events: the call's timing log. Returns { turns, help }.
 export function turnRecords(events, { connectedAt = null, engine = 'gpt-realtime' } = {}) {

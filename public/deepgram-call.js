@@ -28,7 +28,8 @@ export function toPcm16(samples) {
 }
 
 // Plays Deepgram's audio in order, through an <audio> element so the speaker button and recording work.
-export function createPlayer({ AudioContextClass, audio }) {
+// sampleRate is the rate of the audio being played: Deepgram's by default.
+export function createPlayer({ AudioContextClass, audio, sampleRate = OUTPUT_RATE }) {
   const context = new AudioContextClass();
   const output = context.createMediaStreamDestination();
   audio.srcObject = output.stream;
@@ -50,7 +51,7 @@ export function createPlayer({ AudioContextClass, audio }) {
       }
       if (!bytes.length) return;
       const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.length / 2);
-      const buffer = context.createBuffer(1, pcm.length, OUTPUT_RATE);
+      const buffer = context.createBuffer(1, pcm.length, sampleRate);
       const channel = buffer.getChannelData(0);
       for (let i = 0; i < pcm.length; i += 1) channel[i] = pcm[i] / 0x8000;
       const source = context.createBufferSource();
@@ -80,9 +81,10 @@ export function createPlayer({ AudioContextClass, audio }) {
   };
 }
 
-// Sends the microphone to Deepgram as 16 kHz, 16-bit audio, using the same worklet Smart Turn uses.
-export async function createMicrophoneStream({ AudioContextClass, AudioWorkletNodeClass, stream, onAudio }) {
-  const context = new AudioContextClass({ sampleRate: INPUT_RATE });
+// Sends the microphone to Deepgram as 16 kHz, 16-bit audio, using the same worklet Smart Turn uses. sampleRate
+// changes the rate, for engines that take another.
+export async function createMicrophoneStream({ AudioContextClass, AudioWorkletNodeClass, stream, onAudio, sampleRate = INPUT_RATE }) {
+  const context = new AudioContextClass({ sampleRate });
   await Promise.resolve(context.resume?.()).catch(() => {});
   await context.audioWorklet.addModule('/capture-worklet.js');
   const source = context.createMediaStreamSource(stream);

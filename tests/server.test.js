@@ -667,17 +667,17 @@ test('a comment left with the rating is kept with that call, for admins only, an
 test('every caller is randomized across the mix, balanced per person, and each call keeps its assignment', async () => {
   const tester = await joinWith(BETA_CODE);
   const assigned = [];
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 12; index += 1) {
     const call = await connectedCall(tester.token);
     const { data: again } = await request(`/api/calls/${call.id}/session`, { method: 'POST', token: tester.token }); // a reconnect
     const stored = engine.store.calls[call.id];
     assert.equal(again.turnMode, stored.turnMode, 'a reconnect keeps the same turn mode');
     assigned.push(stored.assigned);
   }
-  // Ten calls split evenly across the five this test server runs (GPT-Live has its own tests). It has no Deepgram or
-  // ElevenLabs key, so their four calls fell back to OpenAI instead of failing.
-  assert.deepEqual(engine.userForToken(tester.token).comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'gpt-realtime|semantic': 2, 'deepgram-agent|': 2, 'elevenlabs|': 2 });
-  assert.deepEqual(assigned.toSorted(), ['fallback', 'fallback', 'fallback', 'fallback', 'random', 'random', 'random', 'random', 'random', 'random']);
+  // Twelve calls split evenly across the six this test server runs (GPT-Live has its own tests). It has no Deepgram,
+  // ElevenLabs or Cartesia key, so their six calls fell back to OpenAI instead of failing.
+  assert.deepEqual(engine.userForToken(tester.token).comboCounts, { 'gpt-realtime|silence': 2, 'gpt-realtime|smartTurn': 2, 'gpt-realtime|semantic': 2, 'deepgram-agent|': 2, 'elevenlabs|': 2, 'cartesia|': 2 });
+  assert.deepEqual(assigned.toSorted(), [...Array(6).fill('fallback'), ...Array(6).fill('random')]);
 });
 
 test('an admin can pick the engine and turn mode instead, and only real combinations', async () => {
@@ -856,9 +856,10 @@ test('a controlled scenario opens with the same question on OpenAI and Deepgram,
   await request('/api/topic-setup', { method: 'PUT', token, body: { topicMode: 'randomized' } });
 });
 
-test('the page may connect to Deepgram and ElevenLabs, and nowhere else new', async () => {
+test('the page may connect to Deepgram, ElevenLabs and Cartesia, and nowhere else new', async () => {
   const response = await fetch(baseUrl + '/');
-  assert.match(response.headers.get('content-security-policy'), /connect-src 'self' https:\/\/api\.openai\.com wss:\/\/agent\.deepgram\.com wss:\/\/api\.elevenlabs\.io;/);
+  // Cartesia hands out regional addresses (api-us.cartesia.ai), so any of its subdomains.
+  assert.match(response.headers.get('content-security-policy'), /connect-src 'self' https:\/\/api\.openai\.com wss:\/\/agent\.deepgram\.com wss:\/\/api\.elevenlabs\.io wss:\/\/api\.cartesia\.ai wss:\/\/\*\.cartesia\.ai;/);
 });
 
 test("the phone says why a call ended, and a call that dropped straight away doesn't use up a Free user's call", async () => {
@@ -892,7 +893,7 @@ const CONFIG_FIELDS = ['buildCommit', 'promptVersion', 'realtimeModel', 'transcr
 test('every randomized call logs its ids, settings, build, prompt version, how it ended and what it actually ran on', async () => {
   const token = await join(); // an admin, randomized like everyone else but with no daily limit
   const entries = [];
-  for (let index = 0; index < 5; index += 1) { // one of each of the five this server runs
+  for (let index = 0; index < 6; index += 1) { // one of each of the six this server runs
     const call = await connectedCall(token);
     await request(`/api/calls/${call.id}/connected`, { method: 'POST', token });
     await request(`/api/calls/${call.id}/ended`, { method: 'POST', token, body: { reason: 'hung-up' } });
@@ -903,7 +904,7 @@ test('every randomized call logs its ids, settings, build, prompt version, how i
     assert.deepEqual([entry.contactId, entry.proficiency, entry.formality, entry.thinkingTime, entry.speed, entry.endReason], ['ping', 'N5', 'formal', 'normal', 1, 'hung-up']);
     assert.ok(QUESTIONS.some((question) => question.id === entry.questionId));
     assert.deepEqual([entry.buildCommit, entry.promptVersion], [COMMIT.toLowerCase(), PROMPT_VERSION]);
-    // This server has no Deepgram or ElevenLabs key, so all five ran on OpenAI.
+    // This server has no Deepgram, ElevenLabs or Cartesia key, so all six ran on OpenAI.
     assert.deepEqual(
       [entry.engine, entry.realtimeModel, entry.voice, entry.voiceSpeed, entry.transcriptionModel, entry.thinkModel, entry.listenModel, entry.eotThreshold],
       ['gpt-realtime', 'gpt-realtime', 'marin', 1, 'gpt-transcribe', null, null, null],
@@ -920,7 +921,7 @@ test('every randomized call logs its ids, settings, build, prompt version, how i
     [byCombo.fallback.turnMode, byCombo.fallback.fallbackFromTurnMode, byCombo.fallback.fallbackFromAssigned],
     ['silence', null, 'random'],
   );
-  assert.ok(['deepgram-agent', 'elevenlabs'].includes(byCombo.fallback.fallbackFromEngine), 'this server has neither key, so either falls back');
+  assert.ok(['deepgram-agent', 'elevenlabs', 'cartesia'].includes(byCombo.fallback.fallbackFromEngine), 'this server has none of their keys, so any falls back');
   assert.equal(byCombo.silence.fallbackFromEngine, undefined, 'only a fallback says what it fell back from');
 
   // Ids, settings and model names only: no keys, codes, instructions or words from the call.
@@ -1276,6 +1277,92 @@ test('an ElevenLabs call gets a signed URL and overrides that make the agent Pin
     app.close();
   }
   // The main test server has no ElevenLabs keys, so its ElevenLabs calls fall back (see the randomization test above).
+});
+
+test("a Cartesia call gets a session made on the server with this call's settings, and Cartesia's copy is deleted when it ends", async () => {
+  const cartesiaEngine = new CallEngine({ store: new Store(), sendPush: async () => ({ gone: false }), engineReady: (name) => name === 'cartesia' });
+  const sessions = [];
+  const deleted = [];
+  let calls = 0;
+  const cartesia = {
+    hasKey: true,
+    startSession: async (overrides) => {
+      sessions.push(overrides);
+      calls += 1;
+      return { callId: `ac_${calls}`, socketUrl: `wss://api-us.cartesia.ai/v1/agents/websocket/agent_1?access_token=tok${calls}&cartesia_version=2026-08-14` };
+    },
+    deleteCall: async (id) => deleted.push(id) && true,
+  };
+  const { server: app, deleteCartesiaCalls } = createApp({ engine: cartesiaEngine, openai, cartesia, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null, cartesiaDeleteDelayMs: 5 } });
+  await new Promise((resolve) => app.listen(0, resolve));
+  const url = `http://127.0.0.1:${app.address().port}`;
+  const send = async (method, path, token, body) => (await fetch(url + path, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) })).json();
+  const post = (path, token, body) => send('POST', path, token, body);
+  try {
+    const { token } = await (await fetch(`${url}/api/register`, { method: 'POST', body: JSON.stringify({ inviteCode: BETA_CODE, timeZone: 'Asia/Tokyo' }) })).json();
+    await send('PATCH', '/api/settings', token, { speed: 0.8 });
+    const call = await post('/api/calls', token);
+    const session = await post(`/api/calls/${call.id}/session`, token);
+    assert.deepEqual([session.engine, session.turnMode], ['cartesia', null]);
+    assert.match(session.socketUrl, /^wss:\/\/api-us\.cartesia\.ai\/.*access_token=tok1/);
+    assert.equal(session.instructions, undefined, "the phone gets only the address: the server already set this call's instructions");
+    assert.match(sessions[0].instructions, /WHO YOU ARE/);
+    assert.match(sessions[0].initial_message, /^もしもし、ピンです！/);
+    assert.deepEqual([sessions[0].language.primary, sessions[0].audio.output.speed], ['ja', 0.8]);
+    const logged = cartesiaEngine.callLog().find((entry) => entry.callId === call.id);
+    assert.deepEqual([logged.turnDetection, logged.listenModel, logged.thinkModel, logged.voice, logged.voiceSpeed], ['cartesia', 'ink-2', 'gpt-4.1-mini', '498e7f37-7fa3-4e2c-b8e2-8b6e9276f956', 0.8]);
+    assert.ok(!JSON.stringify(logged).includes('WHO YOU ARE'), 'the call log keeps no instructions');
+
+    await post(`/api/calls/${call.id}/session`, token); // a reconnect is another Cartesia call
+    assert.deepEqual(cartesiaEngine.store.calls[call.id].cartesiaCalls, ['ac_1', 'ac_2']);
+    await post(`/api/calls/${call.id}/connected`, token);
+    await post(`/api/calls/${call.id}/ended`, token, { reason: 'hung-up' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(deleted, ['ac_1', 'ac_2'], 'deleted from Cartesia shortly after the phone says the call ended');
+    assert.equal(cartesiaEngine.store.calls[call.id].cartesiaCalls, undefined);
+
+    // A call the phone never reported is deleted by the sweep once it must be over, and an account's on deletion.
+    const unreported = await post('/api/calls', token);
+    await post(`/api/calls/${unreported.id}/session`, token);
+    await deleteCartesiaCalls();
+    assert.deepEqual(deleted, ['ac_1', 'ac_2'], 'not while it could still be going');
+    cartesiaEngine.store.calls[unreported.id].startedAt -= 16 * 60_000;
+    await deleteCartesiaCalls();
+    assert.deepEqual(deleted, ['ac_1', 'ac_2', 'ac_3']);
+    const another = await post('/api/calls', token);
+    await post(`/api/calls/${another.id}/ended`, token, { reason: 'hung-up' }); // free the line, then a new call
+    const live = await post('/api/calls', token);
+    await post(`/api/calls/${live.id}/session`, token);
+    await send('DELETE', '/api/me', token);
+    assert.equal(deleted.at(-1), `ac_${calls}`, "deleting the account deletes its Cartesia calls, even one still going");
+  } finally {
+    app.close();
+  }
+});
+
+test("a randomized Cartesia call falls back to OpenAI when Cartesia can't make the session, but an admin who picked it sees why", async () => {
+  const cartesiaEngine = new CallEngine({ store: new Store(), sendPush: async () => ({ gone: false }), engineReady: (name) => name === 'cartesia' });
+  const cartesia = { hasKey: true, startSession: async () => { throw new Error('Cartesia refused the call (429): busy'); }, deleteCall: async () => true };
+  const { server: app } = createApp({ engine: cartesiaEngine, openai, cartesia, config: { inviteCodes: { admin: INVITE_CODE, beta: BETA_CODE }, vapidPublicKey: 'public', model: 'gpt-realtime', voice: 'marin', dataDir: null } });
+  await new Promise((resolve) => app.listen(0, resolve));
+  const url = `http://127.0.0.1:${app.address().port}`;
+  const send = async (method, path, token, body) => fetch(url + path, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
+  try {
+    const { token } = await (await fetch(`${url}/api/register`, { method: 'POST', body: JSON.stringify({ inviteCode: BETA_CODE, timeZone: 'Asia/Tokyo' }) })).json();
+    const call = await (await send('POST', '/api/calls', token)).json();
+    const session = await (await send('POST', `/api/calls/${call.id}/session`, token)).json();
+    assert.deepEqual([session.engine, session.turnMode], ['gpt-realtime', 'silence']);
+    assert.equal(cartesiaEngine.callLog().find((entry) => entry.callId === call.id).fallbackFromEngine, 'cartesia');
+
+    const { token: admin } = await (await fetch(`${url}/api/register`, { method: 'POST', body: JSON.stringify({ inviteCode: INVITE_CODE, timeZone: 'Asia/Tokyo' }) })).json();
+    assert.equal((await send('PUT', '/api/call-setup', admin, { manual: true, engine: 'cartesia' })).status, 200);
+    const picked = await (await send('POST', '/api/calls', admin)).json();
+    const refused = await send('POST', `/api/calls/${picked.id}/session`, admin);
+    assert.equal(refused.status, 503);
+    assert.match((await refused.json()).error, /busy/);
+  } finally {
+    app.close();
+  }
 });
 
 test('an invite code typed on a Japanese keyboard, or with spaces, still works', async () => {

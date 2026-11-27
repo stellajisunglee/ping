@@ -20,6 +20,7 @@ import { cleanMetrics, metricsProblems } from '../public/turn-metrics.js';
 import { cleanLearning } from '../public/learning-metrics.js';
 import { cleanTurnData } from '../public/turn-records.js';
 import { LIVE_BACKEND_MODEL, LIVE_MODEL, LIVE_VOICE, liveSession } from './live.js';
+import { cartesiaOverrides, createCartesia } from './cartesia.js';
 import { createElevenLabs, elevenOverrides } from './elevenlabs.js';
 import { buildSession, NOT_NOW_GOODBYES, PROMPT_VERSION, smartTurnRules, TIME_UP_LINES, turnDetection, voiceMessageFor } from './tutor.js';
 
@@ -29,6 +30,7 @@ const PUBLIC_DIR = join(ROOT, 'public');
 // doesn't look like a commit (or no value, as on a laptop) is saved as null rather than guessed.
 export const buildCommit = (value) => (typeof value === 'string' && /^[0-9a-f]{7,40}$/i.test(value) ? value.toLowerCase() : null);
 const TICK_MS = 1_000;
+const CARTESIA_SWEEP_MS = 60_000;
 const MAX_BODY_BYTES = 64_000; // room for a full call's transcript
 const MIN_EXPORT_KEY_LENGTH = 32; // EXPORT_KEY must be at least this long, or the data export stays off
 const MIN_GRADED_TURNS = 3;
@@ -69,7 +71,7 @@ const SMART_TURN_FILES = new Set([
 
 const SECURITY_HEADERS = {
   // 'wasm-unsafe-eval' lets Smart Turn's WebAssembly compile. It doesn't allow eval() of JavaScript.
-  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.openai.com wss://agent.deepgram.com wss://api.elevenlabs.io; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api.openai.com wss://agent.deepgram.com wss://api.elevenlabs.io wss://api.cartesia.ai wss://*.cartesia.ai; media-src 'self' blob:; base-uri 'none'; frame-ancestors 'none'",
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
   // These two make the page "cross-origin isolated", which browsers require before WebAssembly can use
@@ -142,11 +144,15 @@ export function diskUsage({ dataDir, recordingsBytes }) {
   return { recordingsBytes, storeBytes, diskBytes, freeBytes };
 }
 
-export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: '' }), elevenlabs = createElevenLabs({ apiKey: '', agentId: '' }), config }) {
+export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: '' }), elevenlabs = createElevenLabs({ apiKey: '', agentId: '' }), cartesia = createCartesia({ apiKey: '', agentId: '' }), config }) {
   const liveModel = config.liveModel ?? LIVE_MODEL;
   const liveVoice = config.liveVoice ?? LIVE_VOICE;
   const liveBackendModel = config.liveBackendModel ?? LIVE_BACKEND_MODEL;
   const elevenLlm = config.elevenLlm ?? 'gpt-4.1-mini'; // what the Ping agent was set up with, for the call log
+  const cartesiaLlm = config.cartesiaLlm ?? 'gpt-4.1-mini'; // likewise for the Cartesia agent
+  const cartesiaVoice = config.cartesiaVoice ?? '498e7f37-7fa3-4e2c-b8e2-8b6e9276f956'; // Aiko
+  // Cartesia only deletes a call once it has finished on its side, a few seconds after the phone hangs up.
+  const cartesiaDeleteDelayMs = config.cartesiaDeleteDelayMs ?? 10_000;
   const pendingLive = new Map(); // callId -> the GPT-Live session waiting for the phone's WebRTC offer
   const { inviteCodes, vapidPublicKey, model, voice, dataDir, exportKey = '' } = config;
   const deepgramThinkModel = config.deepgramThinkModel ?? 'gpt-4.1-mini';
@@ -201,6 +207,19 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       const { transcription, ...input } = session.audio.input;
       const withoutTranscript = { ...session, audio: { ...session.audio, input } };
       return { clientSecret: await openai.mintClientSecret(withoutTranscript, userId), session: withoutTranscript };
+    }
+  }
+
+  // Deletes Cartesia's copy (recording and transcript) of calls that have ended. One that fails stays on the list
+  // and is tried again by the next sweep. Never throws, so it can run in the background.
+  async function deleteCartesiaCalls(options) {
+    if (!cartesia.hasKey) return;
+    for (const { callId, cartesiaCallId } of engine.cartesiaCallsToDelete(options)) {
+      try {
+        if (await cartesia.deleteCall(cartesiaCallId)) engine.cartesiaCallDeleted(callId, cartesiaCallId);
+      } catch (error) {
+        console.warn(error.message);
+      }
     }
   }
 
@@ -330,6 +349,7 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
     if (method === 'DELETE' && pathname === '/api/me') {
       for (const contact of user.customContacts) rmSync(voiceMessageFile(contact.id), { force: true });
       recordings.deleteUser(user.id);
+      await deleteCartesiaCalls({ userId: user.id });
       engine.deleteUser(user);
       return json(res, 200, {});
     }
@@ -569,6 +589,7 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       // Why it ended, as the phone saw it. A call that broke straight away doesn't use up a call (see endCall).
       const { reason } = await readJson(req);
       if (!engine.endCall(user, ended[1], typeof reason === 'string' ? reason : null)) return json(res, 404, { error: 'Call not found.' });
+      if (engine.cartesiaCallsToDelete({ callId: ended[1] }).length) setTimeout(() => deleteCartesiaCalls({ callId: ended[1] }), cartesiaDeleteDelayMs);
       return json(res, 200, { calling: engine.calling(user) });
     }
 
@@ -732,6 +753,26 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
         recordConfig(user, session[1], { session: { type: 'elevenlabs', llm: elevenLlm, overrides } });
         return json(res, 200, { engine: details.engine, signedUrl, overrides, timeUpNote: TIME_UP_NOTE, maxSeconds: details.maxSeconds, hangUpLines, question: details.question, turnMode: null });
       }
+      // Cartesia: a session for this call made with this call's instructions, or the fallback when it can't start.
+      let cartesiaSession = null;
+      let cartesiaSettings = null;
+      if (details.engine === 'cartesia') {
+        const manual = engine.store.calls[session[1]]?.assigned === 'manual';
+        try {
+          if (!cartesia.hasKey) throw new Error('Cartesia is not set up yet.');
+          cartesiaSettings = cartesiaOverrides(details);
+          cartesiaSession = await cartesia.startSession(cartesiaSettings);
+          engine.addCartesiaCall(user, session[1], cartesiaSession.callId);
+        } catch (error) {
+          if (manual) return json(res, 503, { error: error.message });
+          console.warn(`Cartesia couldn't start a call, so it fell back to OpenAI: ${error.message}`);
+          Object.assign(details, engine.fallBack(user, session[1]));
+        }
+      }
+      if (details.engine === 'cartesia') {
+        recordConfig(user, session[1], { session: { type: 'cartesia', llm: cartesiaLlm, voice: cartesiaVoice, overrides: cartesiaSettings } });
+        return json(res, 200, { engine: details.engine, socketUrl: cartesiaSession.socketUrl, maxSeconds: details.maxSeconds, hangUpLines, question: details.question, turnMode: null });
+      }
       // GPT-Live: the session is created once the phone sends its WebRTC offer (POST /api/calls/:id/live).
       if (details.engine === 'gpt-live') {
         if (!openai.hasKey) return json(res, 503, { error: 'The voice engine is not set up yet.' });
@@ -849,7 +890,7 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
     }
   });
 
-  return { server, ensureVoiceMessage };
+  return { server, ensureVoiceMessage, deleteCartesiaCalls };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -876,15 +917,18 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         'deepgram-agent': Boolean(process.env.DEEPGRAM_API_KEY),
         'gpt-live': Boolean(process.env.OPENAI_API_KEY),
         elevenlabs: Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_AGENT_ID),
+        cartesia: Boolean(process.env.CARTESIA_API_KEY && process.env.CARTESIA_AGENT_ID),
       })[name] ?? true,
   });
   const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY ?? '', baseUrl: process.env.OPENAI_BASE_URL, textModel: process.env.TEXT_MODEL, levelModel: process.env.LEVEL_MODEL });
   const deepgram = createDeepgram({ apiKey: process.env.DEEPGRAM_API_KEY ?? '' });
   const elevenlabs = createElevenLabs({ apiKey: process.env.ELEVENLABS_API_KEY ?? '', agentId: process.env.ELEVENLABS_AGENT_ID ?? '' });
-  const { server, ensureVoiceMessage } = createApp({
+  const cartesia = createCartesia({ apiKey: process.env.CARTESIA_API_KEY ?? '', agentId: process.env.CARTESIA_AGENT_ID ?? '' });
+  const { server, ensureVoiceMessage, deleteCartesiaCalls } = createApp({
     engine,
     openai,
     elevenlabs,
+    cartesia,
     deepgram,
     config: {
       buildCommit: process.env.RENDER_GIT_COMMIT,
@@ -894,6 +938,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       liveVoice: process.env.GPT_LIVE_VOICE,
       liveBackendModel: process.env.GPT_LIVE_BACKEND_MODEL,
       elevenLlm: process.env.ELEVENLABS_LLM,
+      cartesiaLlm: process.env.CARTESIA_LLM,
+      cartesiaVoice: process.env.CARTESIA_VOICE_ID,
       inviteCodes: {
         admin: process.env.ADMIN_INVITE_CODE ?? '',
         beta: process.env.BETA_INVITE_CODE ?? '',
@@ -908,6 +954,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     },
   });
   setInterval(() => engine.tick().catch((error) => console.error(error)), TICK_MS);
+  // Cartesia calls the phone never reported ending are deleted there once they must be over.
+  setInterval(() => deleteCartesiaCalls(), CARTESIA_SWEEP_MS);
   ensureVoiceMessage();
   const port = Number(process.env.PORT ?? 3000);
   server.listen(port, () => {

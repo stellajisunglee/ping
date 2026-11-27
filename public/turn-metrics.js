@@ -72,6 +72,7 @@ const ENGINE_MEASURES = {
   // These decide turns themselves and send no aizuchi or latency signals the phone can use.
   'gpt-live': { aizuchi: false, providerLatency: false },
   elevenlabs: { aizuchi: false, providerLatency: false },
+  cartesia: { aizuchi: false, providerLatency: false },
 };
 
 export const FALLBACK_CODES = { load: 1, slow: 2, 'no-audio': 3 };

@@ -14,9 +14,11 @@ export const ENGINES = {
   'gpt-live': { name: 'OpenAI GPT-Live', turnModes: [] },
   // Cascaded, with ElevenLabs' own turn-taking model (server/elevenlabs.js).
   elevenlabs: { name: 'ElevenLabs Agents', turnModes: [] },
+  // Cascaded: Cartesia Ink-2 hears and decides turns, an OpenAI model thinks, a Sonic voice speaks (server/cartesia.js).
+  cartesia: { name: 'Cartesia Agents', turnModes: [] },
 };
 
-// What every caller is randomized across: the beta's six-way comparison. A new engine or mode joins only
+// What every caller is randomized across: the beta's seven-way comparison. A new engine or mode joins only
 // after a few admin test calls and, for a new company, a Privacy Policy update. An engine whose keys aren't set
 // on the server is left out (engineReady in calls.js).
 export const RANDOM_MIX = [
@@ -26,6 +28,7 @@ export const RANDOM_MIX = [
   { engine: 'deepgram-agent', turnMode: null },
   { engine: 'gpt-live', turnMode: null },
   { engine: 'elevenlabs', turnMode: null },
+  { engine: 'cartesia', turnMode: null },
 ];
 
 // What a call falls back to when its engine can't start, so the caller still gets a call.
@@ -66,6 +69,10 @@ export function callConfig({ session, smartTurn = null }) {
   // ElevenLabs Agents: the agent's own settings, with Ping's speed override.
   if (session?.type === 'elevenlabs') {
     return { ...config, thinkModel: session.llm ?? null, listenModel: 'elevenlabs', voice: session.voice ?? 'elevenlabs-agent', voiceSpeed: session.overrides?.tts?.speed ?? null, turnDetection: 'elevenlabs' };
+  }
+  // Cartesia Agents: the agent's model and voice, with this call's speed.
+  if (session?.type === 'cartesia') {
+    return { ...config, thinkModel: session.llm ?? null, listenModel: 'ink-2', voice: session.voice ?? null, voiceSpeed: session.overrides?.audio?.output?.speed ?? null, turnDetection: 'cartesia' };
   }
   if (session?.type === 'Settings') {
     const { listen, think, speak } = session.agent ?? {};
