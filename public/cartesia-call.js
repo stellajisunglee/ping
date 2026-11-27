@@ -162,7 +162,8 @@ export function startCartesiaCall({
   };
 
   async function runTool({ tool_name: name, tool_call_id: id, parameters = {}, expects_response: expectsResponse }) {
-    turnLog.push({ type: 'tool', name, args: parameters, level, at: now() });
+    // Logged under Ping's own tool names, so help events count the same as on the other engines.
+    turnLog.push({ type: 'tool', name: name === 'hang_up' ? 'end_call' : name, args: parameters, level, at: now() });
     let output;
     let isError = false;
     try {

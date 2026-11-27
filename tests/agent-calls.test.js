@@ -262,10 +262,12 @@ function cartesiaCall({ api = async () => ({}), hangUpLines = [], maxSeconds = 1
   const { seen, ...handlers } = callbacks();
   seen.audio = [];
   seen.metrics = [];
+  seen.turns = [];
   const call = startCartesiaCall({
     callId: 'c1',
     api: async (path, options) => {
       if (path.endsWith('/metrics')) seen.metrics.push(options.body);
+      if (path.endsWith('/turns')) seen.turns.push(options.body);
       return api(path, options);
     },
     audio: { play: async () => {} },
@@ -360,6 +362,8 @@ test('a Cartesia call: tools run on the phone and their results go back, and han
   await flush();
   assert.equal(seen.ended, 'finished');
   assert.equal(seen.metrics.length, 1);
+  await flush();
+  assert.deepEqual(seen.turns.at(-1).help.map((event) => event.type), ['lookup', 'end-call'], 'hang_up counts as end-call, like end_call elsewhere');
 });
 
 test("a Cartesia call ends at the plan's limit, hangs up after a not-now goodbye, and a socket that never opened is a failed call", async (t) => {
