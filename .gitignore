@@ -8,3 +8,4 @@ bench/audio/
 .venv/
 __pycache__/
 ping-data/
+.Rhistory
