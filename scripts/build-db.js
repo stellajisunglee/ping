@@ -4,9 +4,10 @@
 // Uses Node's built-in SQLite, so there's nothing to install.
 //
 // Tables: learners, calls (every call, connected or not), call_setup, turn_metrics, learning_metrics, ratings,
-// level_estimates, settings_changes, turns, help_events, words (with each one's progress), word_events, sentences, scenario_checks, recordings, transcript_lines, feedback.
+// level_estimates, check_ins, settings_changes, turns, help_events, words (with each one's progress), word_events, sentences, scenario_checks, recordings, transcript_lines, feedback.
 // Levels also come as numbers (selfLevelRank, levelRank: 0 completely new, 1 N5 ... 5 N1) so they sort and compare.
-// Views: call_facts (one row per call with everything joined), learner_weeks (each learner's weeks since joining).
+// Views: call_facts (one row per call with everything joined), learner_weeks (each learner's weeks since joining),
+// learner_confidence (each learner's first and latest check-in, and the change).
 
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,7 +29,7 @@ const value = (v) => (v === undefined || v === null ? null : typeof v === 'boole
 const NOT_SETUP = new Set([
   'callId', 'userId', 'joinedWith', 'at', 'direction', 'seconds',
   ...METRIC_FIELDS, ...LEARNING_FIELDS,
-  'cutOffs', 'naturalness', 'commented',
+  'speakingConfidence', 'cutOffs', 'naturalness', 'commented',
   'estimatedLevel', 'estimatedVocabulary', 'estimatedGrammar', 'levelConfidence',
   'userCallSharePercent', 'avgTurnMs',
   'turns', 'help', 'helpRequestsByTools', 'wordEvents',
@@ -65,11 +66,12 @@ export function buildDatabase(exported, dbPath, { audioPath = () => null } = {})
   const counts = {};
   db.exec('BEGIN');
 
-  counts.learners = table(db, 'learners', ['userId', 'role', 'joinedWith', 'plan', 'joinedAt', 'timeZone', 'selfLevel', 'selfLevelRank', 'formality', 'speed', 'thinkingTime', 'callStartHour', 'callEndHour', 'frequency', 'callsEnabled', 'recordingOff', 'levelChosen', 'levelChosenAt', 'onboarded', 'onboardedAt', 'nameGiven', 'hasSubscription', 'policyVersion', 'streakCurrent', 'streakBest', 'connectedCalls'],
+  counts.learners = table(db, 'learners', ['userId', 'role', 'joinedWith', 'plan', 'joinedAt', 'timeZone', 'goal', 'selfLevel', 'selfLevelRank', 'formality', 'speed', 'thinkingTime', 'callStartHour', 'callEndHour', 'frequency', 'callsEnabled', 'recordingOff', 'levelChosen', 'levelChosenAt', 'onboarded', 'onboardedAt', 'nameGiven', 'hasSubscription', 'policyVersion', 'streakCurrent', 'streakBest', 'connectedCalls'],
     users.map((user) => ({
-      userId: user.id, role: user.role, joinedWith: user.joinedWith, plan: user.plan, joinedAt: iso(user.joinedAt), timeZone: user.timeZone,
+      userId: user.id, role: user.role, joinedWith: user.joinedWith, plan: user.plan, joinedAt: iso(user.joinedAt), timeZone: user.timeZone, goal: user.goal,
       selfLevel: user.settings?.proficiency, selfLevelRank: rank(user.settings?.proficiency),
-      levelChosenAt: iso(user.levelChosenAt), onboarded: Boolean(user.onboarded), onboardedAt: iso(user.onboardedAt), nameGiven: Boolean(user.name), // the name itself stays out formality: user.settings?.formality, speed: user.settings?.speed, thinkingTime: user.settings?.thinkingTime,
+      levelChosenAt: iso(user.levelChosenAt), onboarded: Boolean(user.onboarded), onboardedAt: iso(user.onboardedAt), nameGiven: Boolean(user.name), // the name itself stays out
+      formality: user.settings?.formality, speed: user.settings?.speed, thinkingTime: user.settings?.thinkingTime,
       callStartHour: user.settings?.callStartHour, callEndHour: user.settings?.callEndHour, frequency: user.settings?.frequency, callsEnabled: user.settings?.callsEnabled,
       recordingOff: Boolean(user.recordingOff), levelChosen: user.levelChosen, hasSubscription: user.hasSubscription, policyVersion: user.policyVersion,
       streakCurrent: user.streak?.current, streakBest: user.streak?.best, connectedCalls: user.connectedCalls,
@@ -100,11 +102,15 @@ export function buildDatabase(exported, dbPath, { audioPath = () => null } = {})
   counts.turn_metrics = table(db, 'turn_metrics', ['callId', ...METRIC_FIELDS], withAny(METRIC_FIELDS), 'callId');
   counts.learning_metrics = table(db, 'learning_metrics', ['callId', ...LEARNING_FIELDS], withAny(LEARNING_FIELDS), 'callId');
 
-  counts.ratings = table(db, 'ratings', ['callId', 'userId', 'at', 'cutOffs', 'naturalness', 'comment'], users.flatMap((user) => (user.ratings ?? []).map((r) => ({ ...r, userId: user.id, at: iso(r.at) }))), 'callId');
+  counts.ratings = table(db, 'ratings', ['callId', 'userId', 'at', 'speakingConfidence', 'cutOffs', 'naturalness', 'comment'], users.flatMap((user) => (user.ratings ?? []).map((r) => ({ ...r, userId: user.id, at: iso(r.at) }))), 'callId');
   counts.level_estimates = table(db, 'level_estimates', ['callId', 'userId', 'at', 'level', 'levelRank', 'vocabulary', 'grammar', 'confidence', 'reason'], users.flatMap((user) => (user.levelEstimates ?? []).map((e) => ({ ...e, levelRank: rank(e.level), userId: user.id, at: iso(e.at) }))), 'callId');
   // One row per reply the contact gave, and one per time the learner asked for help, by type (public/turn-records.js).
   counts.turns = table(db, 'turns', ['callId', ...TURN_FIELDS], callLog.flatMap((entry) => (entry.turns ?? []).map((turn) => ({ ...turn, callId: entry.callId }))));
   counts.help_events = table(db, 'help_events', ['callId', 'type', 'atMs', 'turn'], callLog.flatMap((entry) => (entry.help ?? []).map((event) => ({ ...event, callId: entry.callId }))));
+  // What learners said about themselves (server/check-ins.js): comfort speaking Japanese with someone (1-5) and how much
+  // they spoke it outside Ping in the past week (0 not at all, 1 a little, 2 a lot), first before Home, then weekly.
+  counts.check_ins = table(db, 'check_ins', ['userId', 'at', 'source', 'comfort', 'outside', 'daysSinceJoining'],
+    users.flatMap((user) => (user.checkIns ?? []).map((checkIn) => ({ ...checkIn, userId: user.id, at: iso(checkIn.at), daysSinceJoining: user.joinedAt ? Math.floor((checkIn.at - user.joinedAt) / 86_400_000) : null }))));
   // Each change to a tracked setting (level, call window, frequency, pace, ...), with whether it was asked for on a call.
   counts.settings_changes = table(db, 'settings_changes', ['userId', 'at', 'field', 'fromValue', 'toValue', 'duringCall'],
     users.flatMap((user) => (user.settingsChanges ?? []).map((change) => ({ userId: user.id, at: iso(change.at), field: change.field, fromValue: change.from, toValue: change.to, duringCall: Boolean(change.duringCall) }))));
@@ -128,7 +134,7 @@ export function buildDatabase(exported, dbPath, { audioPath = () => null } = {})
     SELECT c.*, ${setupSelect ? `${setupSelect},` : ''}
       ${METRIC_FIELDS.map((field) => `t."${field}"`).join(', ')},
       ${LEARNING_FIELDS.map((field) => `l."${field}"`).join(', ')},
-      r.cutOffs, r.naturalness, r.comment,
+      r.speakingConfidence, r.cutOffs, r.naturalness, r.comment,
       e.level AS estimatedLevel, e.levelRank AS estimatedLevelRank, e.vocabulary AS estimatedVocabulary, e.grammar AS estimatedGrammar, e.confidence AS levelConfidence,
       CASE WHEN t.userSpeechMs IS NOT NULL AND t.userSpeechMs + t.agentSpeechMs > 0 THEN ROUND(100.0 * t.userSpeechMs / (t.userSpeechMs + t.agentSpeechMs)) END AS userCallSharePercent,
       CASE WHEN t.userSpeechMs IS NOT NULL AND t.userTurns > 0 THEN ROUND(1.0 * t.userSpeechMs / t.userTurns) END AS avgTurnMs,
@@ -153,6 +159,21 @@ export function buildDatabase(exported, dbPath, { audioPath = () => null } = {})
     FROM call_facts f JOIN learners lr ON lr.userId = f.userId
     WHERE NOT f.test
     GROUP BY f.userId, week`);
+
+  // Each learner's confidence over time: their first and latest check-in, and how much comfort changed. Join it to
+  // learner_weeks or call_facts to ask what kind of practice goes with confidence growing.
+  db.exec(`CREATE VIEW learner_confidence AS
+    WITH ordered AS (
+      SELECT userId, at, comfort, outside,
+        ROW_NUMBER() OVER (PARTITION BY userId ORDER BY at) AS firstRank,
+        ROW_NUMBER() OVER (PARTITION BY userId ORDER BY at DESC) AS lastRank,
+        COUNT(*) OVER (PARTITION BY userId) AS checkIns
+      FROM check_ins)
+    SELECT f.userId, f.checkIns, f.at AS firstAt, f.comfort AS firstComfort, f.outside AS firstOutside,
+      l.at AS latestAt, l.comfort AS latestComfort, l.outside AS latestOutside, l.comfort - f.comfort AS comfortChange,
+      ROUND(julianday(l.at) - julianday(f.at)) AS daysBetween
+    FROM ordered f JOIN ordered l ON l.userId = f.userId AND l.lastRank = 1
+    WHERE f.firstRank = 1`);
 
   db.exec('COMMIT');
   db.close();

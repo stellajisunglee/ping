@@ -21,6 +21,7 @@ import { cleanLearning } from '../public/learning-metrics.js';
 import { cleanTurnData } from '../public/turn-records.js';
 import { LIVE_BACKEND_MODEL, LIVE_MODEL, LIVE_VOICE, liveSession } from './live.js';
 import { cartesiaOverrides, createCartesia } from './cartesia.js';
+import { checkInDue, cleanCheckIn, cleanGoal, needsBaseline } from './check-ins.js';
 import { createElevenLabs, elevenOverrides } from './elevenlabs.js';
 import { buildSession, NOT_NOW_GOODBYES, PROMPT_VERSION, smartTurnRules, TIME_UP_LINES, turnDetection, voiceMessageFor } from './tutor.js';
 
@@ -251,6 +252,9 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       name: user.name,
       nameReading: user.nameReading,
       needsOnboarding: needsOnboarding(user), // beta testers and Free users see the two onboarding pages once
+      needsBaseline: needsBaseline(user), // why they're learning and a first check-in, once, before Home (server/check-ins.js)
+      checkInDue: checkInDue(user, Date.now()), // the weekly check-in card on Home
+      goal: user.goal,
       progress: engine.progress(user),
       recentCalls: engine.recentCalls(user),
       hasSubscription: Boolean(user.subscription),
@@ -385,6 +389,28 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       if (typeof on !== 'boolean') return json(res, 400, { error: 'Invalid request.' });
       if (!engine.setRecording(user, on)) return json(res, 403, { error: 'Recording is part of testing, so it stays on for this account.' });
       return json(res, 200, { recording: { on: recordsCalls(user), canTurnOff: true } });
+    }
+
+    // Why they're learning and the first check-in (server/check-ins.js): a goal word and two numbers.
+    if (method === 'PUT' && pathname === '/api/baseline') {
+      const body = await readJson(req);
+      const goal = cleanGoal(body.goal);
+      const checkIn = cleanCheckIn(body);
+      if (!goal || !checkIn) return json(res, 400, { error: 'Please answer each question.' });
+      engine.setBaseline(user, { goal, ...checkIn });
+      return json(res, 200, publicUser(user));
+    }
+
+    // The weekly check-in on Home, or "Not now".
+    if (method === 'POST' && pathname === '/api/check-ins') {
+      const checkIn = cleanCheckIn(await readJson(req));
+      if (!checkIn) return json(res, 400, { error: 'Please answer both questions.' });
+      engine.addCheckIn(user, checkIn);
+      return json(res, 201, {});
+    }
+    if (method === 'POST' && pathname === '/api/check-ins/snooze') {
+      engine.snoozeCheckIn(user);
+      return json(res, 200, {});
     }
 
     if (method === 'POST' && pathname === '/api/policy/seen') {
@@ -689,7 +715,7 @@ export function createApp({ engine, openai, deepgram = createDeepgram({ apiKey: 
       return json(res, 200, { saved: engine.saveConversation(user, transcript[1], lines), recorded });
     }
 
-    // The two 1-5 taps after a call. Numbers only, like the timing numbers.
+    // The 1-5 taps after a call (confidence speaking, cut-offs, naturalness). Numbers only, like the timing numbers.
     const ratingRoute = pathname.match(/^\/api\/calls\/([\w-]+)\/rating$/);
     if (method === 'POST' && ratingRoute) {
       const body = await readJson(req);

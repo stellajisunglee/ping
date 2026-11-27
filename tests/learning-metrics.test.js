@@ -55,9 +55,41 @@ test('learning numbers must be every known field, whole numbers in range, and no
   const good = summarizeLearning({ lines: [you('映画を見ました。')], levels, segmenter });
   assert.deepEqual(Object.keys(good), LEARNING_FIELDS);
   assert.deepEqual(cleanLearning(good), good);
-  for (const bad of [{ ...good, text: '映画' }, { ...good, japaneseChars: -1 }, { ...good, englishTurnPercent: 101 }, { ...good, newWords: 1.5 }, { ...good, newWords: null }, {}, null, []]) {
+  for (const bad of [{ ...good, text: '映画' }, { ...good, japaneseChars: -1 }, { ...good, englishTurnPercent: 101 }, { ...good, newWords: 1.5 }, { ...good, newWords: null }, { ...good, questionsAsked: -1 }, { ...good, learnerAizuchi: null }, {}, null, []]) {
     assert.equal(cleanLearning(bad), null, JSON.stringify(bad));
   }
+});
+
+test('a phone from before the confidence numbers is accepted, and what it never sent is null, not zero', () => {
+  const good = summarizeLearning({ lines: [you('映画を見ました。')], levels, segmenter });
+  const added = ['questionsAsked', 'japaneseFillers', 'englishFillers', 'helpFollowUps', 'japaneseAfterHelp', 'learnerAizuchi'];
+  const older = Object.fromEntries(Object.entries(good).filter(([field]) => !added.includes(field)));
+  const cleaned = cleanLearning(older);
+  assert.ok(cleaned);
+  assert.deepEqual(added.map((field) => cleaned[field]), [null, null, null, null, null, null]);
+  const { distinctWords, ...missingOld } = older;
+  assert.equal(cleanLearning(missingOld), null, 'fields every phone has always sent are still required');
+});
+
+test('signs of confidence: questions back, Japanese and English fillers, carrying on in Japanese after help, and aizuchi', () => {
+  const lines = [
+    { from: 'contact', text: '週末は何をしましたか？' },
+    you('えーと、うーん…公園に行きました。'),
+    you('Sorry, what does 散歩 mean?'), // help
+    you('あ、そうですか。散歩しました。'), // carries on in Japanese
+    you('ピンさんは週末何をしましたか？'), // a question back
+    you('うん'), // aizuchi
+    you("um, I don't understand"), // help, with an English filler
+    you('okay so I walked'), // carries on, in English
+    you('「忙しい」ってどういう意味ですか？'), // help, so not counted as a question back
+  ];
+  const summary = summarizeLearning({ lines, levels, segmenter });
+  assert.deepEqual(
+    [summary.questionsAsked, summary.japaneseFillers, summary.englishFillers, summary.helpFollowUps, summary.japaneseAfterHelp, summary.learnerAizuchi, summary.helpRequests],
+    [1, 2, 1, 2, 1, 1, 3],
+  );
+  const quiet = summarizeLearning({ lines: [], levels, segmenter });
+  assert.deepEqual([quiet.questionsAsked, quiet.helpFollowUps, quiet.learnerAizuchi], [0, 0, 0]);
 });
 
 test("the admin call log shows the learner's side of a call, and - for calls from before it was measured", async () => {

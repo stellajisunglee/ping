@@ -7,6 +7,7 @@ import { initStack, renderStackTiles } from './stack.js';
 import { failedCallNotice, startCall } from './voice.js';
 import { summarizeLearning, wordEvents, wordLevels } from './learning-metrics.js';
 import { initProgress, renderProgress } from './progress.js';
+import { renderCheckInCard, showBaseline } from './check-in.js';
 import { initOnboarding, renderWelcome, showConnecting } from './onboarding.js';
 import { codeToJoin, deviceKind, isInstalled, isTextField, needsInstall } from './device.js';
 import { initRecents, renderBadge } from './recents.js';
@@ -205,6 +206,7 @@ function renderHome() {
   renderBadge();
   renderBrowserNote();
   renderPolicyNotice();
+  renderCheckInCard();
 }
 
 // When the Privacy Policy changes in a way that affects people, they're told once, on Home.
@@ -215,7 +217,7 @@ const POLICY_NOTICES = {
   },
   update: {
     title: 'Privacy Policy updated',
-    text: 'Some calls now run on Cartesia, another voice AI service, as well as OpenAI, Deepgram and ElevenLabs. The Privacy Policy lists who handles your calls.',
+    text: 'Ping now asks a few quick questions about how confident you feel speaking, and keeps your answers to show how that changes. Some calls also run on Cartesia, another voice AI service. The Privacy Policy has the details.',
   },
 };
 
@@ -234,8 +236,8 @@ async function dismissPolicyNotice() {
   await api('/api/policy/seen', { method: 'POST' }).catch((error) => console.warn('Could not save that the notice was seen', error));
 }
 
-// Before Home: beta testers and Free users go through the two onboarding pages once; everyone picks a level; and
-// right after either, "Connecting to Ping" plays for a few seconds.
+// Before Home: beta testers and Free users go through the two onboarding pages once; everyone picks a level and
+// answers "A bit about you" once (YC reviewers skip it); and right after any of these, "Connecting to Ping" plays.
 let connectingNext = false;
 function beforeHome() {
   if (!state.me) return false;
@@ -245,6 +247,11 @@ function beforeHome() {
   }
   if (!state.me.levelChosen) {
     showLevelPicker();
+    return true;
+  }
+  // Why they're learning and how they feel about speaking, once, so their progress has a starting point.
+  if (state.me.needsBaseline) {
+    showBaseline(goHome);
     return true;
   }
   if (connectingNext) {
@@ -664,11 +671,12 @@ function beginCall(callId, contactName = 'Ping', scenarioId = null) {
 }
 
 // After a call: two 1-5 taps on one page, sent to the server as numbers only.
-const RATING_QUESTIONS = { cutOffs: 'rate-cutoffs', naturalness: 'rate-natural' };
-let rating = null; // { callId, endedNotice, cutOffs, naturalness } while the page is open
+// The learner's own confidence first, then two questions about Ping.
+const RATING_QUESTIONS = { speakingConfidence: 'rate-confidence', cutOffs: 'rate-cutoffs', naturalness: 'rate-natural' };
+let rating = null; // { callId, endedNotice, speakingConfidence, cutOffs, naturalness } while the page is open
 
 function askForRating(callId, endedNotice) {
-  rating = { callId, endedNotice, cutOffs: null, naturalness: null };
+  rating = { callId, endedNotice, speakingConfidence: null, cutOffs: null, naturalness: null };
   for (const [field, id] of Object.entries(RATING_QUESTIONS)) {
     $(id).replaceChildren(
       ...[1, 2, 3, 4, 5].map((value) => {
@@ -687,15 +695,15 @@ function askForRating(callId, endedNotice) {
 function chooseRating(field, value) {
   rating[field] = value;
   for (const button of $(RATING_QUESTIONS[field]).children) button.setAttribute('aria-pressed', String(Number(button.textContent) === value));
-  $('rate-done').disabled = !(rating.cutOffs && rating.naturalness);
+  $('rate-done').disabled = !Object.keys(RATING_QUESTIONS).every((question) => rating[question]);
 }
 
 function finishRating(send) {
   if (!rating) return;
-  const { callId, endedNotice, cutOffs, naturalness } = rating;
+  const { callId, endedNotice, speakingConfidence, cutOffs, naturalness } = rating;
   const comment = $('rate-comment').value.trim() || null;
   rating = null;
-  if (send) api(`/api/calls/${callId}/rating`, { method: 'POST', body: { cutOffs, naturalness, comment } }).catch((error) => console.warn('Could not save the rating', error));
+  if (send) api(`/api/calls/${callId}/rating`, { method: 'POST', body: { speakingConfidence, cutOffs, naturalness, comment } }).catch((error) => console.warn('Could not save the rating', error));
   goHome();
   notice(endedNotice);
 }

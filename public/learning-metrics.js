@@ -6,6 +6,8 @@
 // turn length is counted in Japanese characters. Everything here is an estimate: the transcript is speech
 // recognition, which can mishear a learner.
 
+import { isAizuchi } from './aizuchi.js';
+
 const MAX_COUNT = 100_000;
 
 // Everything the phone sends after a call. Whole numbers, or null where there's nothing to measure.
@@ -25,8 +27,18 @@ export const LEARNING_FIELDS = [
   'jlptN2Words',
   'jlptN1Words',
   'offListWords',
+  // Signs of confidence in how they talk, added after the rest (so phones from before don't send them):
+  'questionsAsked', // lines where the learner asked Ping something in Japanese, not counting asking for help
+  'japaneseFillers', // えーと, あのー, うーん and the like: holding the turn the Japanese way while thinking
+  'englishFillers', // um, uh, hmm
+  'helpFollowUps', // times the learner asked for help and then said something else
+  'japaneseAfterHelp', // of those, times their next line was in Japanese: carrying on after help, not giving up
+  'learnerAizuchi', // lines that were only Japanese aizuchi (うん, へえ, なるほど): listening like a Japanese speaker
 ];
 
+// The fields phones have sent from the start. The rest are optional, so an older phone is still accepted, and what it
+// didn't send is saved as null (not measured), never 0.
+const CORE_FIELDS = LEARNING_FIELDS.slice(0, LEARNING_FIELDS.indexOf('offListWords') + 1);
 const MAY_BE_EMPTY = new Set(['avgTurnChars', 'englishTurnPercent']);
 const PERCENT_FIELDS = new Set(['englishTurnPercent']);
 
@@ -51,6 +63,13 @@ const HELP_PATTERNS = [
 ];
 
 const count = (text, pattern) => text.match(pattern)?.length ?? 0;
+
+// Thinking sounds. Speech-to-text often leaves these out, so the counts are a floor, not the true number.
+const JAPANESE_FILLER = /えー+っ?と|えっと|ええと|あの[ーう]+|うー+ん|んー+|えー+(?![っと])/gu;
+const ENGLISH_FILLER = /\b(?:u+m+|u+h+|h+m+|e+r+m+)\b/gi;
+// A Japanese question: ends in ？ or ?, or in か, かな or かね once the closing punctuation is taken off.
+const QUESTION_END = /(?:[?？]|か|かな|かね)$/u;
+const isQuestion = (text) => HAS_JAPANESE.test(text) && QUESTION_END.test(text.trim().replace(/[。．.!！…\s]+$/u, ''));
 
 // The word list (public/jlpt-words.json) as a Map from a written form to its JLPT level, easiest level first.
 export function wordLevels(list) {
@@ -93,12 +112,30 @@ export function summarizeLearning({ lines = [], stackWords = [], newWords = 0, l
   let japaneseChars = 0;
   let englishTurns = 0;
   let helpRequests = 0;
+  let questionsAsked = 0;
+  let japaneseFillers = 0;
+  let englishFillers = 0;
+  let helpFollowUps = 0;
+  let japaneseAfterHelp = 0;
+  let learnerAizuchi = 0;
+  let afterHelp = false; // the learner's last line asked for help
   const words = new Set();
   for (const { text } of learner) {
     const japanese = count(text, JAPANESE_CHAR);
+    const mostlyEnglish = count(text, LATIN_LETTER) > japanese;
+    const askedForHelp = HELP_PATTERNS.some((pattern) => pattern.test(text));
     japaneseChars += japanese;
-    if (count(text, LATIN_LETTER) > japanese) englishTurns += 1;
-    if (HELP_PATTERNS.some((pattern) => pattern.test(text))) helpRequests += 1;
+    if (mostlyEnglish) englishTurns += 1;
+    if (askedForHelp) helpRequests += 1;
+    if (afterHelp && !askedForHelp) {
+      helpFollowUps += 1;
+      if (japanese > 0 && !mostlyEnglish) japaneseAfterHelp += 1;
+    }
+    afterHelp = askedForHelp;
+    if (!askedForHelp && isQuestion(text)) questionsAsked += 1;
+    japaneseFillers += count(text, JAPANESE_FILLER);
+    englishFillers += count(text, ENGLISH_FILLER);
+    if (HAS_JAPANESE.test(text) && isAizuchi(text)) learnerAizuchi += 1;
     for (const word of japaneseWords(text, segmenter)) words.add(word);
   }
   const said = learner.map((line) => line.text).join('\n');
@@ -126,6 +163,12 @@ export function summarizeLearning({ lines = [], stackWords = [], newWords = 0, l
     jlptN2Words: byLevel.N2,
     jlptN1Words: byLevel.N1,
     offListWords,
+    questionsAsked,
+    japaneseFillers,
+    englishFillers,
+    helpFollowUps,
+    japaneseAfterHelp,
+    learnerAizuchi,
   };
 }
 
@@ -145,10 +188,12 @@ export function wordEvents({ lines = [], stackWords = [], lookedUpIds = [] }) {
 const validValue = (field, value) =>
   value === null ? MAY_BE_EMPTY.has(field) : Number.isInteger(value) && value >= 0 && value <= (PERCENT_FIELDS.has(field) ? 100 : MAX_COUNT);
 
-// Every field, if each is a whole number in range (or null where allowed) and nothing else came with them. Otherwise null.
+// Every field, if each is a whole number in range (or null where allowed) and nothing else came with them. Otherwise
+// null. The fields added later may be missing, and are then null.
 export function cleanLearning(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
   if (Object.keys(body).some((key) => !LEARNING_FIELDS.includes(key))) return null;
-  if (!LEARNING_FIELDS.every((field) => Object.hasOwn(body, field) && validValue(field, body[field]))) return null;
-  return Object.fromEntries(LEARNING_FIELDS.map((field) => [field, body[field]]));
+  if (!CORE_FIELDS.every((field) => Object.hasOwn(body, field))) return null;
+  if (!LEARNING_FIELDS.every((field) => !Object.hasOwn(body, field) || validValue(field, body[field]))) return null;
+  return Object.fromEntries(LEARNING_FIELDS.map((field) => [field, Object.hasOwn(body, field) ? body[field] : null]));
 }

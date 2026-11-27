@@ -614,7 +614,7 @@ test('accounts that saw an older Privacy Policy get a one-time notice about what
   assert.equal((await request('/api/me', { token })).data.policyNotice, null);
 });
 
-test('after a call, the user can rate cut-offs and naturalness from 1 to 5', async () => {
+test('after a call, the user can rate their confidence, cut-offs and naturalness from 1 to 5', async () => {
   const tester = await joinWith(BETA_CODE);
   const { data: notConnected } = await request('/api/calls', { method: 'POST', token: tester.token });
   const rate = (callId, body, token = tester.token) => request(`/api/calls/${callId}/rating`, { method: 'POST', token, body });
@@ -622,21 +622,54 @@ test('after a call, the user can rate cut-offs and naturalness from 1 to 5', asy
 
   const call = await connectedCall(tester.token);
   await request(`/api/calls/${call.id}/connected`, { method: 'POST', token: tester.token });
-  for (const bad of [{ cutOffs: 0, naturalness: 3 }, { cutOffs: 2, naturalness: 6 }, { cutOffs: 2.5, naturalness: 3 }, { cutOffs: '2', naturalness: 3 }, { cutOffs: 2 }]) {
+  for (const bad of [{ cutOffs: 0, naturalness: 3 }, { cutOffs: 2, naturalness: 6 }, { cutOffs: 2.5, naturalness: 3 }, { cutOffs: '2', naturalness: 3 }, { cutOffs: 2 }, { speakingConfidence: 0, cutOffs: 2, naturalness: 3 }, { speakingConfidence: '4', cutOffs: 2, naturalness: 3 }]) {
     assert.equal((await rate(call.id, bad)).status, 400, JSON.stringify(bad));
   }
   assert.equal((await rate(call.id, { cutOffs: 2, naturalness: 4 }, await join())).status, 404); // someone else's call
   assert.equal((await rate(call.id, { cutOffs: 2, naturalness: 4, comment: 'words' })).status, 201);
-  assert.equal((await rate(call.id, { cutOffs: 1, naturalness: 5 })).status, 201); // a second rating replaces the first
+  assert.equal(engine.userForToken(tester.token).ratings[0].speakingConfidence, null, "a phone from before the confidence question sends none");
+  assert.equal((await rate(call.id, { speakingConfidence: 4, cutOffs: 1, naturalness: 5 })).status, 201); // a second rating replaces the first
 
   const { ratings } = engine.userForToken(tester.token);
   assert.equal(ratings.length, 1);
-  assert.deepEqual(Object.keys(ratings[0]).sort(), ['at', 'callId', 'comment', 'cutOffs', 'engine', 'naturalness', 'turnMode']);
+  assert.deepEqual(Object.keys(ratings[0]).sort(), ['at', 'callId', 'comment', 'cutOffs', 'engine', 'naturalness', 'speakingConfidence', 'turnMode']);
   assert.equal(ratings[0].comment, null, 'the second rating had no comment');
-  assert.deepEqual([ratings[0].cutOffs, ratings[0].naturalness, ratings[0].engine], [1, 5, 'gpt-realtime']);
+  assert.deepEqual([ratings[0].speakingConfidence, ratings[0].cutOffs, ratings[0].naturalness, ratings[0].engine], [4, 1, 5, 'gpt-realtime']);
+  assert.equal(engine.callLog().find((entry) => entry.callId === call.id).speakingConfidence, 4);
   assert.equal(ratings[0].turnMode, engine.store.calls[call.id].turnMode, 'the rating keeps the mode the call was assigned');
   const listed = (await request('/api/admin/recordings', { token: await join() })).data.recordings.find((item) => item.callId === call.id);
-  assert.deepEqual(listed.rating, { cutOffs: 1, naturalness: 5, comment: null });
+  assert.deepEqual(listed.rating, { speakingConfidence: 4, cutOffs: 1, naturalness: 5, comment: null });
+});
+
+test('everyone but YC reviewers answers why they learn and a first check-in before Home, then a weekly check-in', async () => {
+  const tester = await joinWith(BETA_CODE);
+  const me = async (token = tester.token) => (await request('/api/me', { token })).data;
+  assert.deepEqual([(await me()).needsBaseline, (await me()).checkInDue], [true, false]);
+  const baseline = (body) => request('/api/baseline', { method: 'PUT', token: tester.token, body });
+  for (const bad of [{ comfort: 3, outside: 1 }, { goal: 'fame', comfort: 3, outside: 1 }, { goal: 'travel', comfort: 6, outside: 1 }, { goal: 'travel', comfort: 3, outside: 3 }, { goal: 'travel', comfort: 3 }]) {
+    assert.equal((await baseline(bad)).status, 400, JSON.stringify(bad));
+  }
+  const answered = await baseline({ goal: 'travel', comfort: 2, outside: 0 });
+  assert.equal(answered.status, 200);
+  assert.deepEqual([answered.data.needsBaseline, answered.data.goal, answered.data.checkInDue], [false, 'travel', false], 'the next check-in is a week away');
+  await baseline({ goal: 'work', comfort: 4, outside: 2 }); // going back through it changes the goal, not the starting point
+  const user = engine.userForToken(tester.token);
+  assert.deepEqual(user.checkIns.map(({ source, comfort, outside }) => [source, comfort, outside]), [['start', 2, 0]]);
+  assert.equal(user.goal, 'work');
+
+  user.checkIns[0].at -= 8 * 86_400_000; // a week has gone by
+  assert.equal((await me()).checkInDue, true);
+  assert.equal((await request('/api/check-ins/snooze', { method: 'POST', token: tester.token })).status, 200);
+  assert.equal((await me()).checkInDue, false, '"Not now" waits two days');
+  user.checkInSnoozedAt -= 3 * 86_400_000;
+  assert.equal((await me()).checkInDue, true);
+  assert.equal((await request('/api/check-ins', { method: 'POST', token: tester.token, body: { comfort: 3 } })).status, 400);
+  assert.equal((await request('/api/check-ins', { method: 'POST', token: tester.token, body: { comfort: 3, outside: 1 } })).status, 201);
+  assert.deepEqual(user.checkIns.map(({ source, comfort, outside }) => [source, comfort, outside]), [['start', 2, 0], ['weekly', 3, 1]]);
+  assert.equal((await me()).checkInDue, false);
+
+  const reviewer = await joinWith(YC_CODE);
+  assert.deepEqual([(await me(reviewer.token)).needsBaseline, (await me(reviewer.token)).checkInDue], [false, false], 'YC reviewers are only looking around');
 });
 
 test('a comment left with the rating is kept with that call, for admins only, and only flagged in the call log', async () => {

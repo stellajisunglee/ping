@@ -131,6 +131,12 @@ After every call that connected, the phone works out numbers about the learner's
 | `newWords`, `stackWordsUsed` | Words saved to the stack during the call, and words already in the stack that they said (matched by kanji or kana) |
 | `helpRequests` | Lines asking for help: what a word means, a translation, to repeat or slow down, how to answer, in English or Japanese (`HELP_PATTERNS`) |
 | `distinctWords` and `jlptN5Words` … `jlptN1Words`, `offListWords` | Different words they used, found with the browser's Japanese word splitter (`Intl.Segmenter`), and how many are on each JLPT list. Particles, verb endings and fillers aren't counted. The splitter often breaks a verb into pieces, so a verb is matched by its stem when it can be and otherwise counts as off-list: read these as rough |
+| `questionsAsked` | Lines where they asked Ping something in Japanese (ending in ？, か or かな), not counting asking for help: taking the lead in the conversation |
+| `japaneseFillers`, `englishFillers` | Thinking sounds: えーと, あのー, うーん against um, uh, hmm. Holding the turn the Japanese way is a sign of comfort, and also keeps Ping from cutting in. Speech-to-text often drops fillers, so these are a floor |
+| `helpFollowUps`, `japaneseAfterHelp` | Times they asked for help and then said something else, and of those, times that next line was in Japanese: carrying on after help instead of giving up |
+| `learnerAizuchi` | Lines that were only Japanese aizuchi (うん, へえ, なるほど): listening the way a Japanese speaker does. A bare はい answering a question counts too, so read it as rough |
+
+These six were added after the others. A phone still running an older version doesn't send them, and they're saved as null (not measured) for its calls.
 
 The timing summary (`public/turn-metrics.js`) adds `userSpeechMs` and `agentSpeechMs` (how long each side spoke, estimated from the same speech events) and `answerStartMedianMs` (how long the learner took to start answering after the contact finished a turn). The call log keeps every timing number the phone sends (P90s, Smart Turn's numbers and the rest), and works out `userCallSharePercent` (the learner's share of speaking time) and `avgTurnMs` (speaking time per turn).
 
@@ -139,6 +145,17 @@ The timing summary (`public/turn-metrics.js`) adds `userSpeechMs` and `agentSpee
 **What the learner sees.** Under My Stack on Home, a chart of the minutes of Japanese they've spoken on calls, adding up call by call, so it only ever grows. Japanese minutes are their speaking time less the share of lines that were mostly English. Once 5 calls have been graded, it also says "Your speaking sounds about N4", the middle of the last 5 estimates (`LEVEL_SAMPLE`), so one off day doesn't move it. Each account keeps a progress history (`progress`, one entry per call: speaking time, English share, characters, level) and its estimates (`levelEstimates`), the latest 1,000 each, or all of them for admin and beta tester accounts.
 
 The JLPT word list (`public/jlpt-words.json`, about 13,600 written forms) is built from [open-anki-jlpt-decks](https://github.com/jamsinclair/open-anki-jlpt-decks) (MIT), which comes from Jonathan Waller's JLPT lists at tanos.co.uk (CC BY). A word on more than one list keeps its easiest level.
+
+### Confidence and practice outside Ping
+
+What happens on calls shows skill. To see whether Ping also builds confidence and carries into real life, learners are asked a few questions of their own (`server/check-ins.js`, `public/check-in.js`), and only their answers are kept: one goal word and numbers.
+
+- **Before Home, once: "A bit about you".** Their main reason for learning (school, work, travel, a partner, family, anime, games or media, or something else), and their first check-in. New accounts see it after picking a level; accounts from before see it on their next visit. YC reviewers aren't asked.
+- **The check-in:** how comfortable they feel speaking Japanese with someone (1 very nervous to 5 very comfortable), and in the past week how much they spoke Japanese with people outside Ping (not at all, a little, a lot: 0, 1, 2). The first one is the starting point.
+- **Weekly:** a card on Home asks the same two questions a week after the last check-in. "Not now" asks again two days later.
+- **After every call:** the rating's first question is the learner's own, "How confident did you feel speaking Japanese?" (1–5, `speakingConfidence`), before the two about Ping. Phones from before it send only those two, and it's saved as null.
+
+Together these give each learner a confidence line over weeks (the check-ins), a per-call line (the rating), real-life practice (outside), and behavior that goes with confidence on calls (the learning numbers above: questions asked, fillers, carrying on after help, aizuchi). In the SQLite export they're `check_ins`, `learners.goal`, `ratings.speakingConfidence`, and the `learner_confidence` view.
 
 ## Plans
 
@@ -226,7 +243,8 @@ In the SQLite file each fact is stored once (`scripts/build-db.js`), even where 
 | `calls` | call, connected or not: who started it, outcome, hour, pick-up time, length, level chosen at the time, test ring or not |
 | `call_setup` | connected call: engine, turn mode, topic, settings, build, prompt version, what the engine was sent |
 | `turn_metrics`, `learning_metrics` | connected call: the phone's timing numbers, and the learner's Japanese |
-| `ratings`, `level_estimates` | rated or graded call, with the comment or the model's reason |
+| `ratings`, `level_estimates` | rated or graded call (confidence speaking, cut-offs, naturalness), with the comment or the model's reason |
+| `check_ins` | answer to the check-in: when, `start` or `weekly`, comfort 1–5, practice outside Ping 0–2, and days since joining. `learners.goal` has why they're learning |
 | `turns`, `help_events` | reply the contact gave (its timing), and request for help by type |
 | `words`, `word_events` | saved word with its progress (stage, times it came back, times used), and each time a word came back, was understood, used or asked about again |
 | `settings_changes` | change to a tracked setting (level, call window, frequency, pace, formality, calls on or off): when, from, to, and whether it was asked for during a call |
@@ -234,7 +252,7 @@ In the SQLite file each fact is stored once (`scripts/build-db.js`), even where 
 
 Levels also come as numbers (`selfLevelRank`, `levelRank`, `estimatedLevelRank`: 0 completely new, 1 N5 … 5 N1, with the old beginner, intermediate and advanced at 1, 3 and 5), so they sort and compare. Each connected call's `call_setup` row has the call window and frequency as it started.
 
-Two views do the usual joins: `call_facts` (one row per call with everything, plus talk share, average turn and Japanese minutes) and `learner_weeks` (each learner's weeks since joining: Ping's calls, answered, calls they started, and unplanned Japanese minutes). `node scripts/pull-data.js --from <DATA_DIR>` builds the same file from a local folder instead of the server.
+Three views do the usual joins: `learner_confidence` (each learner's first and latest check-in, and how much comfort changed), `call_facts` (one row per call with everything, plus talk share, average turn and Japanese minutes) and `learner_weeks` (each learner's weeks since joining: Ping's calls, answered, calls they started, and unplanned Japanese minutes). `node scripts/pull-data.js --from <DATA_DIR>` builds the same file from a local folder instead of the server.
 
 The export (`GET /api/export`, and `/api/export/audio/:callId`) needs the `X-Export-Key` header, counts wrong keys toward the same limit as wrong invite codes, and never includes sign-in tokens or push subscriptions. The pulled folder holds transcripts and recordings: keep it on the laptop, outside any git repository.
 
@@ -319,7 +337,7 @@ Ping is for adults in the US, and the Privacy Policy and Terms in the app are dr
 
 - During a call, audio goes directly from the browser to the call's voice engine: OpenAI (gpt-realtime or GPT-Live), ElevenLabs (which keeps no audio and deletes transcripts straight away), Deepgram (whose agent sends the transcript to an OpenAI model to write replies), or Cartesia (which keeps a recording and transcript of each call until Ping deletes them there, as soon as the call ends). Ping's server doesn't take part in the live call. The Privacy Policy names OpenAI, Deepgram, ElevenLabs, Cartesia and Render as the companies that handle calls.
 - **Calls are recorded.** After each recorded call, the phone uploads the recording (both voices) and the transcript to Ping's server, where only admins can listen to them. They're kept until the user deletes their account. See "Call recordings". They're never sold, shared, or used to identify or copy anyone's voice.
-- At the end of a call, the app also sends timing numbers to the server to measure conversation quality, numbers about the learner's Japanese worked out on the phone from the transcript (see "Learning progress"), and the two 1-5 ratings if the user answers them. All are numbers only; an optional comment can go with the ratings.
+- At the end of a call, the app also sends timing numbers to the server to measure conversation quality, numbers about the learner's Japanese worked out on the phone from the transcript (see "Learning progress"), and the three 1-5 ratings if the user answers them. All are numbers only; an optional comment can go with the ratings. The goal and check-in answers ("Confidence and practice outside Ping") are a goal word and numbers too.
 - A recorded call's transcript, already kept for review, is also sent to OpenAI once to estimate the learner's speaking level. The estimate (levels, confidence and a one-line reason written by the model) is kept with the account.
 - In Smart Turn mode, the voice detector and Smart Turn run on the phone, and send no audio anywhere themselves. The call's recording is uploaded as above. Smart Turn adds only the same kind of timing numbers: how many turns Smart Turn or the backup ended, how long decisions and loading took, and whether the call fell back to silence mode.
 - Transcripts appear on the call screen. A recorded call's transcript is kept for review on any plan. On a paid plan, the text of the last 20 calls is also stored with the account to personalize later calls. A free-plan call that isn't recorded sends no transcript to the server.
@@ -334,6 +352,7 @@ Ping is for adults in the US, and the Privacy Policy and Terms in the app are dr
 - `server/calls.js`: the call lifecycle, driven by a one-second tick so a restart picks up where it left off, plus each user's record.
 - `server/schedule.js`: picks call times, in the user's time zone.
 - `server/progress.js`: streaks.
+- `server/check-ins.js` and `public/check-in.js`: why the learner is learning, and the check-ins on confidence and practice outside Ping.
 - `server/stack.js`: the word and sentence banks.
 - `server/contacts.js`: contacts, plans and voices.
 - `server/persona.js`: who Ping is: her facts, personality, speech style and week (`PING_PERSONA`, `PING_DAYS`). The one place her identity is defined.

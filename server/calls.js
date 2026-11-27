@@ -4,6 +4,7 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { canCall, cleanContact, contactList, findContact, isPaid, MAX_CUSTOM_CONTACTS, PING, planLimits, PLANS, selectedContact } from './contacts.js';
+import { MAX_CHECK_INS } from './check-ins.js';
 import { recordCallDay, streakToShow } from './progress.js';
 import { hourWeights, localDay, localDayNumber, localParts, nextCallTime } from './schedule.js';
 import { HELP_TYPES } from '../public/turn-records.js';
@@ -81,7 +82,7 @@ export class PlanError extends Error {}
 
 // The Privacy Policy's version. 2: calls are recorded. 3: Deepgram joins OpenAI as a voice service.
 // Accounts that saw an older version get a one-time notice on Home about what changed since.
-export const POLICY_VERSION = 7; // 2: calls recorded, 3: Deepgram named, 4: post-call comments, testers' data kept, learning numbers and level estimates, 5: their name, 6: ElevenLabs named, 7: Cartesia named
+export const POLICY_VERSION = 8; // 2: calls recorded, 3: Deepgram named, 4: post-call comments, testers' data kept, learning numbers and level estimates, 5: their name, 6: ElevenLabs named, 7: Cartesia named, 8: goal, check-ins and confidence answers
 const RECORDING_POLICY = 2;
 export const policyNoticeFor = (seen = 0) => (seen >= POLICY_VERSION ? null : seen < RECORDING_POLICY ? 'recording' : 'update');
 // Admins and beta testers record every call as part of testing. YC reviewers and everyone else
@@ -92,10 +93,14 @@ export const recordsCalls = (user) => recordingLocked(user) || !user.recordingOf
 // comments and their call log entries stay until an admin deletes the call or the account is deleted.
 export const keepsEverything = (user) => user?.role === 'admin' || user?.joinedWith === 'beta';
 
-// A call's rating is two whole numbers from 1 to 5, or nothing.
+// A call's rating: how confident the learner felt speaking, how often Ping cut them off, and how natural it felt, each
+// a whole number from 1 to 5. Phones from before the confidence question send only the last two, so it may be missing
+// (saved as null), but a value that's there must be on the scale.
 export function cleanRating(body) {
   const scale = (value) => Number.isInteger(value) && value >= 1 && value <= 5;
-  return scale(body?.cutOffs) && scale(body?.naturalness) ? { cutOffs: body.cutOffs, naturalness: body.naturalness } : null;
+  if (!scale(body?.cutOffs) || !scale(body?.naturalness)) return null;
+  if (body.speakingConfidence !== undefined && body.speakingConfidence !== null && !scale(body.speakingConfidence)) return null;
+  return { speakingConfidence: body.speakingConfidence ?? null, cutOffs: body.cutOffs, naturalness: body.naturalness };
 }
 
 // The optional comment under the ratings: what felt natural or unnatural. Plain text, trimmed and capped, or null.
@@ -132,7 +137,7 @@ const newUserFields = () => ({
   lastCallAt: null,
   missedCallToReturn: false, // they missed or declined a call and haven't called back yet, which doesn't use a call
   recordingOff: false, // turned off in Manage Account, where the account allows it
-  ratings: [], // the 1-5 taps after each call: how often Ping cut them off, and how natural it felt
+  ratings: [], // the 1-5 taps after each call: how confident they felt speaking, how often Ping cut them off, how natural it felt
   policyVersion: 0, // the Privacy Policy version they've seen. 0: joined before calls were recorded
   levelChosen: false, // whether they've picked their JLPT level. Everyone picks one before they first reach Home
   name: null, // what Ping calls them, as they wrote it
@@ -144,6 +149,9 @@ const newUserFields = () => ({
   progress: [], // one entry per call: speaking time, English share, Japanese characters, estimated level (numbers and levels only)
   levelEstimates: [], // the model's speaking-level estimate for each graded call, newest first, with its one-line reason
   callHistory: [], // the Calls tab: each call to or from a contact, with how it went. Kept after the call record is removed
+  goal: null, // why they're learning, one of GOALS in server/check-ins.js
+  checkIns: [], // { at, source: 'start' | 'weekly', comfort 1-5, outside 0-2 }: how comfortable they feel speaking, and practice outside Ping
+  checkInSnoozedAt: null, // when they last said "Not now" to the weekly check-in
 });
 
 // Accounts saved before JLPT levels keep their old level's place on the scale until they pick one.
@@ -1053,9 +1061,10 @@ export class CallEngine {
   saveRating(user, callId, rating, comment = null) {
     const call = this.store.calls[callId];
     if (!call || call.userId !== user.id || !call.connectedAt) return null;
-    const record = { callId, at: this.now(), engine: call.engine ?? 'gpt-realtime', turnMode: call.turnMode ?? null, cutOffs: rating.cutOffs, naturalness: rating.naturalness, comment };
-    call.rating = { cutOffs: rating.cutOffs, naturalness: rating.naturalness };
-    this.#log(call, { cutOffs: rating.cutOffs, naturalness: rating.naturalness, commented: Boolean(comment) });
+    const { speakingConfidence = null, cutOffs, naturalness } = rating;
+    const record = { callId, at: this.now(), engine: call.engine ?? 'gpt-realtime', turnMode: call.turnMode ?? null, speakingConfidence, cutOffs, naturalness, comment };
+    call.rating = { speakingConfidence, cutOffs, naturalness };
+    this.#log(call, { speakingConfidence, cutOffs, naturalness, commented: Boolean(comment) });
     const ratings = [record, ...user.ratings.filter((saved) => saved.callId !== callId)];
     user.ratings = keepsEverything(user) ? ratings : ratings.slice(0, KEEP_RATINGS);
     this.store.save();
@@ -1068,6 +1077,28 @@ export class CallEngine {
     user.recordingOff = !on;
     this.store.save();
     return true;
+  }
+
+  // Why they're learning and their first check-in, before Home (server/check-ins.js). Answering again replaces the goal
+  // and adds a check-in, so a learner who goes back through it isn't counted twice from the start.
+  setBaseline(user, { goal, comfort, outside }) {
+    user.goal = goal;
+    if (!user.checkIns.some((checkIn) => checkIn.source === 'start')) return this.addCheckIn(user, { comfort, outside }, 'start');
+    this.store.save();
+    return user.checkIns.find((checkIn) => checkIn.source === 'start');
+  }
+
+  addCheckIn(user, { comfort, outside }, source = 'weekly') {
+    const checkIn = { at: this.now(), source, comfort, outside };
+    user.checkIns = [...user.checkIns, checkIn].slice(-MAX_CHECK_INS);
+    user.checkInSnoozedAt = null;
+    this.store.save();
+    return checkIn;
+  }
+
+  snoozeCheckIn(user) {
+    user.checkInSnoozedAt = this.now();
+    this.store.save();
   }
 
   acknowledgePolicy(user) {

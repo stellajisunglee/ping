@@ -23,7 +23,7 @@ const SCREEN_TABS = {
   recordings: 'settings',
   'call-log': 'settings',
 };
-const SCREENS = [...Object.keys(SCREEN_TABS), 'install', 'join', 'welcome', 'upgrade', 'connecting', 'level', 'enable', 'ringing', 'outgoing', 'call', 'rate'];
+const SCREENS = [...Object.keys(SCREEN_TABS), 'install', 'join', 'welcome', 'upgrade', 'connecting', 'level', 'about', 'enable', 'ringing', 'outgoing', 'call', 'rate'];
 const renderers = {};
 const TAB_ROOTS = ['home', 'calls', 'contacts', 'settings'];
 const BACK_SWIPE_DISTANCE = 70;

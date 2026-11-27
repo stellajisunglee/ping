@@ -107,6 +107,26 @@
       <p class="fine">Not sure? Pick the closest. You can change it any time in Settings, Manage Account, or ask Ping to speak more easily on a call.</p>
     </main>
 
+    <main id="screen-about" class="screen centered rate-screen" hidden>
+      <h1>A bit about you</h1>
+      <p class="muted">Three quick questions, so Ping can show how your speaking changes over time.</p>
+      <fieldset class="rating">
+        <legend>What's your main reason for learning Japanese?</legend>
+        <div id="about-goal" class="choices"></div>
+      </fieldset>
+      <fieldset class="rating" aria-describedby="about-comfort-scale">
+        <legend>How comfortable do you feel speaking Japanese with someone?</legend>
+        <div id="about-comfort" class="rating-choices"></div>
+        <p id="about-comfort-scale" class="rating-scale"><span>1 Very nervous</span><span>5 Very comfortable</span></p>
+      </fieldset>
+      <fieldset class="rating">
+        <legend>In the past week, how much did you speak Japanese with people, outside Ping?</legend>
+        <div id="about-outside" class="choices"></div>
+      </fieldset>
+      <p id="about-error" class="error" role="alert" hidden></p>
+      <button id="about-done" class="primary wide" type="button" disabled>Continue</button>
+    </main>
+
     <main id="screen-enable" class="screen centered" hidden>
       <img class="logo" src="/icons/icon-192.png" alt="ping" />
       <h1>So Ping can reach you</h1>
@@ -127,6 +147,22 @@
         <button id="home-plan" class="badge plan-badge" type="button" data-go="plan"></button>
       </header>
       <p id="home-notice" class="notice" role="status" hidden></p>
+      <section id="check-in" class="card check-in" aria-labelledby="check-in-title" hidden>
+        <h2 id="check-in-title">Weekly check-in</h2>
+        <fieldset class="rating" aria-describedby="check-in-comfort-scale">
+          <legend>How comfortable do you feel speaking Japanese with someone?</legend>
+          <div id="check-in-comfort" class="rating-choices"></div>
+          <p id="check-in-comfort-scale" class="rating-scale"><span>1 Very nervous</span><span>5 Very comfortable</span></p>
+        </fieldset>
+        <fieldset class="rating">
+          <legend>In the past week, how much did you speak Japanese with people, outside Ping?</legend>
+          <div id="check-in-outside" class="choices"></div>
+        </fieldset>
+        <div class="button-row">
+          <button id="check-in-later" class="secondary" type="button">Not now</button>
+          <button id="check-in-save" class="primary" type="button" disabled>Save</button>
+        </div>
+      </section>
       <section id="policy-notice" class="card policy-notice" aria-labelledby="policy-notice-title" hidden>
         <h2 id="policy-notice-title">Calls are now recorded</h2>
         <p id="policy-notice-text">To improve Ping, calls are now recorded and transcribed, and the Ping team may listen to them. The Privacy Policy has the details.</p>
@@ -444,7 +480,9 @@
       <p>Recordings and transcripts are kept until you delete your account. On beta tester and admin accounts, everything kept about your calls (recordings, transcripts, ratings, comments and call details) stays until you delete your account or the Ping team deletes it.</p>
       <h2>What else Ping stores</h2>
       <p>The name you give Ping to call you, and how to say it. How to say it goes to the voice service on each call so Ping can greet you by name; the name as you typed it is sent to OpenAI only to suggest how to say it.</p>
-      <p>Which invite code you joined with and when, how many calls you've made, your time zone, settings (including your Japanese level), plan, streak, notification details, voicemails, recent call times, your word and sentence stacks, your contacts, timing numbers from each call, such as how long Ping took to reply, and numbers about your Japanese on each call, such as how long you spoke, how many different words you used, how often you used English or asked for help, and how many of your saved words you used. Your phone works these out from the call; only the numbers are sent.</p>
+      <p>Which invite code you joined with and when, how many calls you've made, your time zone, settings (including your Japanese level), plan, streak, notification details, voicemails, recent call times, your word and sentence stacks, your contacts, timing numbers from each call, such as how long Ping took to reply, and numbers about your Japanese on each call, such as how long you spoke, how many different words you used, how often you used English or asked for help, how many of your saved words you used, and how many questions, thinking sounds like えーと and listening sounds like うん you said. Your phone works these out from the call; only the numbers are sent.</p>
+      <h2>What you tell Ping about yourself</h2>
+      <p>When you start, and then once a week if you choose to answer, Ping asks why you're learning Japanese, how comfortable you feel speaking it with someone, and how much you've spoken it outside Ping. After each call it also asks how confident you felt speaking. Your answers are kept with your account, so the Ping team can see how confidence and real-life practice change over time and what helps.</p>
       <h2>Your speaking level</h2>
       <p>After a recorded call, Ping sends its transcript to OpenAI to estimate your Japanese speaking level (JLPT N5 to N1). Each estimate is kept with your account, and once there are five, Ping shows you the level your speaking sounds like.</p>
       <h2>Conversations</h2>
@@ -505,6 +543,11 @@
 
     <main id="screen-rate" class="screen centered rate-screen" hidden>
       <h1>How was the call?</h1>
+      <fieldset class="rating" aria-describedby="rate-confidence-scale">
+        <legend>How confident did you feel speaking Japanese?</legend>
+        <div id="rate-confidence" class="rating-choices"></div>
+        <p id="rate-confidence-scale" class="rating-scale"><span>1 Not at all</span><span>5 Very confident</span></p>
+      </fieldset>
       <fieldset class="rating" aria-describedby="rate-cutoffs-scale">
         <legend>How often did Ping cut you off?</legend>
         <div id="rate-cutoffs" class="rating-choices"></div>

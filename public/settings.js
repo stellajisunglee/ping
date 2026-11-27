@@ -408,7 +408,7 @@ function callLogRow(entry, checks = [], comment = null) {
     ['Length', durationText(entry.seconds)],
     ...turnFacts(entry),
     ...learningFacts(entry),
-    ['Rating', entry.cutOffs ? `cut-offs ${entry.cutOffs}/5, natural ${entry.naturalness}/5` : '-'],
+    ['Rating', entry.cutOffs ? `${entry.speakingConfidence ? `confident ${entry.speakingConfidence}/5, ` : ''}cut-offs ${entry.cutOffs}/5, natural ${entry.naturalness}/5` : '-'],
     ...(comment ? [['Comment', comment]] : []),
   ];
   const row = el(
@@ -524,7 +524,7 @@ function recordingRow(call) {
       {},
       el('strong', { textContent: `${when}${callLength(call.seconds)}` }),
       el('span', { className: 'muted', textContent: ` ${who} · ${call.contactName} · ${[call.engine ?? 'gpt-realtime', TURN_MODE_NAMES[call.turnMode]].filter(Boolean).join(' + ')}` }),
-      call.rating ? el('span', { className: 'recording-rating', textContent: ` · cut-offs ${call.rating.cutOffs}/5, natural ${call.rating.naturalness}/5` }) : '',
+      call.rating ? el('span', { className: 'recording-rating', textContent: ` · ${call.rating.speakingConfidence ? `confident ${call.rating.speakingConfidence}/5, ` : ''}cut-offs ${call.rating.cutOffs}/5, natural ${call.rating.naturalness}/5` }) : '',
     ),
   );
   let loaded = false;

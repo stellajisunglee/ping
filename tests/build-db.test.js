@@ -26,7 +26,13 @@ const exported = {
         { callId: 'c3', contactId: 'ping', direction: 'outgoing', at: joined + 9 * DAY, localHour: 19, selfLevel: 'N4', outcome: 'connected', seconds: 90, pickupSeconds: null },
         { callId: 't1', contactId: 'ping', direction: 'incoming', at: joined + 9 * DAY, localHour: 12, selfLevel: 'N4', outcome: 'missed', test: true },
       ],
-      ratings: [{ callId: 'c1', at: joined + DAY, engine: 'gpt-realtime', turnMode: 'silence', cutOffs: 1, naturalness: 4, comment: 'Natural!' }],
+      ratings: [{ callId: 'c1', at: joined + DAY, engine: 'gpt-realtime', turnMode: 'silence', speakingConfidence: 3, cutOffs: 1, naturalness: 4, comment: 'Natural!' }],
+      goal: 'travel',
+      checkIns: [
+        { at: joined + 60_000, source: 'start', comfort: 2, outside: 0 },
+        { at: joined + 8 * DAY, source: 'weekly', comfort: 3, outside: 1 },
+        { at: joined + 15 * DAY, source: 'weekly', comfort: 4, outside: 1 },
+      ],
       levelEstimates: [{ callId: 'c1', at: joined + DAY, level: 'N4', vocabulary: 'N4', grammar: 'N5', confidence: 'medium', reason: 'Complete sentences.' }],
       words: [{ id: 'w1', kanji: '予定', kana: 'よてい', romaji: 'yotei', english: 'plan', at: joined + DAY }],
       sentences: [],
@@ -93,5 +99,23 @@ test('per-turn records and help events get their own tables, out of call_setup',
   assert.deepEqual({ ...db.prepare('SELECT type, turn FROM help_events').get() }, { type: 'lookup', turn: 0 });
   const setupColumns = db.prepare('PRAGMA table_info(call_setup)').all().map((column) => column.name);
   assert.ok(!setupColumns.includes('turns') && !setupColumns.includes('help_lookup'));
+  db.close();
+});
+
+test('goals and check-ins come out for confidence research: each answer, and each learner from first to latest', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'ping-db-')), 'ping.sqlite');
+  const counts = buildDatabase(exported, path);
+  assert.equal(counts.check_ins, 3);
+  const db = new DatabaseSync(path);
+  const learner = db.prepare('SELECT goal, formality, speed, thinkingTime FROM learners').get();
+  assert.deepEqual({ ...learner }, { goal: 'travel', formality: 'formal', speed: 1, thinkingTime: 'normal' }, 'the settings a comment used to swallow are back');
+  assert.deepEqual(db.prepare('SELECT source, comfort, outside, daysSinceJoining FROM check_ins ORDER BY at').all().map((row) => ({ ...row })), [
+    { source: 'start', comfort: 2, outside: 0, daysSinceJoining: 0 },
+    { source: 'weekly', comfort: 3, outside: 1, daysSinceJoining: 8 },
+    { source: 'weekly', comfort: 4, outside: 1, daysSinceJoining: 15 },
+  ]);
+  const trend = db.prepare('SELECT checkIns, firstComfort, latestComfort, comfortChange, firstOutside, latestOutside, daysBetween FROM learner_confidence').get();
+  assert.deepEqual({ ...trend }, { checkIns: 3, firstComfort: 2, latestComfort: 4, comfortChange: 2, firstOutside: 0, latestOutside: 1, daysBetween: 15 });
+  assert.equal(db.prepare("SELECT speakingConfidence FROM call_facts WHERE callId = 'c1'").get().speakingConfidence, 3);
   db.close();
 });
